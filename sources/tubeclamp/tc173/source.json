@@ -1,0 +1,58 @@
+{
+  "title": "173 - Single Swivel Tee Combination",
+  "url": "https://www.tubeclamp.com.au/products/tc173",
+  "retrieved": "2026-09-07T11:44:00.448778+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173Hero.jpg?v=1696915350",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173TechnicalDiagram-2025.jpg?v=1746750392",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173gif.gif?v=1746750392",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173Front.jpg?v=1746750392",
+    "https://cdn.shopify.com/s/files/1/1384/6879/products/TC173_Perspective.jpg?v=1746750392",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173Side.jpg?v=1746750392",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173withtube-web.jpg?v=1746750392"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC173A",
+      "weight": 660,
+      "price": 1816
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC173B",
+      "weight": 780,
+      "price": 1824
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC173C",
+      "weight": 1140,
+      "price": 2245
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC173D",
+      "weight": 1260,
+      "price": 2534
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC173E",
+      "weight": 1680,
+      "price": 4899
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173TechnicalDiagram-2025.jpg?v=1746750392",
+      "sha256": "54b792d51a4b3ed2dce64736cfb21ecc00f646e00950408e2137f70b8d176215"
+    },
+    {
+      "path": "drawing-1.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/products/TC173_Perspective.jpg?v=1746750392",
+      "sha256": "d7bfa9c79e455479a8a37c53b77c0214ba7f8df19f31a136eb1de23c8662cc77"
+    }
+  ]
+}

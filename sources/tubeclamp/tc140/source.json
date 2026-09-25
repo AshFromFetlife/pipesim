@@ -1,0 +1,48 @@
+{
+  "title": "140 - Gate Hinge Pin",
+  "url": "https://www.tubeclamp.com.au/products/tc140",
+  "retrieved": "2026-09-07T11:43:59.756043+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140Hero.jpg?v=1699586362",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140TechnicalDiagram-2025.jpg?v=1746745117",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140.gif?v=1746745117",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138-140Together_f6538426-a4ab-4699-bd55-8ab3982aaf1f.jpg?v=1746745117",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140Front.jpg?v=1746745117",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140Side.jpg?v=1746745117",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140Top.jpg?v=1746745117",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140withtube-web.jpg?v=1746745117"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC140A",
+      "weight": 300,
+      "price": 1176
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC140B",
+      "weight": 320,
+      "price": 1164
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC140C",
+      "weight": 360,
+      "price": 1194
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC140D",
+      "weight": 370,
+      "price": 1243
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC140TechnicalDiagram-2025.jpg?v=1746745117",
+      "sha256": "78a170c4fa4635192285afbc7f3d9bb21c86538e4641559a70d6351f9ad64c32"
+    }
+  ]
+}

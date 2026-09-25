@@ -1,0 +1,35 @@
+{
+  "title": "134 - Ground Socket",
+  "url": "https://www.tubeclamp.com.au/products/tc134",
+  "retrieved": "2026-09-07T11:43:59.395591+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/tc134Hero.jpg?v=1711408356",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC134.gif?v=1711408356",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/tc134bottom.jpg?v=1711408356",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/tc134top.jpg?v=1711408356",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/tc134front.jpg?v=1711408356",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC134withtube-web.jpg?v=1711408356",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC134TechnicalDiagram-2025.jpg?v=1746744673"
+  ],
+  "variants": [
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC134C",
+      "weight": 2500,
+      "price": 6651
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC134D",
+      "weight": 2500,
+      "price": 6431
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC134TechnicalDiagram-2025.jpg?v=1746744673",
+      "sha256": "d9a6f29d5d48818a0fd75cbc0d92f7e1ef0fc1aba82a8fef4e0dcfda0b153a0f"
+    }
+  ]
+}

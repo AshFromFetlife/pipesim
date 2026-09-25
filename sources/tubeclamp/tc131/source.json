@@ -1,0 +1,58 @@
+{
+  "title": "131 - Wall Round Base Flange",
+  "url": "https://www.tubeclamp.com.au/products/tc131",
+  "retrieved": "2026-09-07T11:43:58.517486+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC131Hero.jpg?v=1750812295",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC131TechnicalDiagram-2025.jpg?v=1757379255",
+    "https://cdn.shopify.com/s/files/1/1384/6879/products/TC131-1.jpg?v=1757379255",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC131_f160bfcc-c337-4f22-9e33-23b40ffcf59c.gif?v=1757379255",
+    "https://cdn.shopify.com/s/files/1/1384/6879/products/TC131-2.jpg?v=1757379255",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC131Top.jpg?v=1757379255"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC131A",
+      "weight": 420,
+      "price": 943
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC131B",
+      "weight": 540,
+      "price": 1295
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC131C",
+      "weight": 780,
+      "price": 1609
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC131D",
+      "weight": 960,
+      "price": 2185
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC131E",
+      "weight": 1320,
+      "price": 2672
+    },
+    {
+      "title": "T21 - 21mm OD Pipe",
+      "sku": "TC131T",
+      "weight": 300,
+      "price": 932
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC131TechnicalDiagram-2025.jpg?v=1757379255",
+      "sha256": "937632fb543f15b47b41f7e383241988621f2bff346a697317db180deb94fad5"
+    }
+  ]
+}

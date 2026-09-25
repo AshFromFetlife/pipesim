@@ -1,0 +1,57 @@
+{
+  "title": "128 - Corner Top Elbow (Side Outlet Elbow)",
+  "url": "https://www.tubeclamp.com.au/products/tc128",
+  "retrieved": "2026-09-07T11:43:58.519203+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC128Hero.jpg?v=1778113998",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC128.gif?v=1750746075",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC128Side.jpg?v=1700111527",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC128Top.jpg?v=1700111527",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC128TechnicalDiagram-2025.jpg?v=1750746075"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC128A",
+      "weight": 480,
+      "price": 1457
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC128B",
+      "weight": 660,
+      "price": 1552
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC128C",
+      "weight": 1080,
+      "price": 2328
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC128D",
+      "weight": 1380,
+      "price": 2854
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC128E",
+      "weight": 2160,
+      "price": 5026
+    },
+    {
+      "title": "T21 - 21mm OD Pipe",
+      "sku": "TC128T",
+      "weight": 300,
+      "price": 1338
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC128TechnicalDiagram-2025.jpg?v=1750746075",
+      "sha256": "14089b4ae5a58f04285ece3ea2b76eb41f23dc30bdce47c6b4ca565b34ef2db4"
+    }
+  ]
+}

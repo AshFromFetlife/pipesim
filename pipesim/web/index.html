@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>PipeSim — Modular design studio</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2324424b'/%3E%3Cpath d='M9 24V9h14v8H9' fill='none' stroke='%23d1ece4' stroke-width='4'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/theme.css">
+  <link rel="stylesheet" href="/placement.css">
+  <link rel="stylesheet" href="/files.css">
+  <script type="importmap">{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/addons/"}}</script>
+</head>
+<body>
+<header class="app-header">
+  <a class="brand" href="/" aria-label="PipeSim home"><span class="brand-mark">P<span>·</span></span><span>PipeSim<span class="brand-sub">DESIGN STUDIO</span></span></a>
+  <div class="document-heading"><span class="file-symbol">◇</span><div><button id="rename" title="Rename design">Loading your workspace…</button><div id="file-path" class="subtle">Local workspace</div></div><span id="dirty" title="Unsaved changes"></span></div>
+  <div class="header-actions"><span class="local-badge"><i></i> LOCAL & OFFLINE</span><button id="source-button" class="button ghost" title="Edit the design source">{ } Source</button><button id="load-button" class="button" title="Load a saved design or open a file">Load</button><button id="save-button" class="button">Save</button><button id="export-button" class="button primary">Export <span>↗</span></button></div>
+</header>
+<nav class="workspace-bar">
+  <div class="workspace-label">WORKSPACE <span>01</span></div>
+  <div class="mode-tabs" role="tablist" aria-label="Workspace mode"><button class="active" data-mode="design" role="tab">Design</button><button data-mode="check" role="tab">Validate</button><button data-mode="simulate" role="tab">Simulate</button><button data-mode="build" role="tab">Build instructions</button></div>
+  <div class="workspace-actions"><button id="examples-button" title="Open an example">Examples <span>⌄</span></button><button id="new-button">+ New design</button></div>
+</nav>
+<main>
+  <aside class="library-pane">
+    <div class="pane-tabs"><button class="active" data-left="library">Part library</button><button data-left="outline">Design tree <span id="tree-count">0</span></button></div>
+    <div id="library-content">
+      <div class="library-search"><span>⌕</span><input id="part-search" placeholder="Find a part or product code" aria-label="Search part library"><kbd>/</kbd></div>
+      <div class="filter-row"><select id="category" aria-label="Part category"><option value="all">All components</option><option value="connector" selected>Connectors</option><option value="member">Tube & profiles</option><option value="panel">Panels & timber</option><option value="motion">Motion & hardware</option><option value="load">Loads & shapes</option></select><select id="size-filter" aria-label="Tube size"><option value="C" selected>C42</option><option value="all">All sizes</option><option value="T">T21</option><option value="A">A27</option><option value="B">B34</option><option value="D">D48</option><option value="E">E60</option></select></div>
+      <div class="library-caption"><span id="library-count">COMPONENTS</span><button id="library-edit" title="Edit a library definition">Edit library ↗</button></div>
+      <div id="part-list" class="part-list"></div>
+      <div class="library-bottom"><button id="chain-button" class="wide-button"><span>&#9939;</span> Add a chain <span>+</span></button><button id="human-button" class="wide-button"><span>♙</span> Add a human model <span>+</span></button><button id="import-button" class="wide-button"><span>↥</span> Import a 3D part <span>+</span></button><p>Real parts. Editable dimensions.<br>Drag a component into your design.</p></div>
+    </div>
+    <div id="outline-content" class="hidden"><div class="outline-label">OBJECTS & RIGID BODIES</div><div id="outline-list"></div><button id="expand-button" class="wide-button">Expand reusable objects ↗</button></div>
+  </aside>
+  <section class="view-pane" aria-label="3D design viewport">
+    <div class="view-topline"><div><span class="view-dot"></span><strong id="view-title">Perspective</strong><span class="view-caption">Z up · millimetres</span></div><div class="view-tools"><button id="undo" title="Undo (Ctrl+Z)">↶</button><button id="redo" title="Redo (Ctrl+Y)">↷</button><span class="divider"></span><button id="fit-view" title="Fit design (F)">⛶</button><button id="grid-button" class="active" title="Toggle grid">▦</button><button id="ports-button" title="Show connection ports">⊙</button><button id="camera-button" title="Render an image">▣</button></div></div>
+    <div id="viewport"><div id="canvas-fallback" class="hidden">WebGL is unavailable. The CLI renderer works without a GPU.</div></div>
+    <div class="floating-tools"><button data-tool="select" class="active" title="Select (Q)">↖</button><button data-tool="translate" title="Move (G)">✥</button><button data-tool="rotate" title="Rotate (R)">⟳</button><div></div><button data-tool="connect" title="Connect a member to a socket">⌘</button><button id="delete-part" title="Delete selected part">⌫</button></div>
+    <div id="placement-hint" class="placement-hint hidden"></div>
+    <div id="snap-hint" class="placement-hint snap-hint hidden" role="status"></div>
+    <div id="selection-label" class="selection-label hidden"></div>
+    <div class="axis-compass"><button data-camera="front">Y</button><button data-camera="side">X</button><button data-camera="top">Z</button><span>VIEW</span></div>
+    <div class="view-bottom"><div><span id="selection-summary">Nothing selected</span><span id="snap-summary">10 mm · 90°</span></div><div class="snap-options"><button id="connection-snap-button" class="active" aria-pressed="true" title="Snap to connections while dragging">Connections</button><button id="snap-button" class="active" aria-pressed="true" title="Snap position to 10 mm and rotation to 90 degrees">⌗ Grid</button><button id="snap-settings-button" title="Snap settings" aria-label="Snap settings">⚙</button></div></div>
+    <div class="timeline"><button id="play-button" title="Play recording">▶</button><button id="reset-button" title="Restore authored pose">↺</button><div class="timeline-track"><div class="time-ticks"><span>0 s</span><span id="timeline-mid">1.5 s</span><span id="timeline-end">3 s</span></div><input id="time-slider" type="range" min="0" max="100" value="0" aria-label="Animation frame"></div><span id="time-label">0.00 s</span><button id="capture-frame" title="Capture the current frame as design poses">Capture frame</button></div>
+  </section>
+  <aside class="inspector-pane"><div class="inspector-top"><span id="inspector-title">PROPERTIES</span><span class="inspector-icon">☷</span></div><div id="inspector"></div></aside>
+</main>
+<footer class="status-bar"><div><span class="status-dot"></span><span id="status-text">Ready to design</span></div><div><span id="part-stat">0 parts</span><span id="body-stat">0 rigid bodies</span><span id="mass-stat">0 kg</span><span class="unit-badge">mm · kg · N</span><span>v0.1</span></div></footer>
+<div id="toast" role="status" class="hidden"></div>
+<dialog id="modal"><div class="modal-header"><h2 id="modal-title"></h2><button id="modal-close" aria-label="Close dialog">×</button></div><div id="modal-content"></div><div id="modal-actions"></div></dialog>
+<input id="mesh-file" type="file" accept=".stl,.obj,.glb,.ply" hidden>
+<input id="design-file" type="file" accept=".yaml,.yml,.json" aria-label="Open design file" hidden>
+<div id="design-drop-overlay" class="hidden" role="status"><div><strong>Drop a design to open</strong><span>PipeSim · YAML or JSON</span></div></div>
+<script type="module" src="/app.js"></script>
+</body></html>

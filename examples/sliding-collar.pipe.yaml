@@ -1,0 +1,90 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: "Loose collar \xB7 gravity and a physical stop"
+parts:
+- id: guide
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 1000
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    length_mm: 2000
+- id: stop
+  catalog: tubeclamp.TC179C
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 40
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: slider
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 1300
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+joints:
+- id: stop-screw
+  type: socket
+  a:
+    part: stop
+    port: through
+  b:
+    part: guide
+    at_mm: 40
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: loose-screw
+  type: socket
+  a:
+    part: slider
+    port: through
+  b:
+    part: guide
+    at_mm: 1300
+  insertion_mm: 0
+  locked: false
+  limits:
+    slide_mm:
+    - -600
+    - 1250
+    angle_deg:
+    - -180
+    - 180
+anchors:
+- part: guide
+  surface: fixture
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - -9.81
+animation:
+  duration_s: 4
+  fps: 30
+  tracks:
+  - joint: loose-screw
+    coordinate: slide_mm
+    keyframes:
+    - time_s: 0
+      value: 0
+    - time_s: 2
+      value: 1000
+    - time_s: 4
+      value: 0

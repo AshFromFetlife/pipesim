@@ -1,0 +1,334 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Assembly fit allowance and bounded adjustments
+parts:
+- id: corner-0
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 0.0
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: corner-1
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 1065.6
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 180.0
+- id: corner-2
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 1065.6
+    - 1065.6
+    - 500.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 180.0
+- id: corner-3
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 0.0
+    - 1065.6
+    - 500.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 0.0
+- id: bottom
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 532.8
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+- id: right
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 1065.6
+    - 532.8
+    - 500.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+- id: top
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 532.8
+    - 1065.6
+    - 500.0
+    rotation_deg:
+    - 0.0
+    - -90.0
+    - 0.0
+- id: left
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 0.0
+    - 532.8
+    - 500.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 0.0
+- id: left-tee
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - 0.0
+    - 466.7
+    - 500.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 0.0
+- id: bottom-tee
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - 466.7
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 90.0
+- id: left-arm
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 233.7
+    - 466.7
+    - 500.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 401.0
+- id: bottom-arm
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 466.7
+    - 233.2
+    - 500.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 400
+- id: elbow
+  catalog: tubeclamp.TC125C
+  pose:
+    position_mm:
+    - 467.7
+    - 466.7
+    - 500.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - -90.0
+joints:
+- id: bottom-start
+  type: socket
+  a:
+    part: corner-0
+    port: x
+  b:
+    part: bottom
+    end: start
+  insertion_mm: 30.000000000000043
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: bottom-end
+  type: socket
+  a:
+    part: corner-1
+    port: x
+  b:
+    part: bottom
+    end: end
+  insertion_mm: 30.0
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: right-start
+  type: socket
+  a:
+    part: corner-1
+    port: y
+  b:
+    part: right
+    end: start
+  insertion_mm: 30.000000000000043
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: right-end
+  type: socket
+  a:
+    part: corner-2
+    port: y
+  b:
+    part: right
+    end: end
+  insertion_mm: 30.0
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: top-start
+  type: socket
+  a:
+    part: corner-2
+    port: x
+  b:
+    part: top
+    end: start
+  insertion_mm: 30.0
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: top-end
+  type: socket
+  a:
+    part: corner-3
+    port: x
+  b:
+    part: top
+    end: end
+  insertion_mm: 30.000000000000043
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: left-start
+  type: socket
+  a:
+    part: corner-3
+    port: y
+  b:
+    part: left
+    end: start
+  insertion_mm: 30.0
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: left-end
+  type: socket
+  a:
+    part: corner-0
+    port: y
+  b:
+    part: left
+    end: end
+  insertion_mm: 30.000000000000043
+  locked: true
+  torque_nm: 40
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: left-slide
+  type: socket
+  a:
+    part: left-tee
+    port: through
+  b:
+    part: left
+    at_mm: 566.0999999999999
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates:
+      slide_mm: 16.69999999999999
+      angle_deg: 0.0
+- id: bottom-slide
+  type: socket
+  a:
+    part: bottom-tee
+    port: through
+  b:
+    part: bottom
+    at_mm: 433.90000000000003
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates:
+      slide_mm: 133.3
+      angle_deg: 0.0
+- id: left-arm-seat
+  type: socket
+  a:
+    part: left-tee
+    port: x
+  b:
+    part: left-arm
+    end: start
+  insertion_mm: 30.000000000000014
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: bottom-arm-seat
+  type: socket
+  a:
+    part: bottom-tee
+    port: x
+  b:
+    part: bottom-arm
+    end: start
+  insertion_mm: 30.000000000000014
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: elbow-seat
+  type: socket
+  a:
+    part: elbow
+    port: z
+  b:
+    part: left-arm
+    end: end
+  insertion_mm: 30.0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+anchors:
+- part: corner-0
+  surface: fixture
+environment:
+  ground: false
+description: A locked square and two inner arms leave a one millimetre lateral gap at elbow/x. A small assembly allowance, a temporary screw release, or shortening left-arm from 401 to 400 mm can close the final connection.

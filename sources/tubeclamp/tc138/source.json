@@ -1,0 +1,47 @@
+{
+  "title": "138 - Gate Eye",
+  "url": "https://www.tubeclamp.com.au/products/tc138",
+  "retrieved": "2026-09-07T11:43:59.428391+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138Hero.jpg?v=1697433568",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138TechnicalDiagram-2025.jpg?v=1746745036",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138.gif?v=1746745036",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138Side.jpg?v=1746745036",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138Top.jpg?v=1746745036",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138-140Together.jpg?v=1746745036",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138withtube-web.jpg?v=1746745036"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC138A",
+      "weight": 200,
+      "price": 1077
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC138B",
+      "weight": 220,
+      "price": 1023
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC138C",
+      "weight": 260,
+      "price": 1051
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC138D",
+      "weight": 280,
+      "price": 1194
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC138TechnicalDiagram-2025.jpg?v=1746745036",
+      "sha256": "0d2659fa94c7098ecf189a8bafb235bf08b472f24e7325a8d430c03db8844588"
+    }
+  ]
+}

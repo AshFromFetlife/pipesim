@@ -1,0 +1,51 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Three one-metre pipes with tees at their midpoints
+description: An I frame. The two continuous crossbars pass through TC104 main runs at 500 mm from pipe start.
+parts:
+- id: spine
+  catalog: tubeclamp.tube-C
+  parameters: {length_mm: 1000}
+  pose: {position_mm: [0, 0, 600]}
+- id: lower-tee
+  catalog: tubeclamp.TC104C
+  pose: {position_mm: [0, 0, 66.96], rotation_deg: [0, -90, 0]}
+- id: upper-tee
+  catalog: tubeclamp.TC104C
+  pose: {position_mm: [0, 0, 1133.04], rotation_deg: [0, 90, 0]}
+- id: lower-crossbar
+  catalog: tubeclamp.tube-C
+  parameters: {length_mm: 1000}
+  pose: {position_mm: [0, 0, 66.96], rotation_deg: [0, -90, 0]}
+- id: upper-crossbar
+  catalog: tubeclamp.tube-C
+  parameters: {length_mm: 1000}
+  pose: {position_mm: [0, 0, 1133.04], rotation_deg: [0, 90, 0]}
+joints:
+- id: lower-spine-end
+  type: socket
+  a: {part: lower-tee, port: branch}
+  b: {part: spine, end: start}
+  insertion_mm: 29.36
+  locked: true
+- id: upper-spine-end
+  type: socket
+  a: {part: upper-tee, port: branch}
+  b: {part: spine, end: end}
+  insertion_mm: 29.36
+  locked: true
+- id: lower-midpoint
+  type: socket
+  a: {part: lower-tee, port: through}
+  b: {part: lower-crossbar, at_mm: 500}
+  insertion_mm: 0
+  locked: true
+- id: upper-midpoint
+  type: socket
+  a: {part: upper-tee, port: through}
+  b: {part: upper-crossbar, at_mm: 500}
+  insertion_mm: 0
+  locked: true
+anchors:
+- {part: spine, surface: fixture}
+environment: {ground: false}

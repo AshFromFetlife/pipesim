@@ -1,0 +1,108 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Swivel short tee pair
+description: 'Two TC148C castings share a continuous upright. Their collars are inverted and stacked so the branches
+  meet at the same height. The upper collar screw is loose: rotate its rail around the upright, then lock the socket
+  to hold the angle. The nominal paired angular range is 60-180 degrees; exact casting contact is approximated.'
+parts:
+- id: upright
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 500
+- id: lower-tee
+  catalog: tubeclamp.TC148C
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 485.75
+- id: upper-tee
+  catalog: tubeclamp.TC148C
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 514.25
+    rotation_deg:
+    - 180
+    - 0
+    - 90
+- id: first-rail
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 500
+  pose:
+    position_mm:
+    - 305.3
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+- id: second-rail
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 500
+  pose:
+    position_mm:
+    - 0.0
+    - 305.3
+    - 500.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - -0.0
+joints:
+- id: lower-collar
+  type: socket
+  a:
+    part: lower-tee
+    port: through
+  b:
+    part: upright
+    at_mm: 485.75
+  insertion_mm: 0
+  locked: true
+- id: upper-collar
+  type: socket
+  a:
+    part: upper-tee
+    port: through
+  b:
+    part: upright
+    at_mm: 514.25
+  insertion_mm: 0
+  locked: false
+  limits:
+    angle_deg:
+    - -30
+    - 90
+- id: lower-tee-branch-first-rail
+  type: socket
+  a:
+    part: lower-tee
+    port: branch
+  b:
+    part: first-rail
+    end: start
+  insertion_mm: 21.6
+  locked: true
+- id: upper-tee-branch-second-rail
+  type: socket
+  a:
+    part: upper-tee
+    port: branch
+  b:
+    part: second-rail
+    end: start
+  insertion_mm: 21.6
+  locked: true
+anchors:
+- part: upright
+  surface: fixture

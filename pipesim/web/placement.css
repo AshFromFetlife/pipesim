@@ -1,0 +1,25 @@
+.snap-options{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.view-bottom .snap-options button{padding:6px 9px;border:1px solid var(--line);border-radius:4px;color:var(--muted)}
+.view-bottom .snap-options button.active{color:var(--teal);background:var(--teal-light);border-color:var(--teal)}
+.snap-hint{max-width:calc(100% - 125px);white-space:normal;pointer-events:none}
+#modal.connection-modal{width:366px;max-width:calc(100vw - 28px);margin:0;position:fixed;left:auto;right:16px;top:140px;max-height:calc(100vh - 160px);overflow:auto}
+#modal.connection-modal::backdrop{background:rgb(0 0 0 / .08)}
+.connection-modal #modal-content{padding:16px 22px}
+.connection-modal #modal-actions{padding:12px 16px;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.connection-modal .single-field{margin-bottom:12px}
+.connection-modal p{line-height:1.5}
+#snap-preview-view{width:100%;aspect-ratio:16/11;border:1px solid var(--line);border-radius:5px;overflow:hidden;margin-top:14px}
+#snap-preview-view canvas{display:block;width:100%!important;height:100%!important;touch-action:none}
+#snap-review-status{min-height:36px;color:var(--ink)}
+#snap-force-options{margin:12px 0;padding:10px;border:1px solid var(--line);border-radius:4px}
+#snap-force-options summary{cursor:pointer;color:var(--ink)}
+#snap-force-options .fields{grid-template-columns:1fr 1fr}
+#snap-adjustments{font-size:12px;line-height:1.5}
+#snap-adjustments ul{padding-left:18px}
+#snap-adjustments li{margin:6px 0}
+.snap-settings-fields{grid-template-columns:1fr 1fr;margin:12px 0}
+.snap-presets{display:flex;gap:8px;margin-bottom:18px}
+.snap-presets button{border:1px solid var(--line);border-radius:4px;padding:7px 10px;background:var(--panel)}
+.snap-presets button:hover{color:var(--teal);border-color:var(--teal)}
+@media(max-width:850px){#modal.connection-modal{right:10px;top:80px;max-height:calc(100vh - 100px)}.view-bottom>div:first-child{min-width:0;overflow:hidden}.view-bottom #snap-summary{display:none}}
+#modal.attachment-modal::backdrop{backdrop-filter:none;background:rgb(0 0 0 / .06)}

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pipesim"
+version = "0.1.0"
+description = "Editable modular structures, assembly planning, rigid-body simulation and frame analysis"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26,<3", "scipy>=1.12,<2", "PyYAML>=6,<7", "jsonschema>=4.21,<5", "pybullet>=3.2.7,<4", "trimesh>=4.4,<5", "Pillow>=10,<13", "matplotlib>=3.8,<4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+pipesim = "pipesim.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pipesim*"]
+
+[tool.setuptools.package-data]
+pipesim = ["data/**/*.yaml", "data/**/*.json", "data/**/*.stl", "web/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

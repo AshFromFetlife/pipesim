@@ -1,0 +1,90 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Three materials · equal 500 mm cantilevers
+parts:
+- id: steel
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 500
+  pose:
+    position_mm:
+    - 250
+    - 0
+    - 800
+    rotation_deg:
+    - 0
+    - 90
+    - 0
+- id: aluminium
+  catalog: minitec.20.1006
+  parameters:
+    length_mm: 500
+  pose:
+    position_mm:
+    - 250
+    - 350
+    - 800
+    rotation_deg:
+    - 0
+    - 90
+    - 0
+- id: timber
+  catalog: porta.DOW-19
+  parameters:
+    length_mm: 500
+  pose:
+    position_mm:
+    - 250
+    - 700
+    - 800
+    rotation_deg:
+    - 0
+    - 90
+    - 0
+joints: []
+anchors:
+- part: steel
+  surface: wall
+  position_mm:
+  - 0
+  - 0
+  - 800
+- part: aluminium
+  surface: wall
+  position_mm:
+  - 0
+  - 350
+  - 800
+- part: timber
+  surface: wall
+  position_mm:
+  - 0
+  - 700
+  - 800
+environment:
+  gravity_m_s2:
+  - 0
+  - 0
+  - 0
+  ground: true
+loads:
+- part: steel
+  at_mm: 500
+  force_n:
+  - 0
+  - 0
+  - -50
+- part: aluminium
+  at_mm: 500
+  force_n:
+  - 0
+  - 0
+  - -50
+- part: timber
+  at_mm: 500
+  force_n:
+  - 0
+  - 0
+  - -50
+description: Same force and length, different sections. This is not a comparison at equal mass. Timber and metal
+  strength defaults are assumptions.

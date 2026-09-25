@@ -1,0 +1,130 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Four casters · reusable articulated objects
+parts:
+- id: platform
+  catalog: generic.panel
+  parameters:
+    width_mm: 800
+    depth_mm: 500
+    thickness_mm: 36
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 180
+joints:
+- id: mount-1
+  type: fixed
+  a:
+    part: platform
+    frame:
+      position_mm:
+      - -300
+      - -180
+      - -18
+  b:
+    part: caster-1/plate
+    frame:
+      position_mm:
+      - 0
+      - 0
+      - 3
+  metadata:
+    hardware: Four appropriately sized caster mounting bolts, nuts and washers
+- id: mount-2
+  type: fixed
+  a:
+    part: platform
+    frame:
+      position_mm:
+      - 300
+      - -180
+      - -18
+  b:
+    part: caster-2/plate
+    frame:
+      position_mm:
+      - 0
+      - 0
+      - 3
+  metadata:
+    hardware: Four appropriately sized caster mounting bolts, nuts and washers
+- id: mount-3
+  type: fixed
+  a:
+    part: platform
+    frame:
+      position_mm:
+      - 300
+      - 180
+      - -18
+  b:
+    part: caster-3/plate
+    frame:
+      position_mm:
+      - 0
+      - 0
+      - 3
+  metadata:
+    hardware: Four appropriately sized caster mounting bolts, nuts and washers
+- id: mount-4
+  type: fixed
+  a:
+    part: platform
+    frame:
+      position_mm:
+      - -300
+      - 180
+      - -18
+  b:
+    part: caster-4/plate
+    frame:
+      position_mm:
+      - 0
+      - 0
+      - 3
+  metadata:
+    hardware: Four appropriately sized caster mounting bolts, nuts and washers
+anchors: []
+libraries:
+- libraries/mechanisms.yaml
+objects:
+- id: caster-1
+  template: demo.caster
+  pose:
+    position_mm:
+    - -300
+    - -180
+    - 0
+- id: caster-2
+  template: demo.caster
+  pose:
+    position_mm:
+    - 300
+    - -180
+    - 0
+- id: caster-3
+  template: demo.caster
+  pose:
+    position_mm:
+    - 300
+    - 180
+    - 0
+- id: caster-4
+  template: demo.caster
+  pose:
+    position_mm:
+    - -300
+    - 180
+    - 0
+loads:
+- part: platform
+  force_n:
+  - 10
+  - 0
+  - 0
+  start_s: 0.5
+  end_s: 1.5
+description: Each caster contains a fork, wheel and plate joined by two revolute bearings. Apply a horizontal push
+  to observe rolling. Gravity-polygon validation is conservative for articulated wheels.

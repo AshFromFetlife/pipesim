@@ -1,0 +1,1191 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+parts:
+- id: tc148c-1
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -654.97025009
+    - 792.50974949
+    - 29.6695414
+    rotation_deg:
+    - 90.00000739
+    - -0.00014602
+    - 89.98802503
+- id: tc148c-2
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -626.27993283
+    - 1703.10377585
+    - 29.67185425
+    rotation_deg:
+    - 89.99999261
+    - 0.00014602
+    - -90.01197497
+- id: tube-c-1
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -640.62509146
+    - 1247.80676268
+    - 29.67069783
+    rotation_deg:
+    - -89.99985398
+    - 7.37e-06
+    - -0.01197498
+- id: tc148c-1-copy
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -653.27975998
+    - 1703.10942027
+    - 29.67185538
+    rotation_deg:
+    - -90.00001579
+    - -59.99985451
+    - -90.01196095
+- id: tc148c-2-copy
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -624.87480868
+    - 1247.80147164
+    - 818.27342695
+    rotation_deg:
+    - -89.99998421
+    - 59.99985451
+    - 89.98803905
+- id: tube-c-1-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -639.07728433
+    - 1475.45544596
+    - 423.97264115
+    rotation_deg:
+    - 30.00014549
+    - 7.89e-06
+    - -0.01197464
+- id: tc148c-1-copy-2
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -654.87480802
+    - 1247.80774199
+    - 818.27343
+    rotation_deg:
+    - -90.00001475
+    - 60.000145
+    - -90.01198775
+- id: tc148c-2-copy-2
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -626.47006865
+    - 792.50379132
+    - 29.66954033
+    rotation_deg:
+    - -89.99998525
+    - -60.000145
+    - 89.98801225
+- id: tube-c-1-copy-2
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -640.67243834
+    - 1020.15576665
+    - 423.97148516
+    rotation_deg:
+    - 150.000145
+    - 7.37e-06
+    - -0.01197498
+- id: tube-c-2
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 3000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -1864.84003711
+    - 1703.36263175
+    - 29.6720227
+    rotation_deg:
+    - 90.00005353
+    - 81.52750847
+    - 89.98807834
+- id: tube-c-2-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 3000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -1848.01451292
+    - 792.75909728
+    - 29.66969708
+    rotation_deg:
+    - 90.00090962
+    - 89.5352423
+    - 89.98893463
+- id: tc148c-1-copy-3
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2311.4307106
+    - 1248.15394762
+    - 818.27365107
+    rotation_deg:
+    - -90.00001561
+    - 60.00014633
+    - -90.01198849
+- id: tc148c-2-copy-3
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2283.02597679
+    - 792.8500159
+    - 29.66975335
+    rotation_deg:
+    - -89.99998439
+    - -60.00014632
+    - 89.98801151
+- id: tube-c-1-copy-3
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -2297.2283437
+    - 1020.50198391
+    - 423.97170592
+    rotation_deg:
+    - 150.00014633
+    - 7.79e-06
+    - -0.01197494
+- id: tc148c-1-copy-4
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -3203.75372322
+    - 1248.34044562
+    - 818.27377097
+    rotation_deg:
+    - -90.00001561
+    - 60.00014627
+    - -90.01198849
+- id: tc148c-2-copy-4
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -3175.34898929
+    - 793.03651344
+    - 29.66987008
+    rotation_deg:
+    - -89.99998439
+    - -60.00014626
+    - 89.98801151
+- id: tube-c-1-copy-4
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -3189.55135625
+    - 1020.68848166
+    - 423.97182421
+    rotation_deg:
+    - 150.00014627
+    - 7.78e-06
+    - -0.01197494
+- id: tc148c-1-copy-5
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2304.19499677
+    - 1703.45445484
+    - 29.6720823
+    rotation_deg:
+    - -90.0000156
+    - -59.99985402
+    - -90.01196144
+- id: tc148c-2-copy-5
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2275.79004934
+    - 1248.14649925
+    - 818.27364733
+    rotation_deg:
+    - -89.9999844
+    - 59.99985402
+    - 89.98803856
+- id: tube-c-1-copy-5
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -2289.99252306
+    - 1475.80047488
+    - 423.97286856
+    rotation_deg:
+    - 30.00014598
+    - 7.79e-06
+    - -0.01197495
+- id: tc148c-1-copy-6
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -3203.72917439
+    - 1703.642455
+    - 29.67220556
+    rotation_deg:
+    - -90.00001582
+    - -59.99985417
+    - -90.01196086
+- id: tc148c-2-copy-6
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -3175.32422243
+    - 1248.33450337
+    - 818.27377059
+    rotation_deg:
+    - -89.99998418
+    - 59.99985417
+    - 89.98803914
+- id: tube-c-1-copy-6
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -3189.52669841
+    - 1475.98847701
+    - 423.97299184
+    rotation_deg:
+    - 30.00014583
+    - 7.91e-06
+    - -0.01197458
+- id: tc148c-1-copy-7
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -3333.76447817
+    - 793.06962271
+    - 29.66988516
+    rotation_deg:
+    - 90.00000747
+    - -0.00014782
+    - 89.98802539
+- id: tc148c-2-copy-7
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -3305.0741665
+    - 1703.66363536
+    - 29.6722242
+    rotation_deg:
+    - 89.99999211
+    - 0.00014783
+    - -90.01197463
+- id: tube-c-1-copy-7
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -3319.41932235
+    - 1248.36662351
+    - 29.67105473
+    rotation_deg:
+    - -89.99985217
+    - 7.89e-06
+    - -0.01197462
+- id: tc148c-1-copy-8
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2439.61859189
+    - 792.88274262
+    - 29.66977572
+    rotation_deg:
+    - 90.00000788
+    - -0.00014589
+    - 89.98802536
+- id: tc148c-2-copy-8
+  catalog: tubeclamp.TC148C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2410.92828
+    - 1703.47676356
+    - 29.67209541
+    rotation_deg:
+    - 89.99999212
+    - 0.0001459
+    - -90.01197464
+- id: tube-c-1-copy-8
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 800
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -2425.27343595
+    - 1248.17975309
+    - 29.67093556
+    rotation_deg:
+    - -89.9998541
+    - 7.89e-06
+    - -0.01197464
+- id: tube-c-3
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1500
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -2770.26603362
+    - 1248.24984561
+    - 818.27371387
+    rotation_deg:
+    - 89.99998257
+    - 63.35570528
+    - -90.01199055
+- id: tube-c-4
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 200
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -674.87480759
+    - 1247.8119219
+    - 818.2734333
+    rotation_deg:
+    - -90.0000592
+    - 82.32471958
+    - -90.01203362
+- id: tc179c-1
+  catalog: tubeclamp.TC179C
+  parameters: {}
+  pose:
+    position_mm:
+    - -761.77480507
+    - 1247.8300842
+    - 818.2734453
+    rotation_deg:
+    - 89.99952241
+    - -89.05037162
+    - -90.01149743
+- id: tc179c-2
+  catalog: tubeclamp.TC179C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2033.36604971
+    - 1248.09583157
+    - 818.27361335
+    rotation_deg:
+    - -89.99998882
+    - -43.42240431
+    - 89.9880173
+- id: tc101c-1
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2078.21572379
+    - 1248.10520569
+    - 818.27362143
+    rotation_deg:
+    - 90.00000971
+    - 48.53455331
+    - 89.98803259
+- id: tc101c-2
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - -712.27009574
+    - 1247.8197376
+    - 818.27343729
+    rotation_deg:
+    - -90.00000137
+    - 48.38899401
+    - 89.98802396
+- id: tc104c-1-copy
+  catalog: tubeclamp.TC104C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2078.13709051
+    - 1624.57433761
+    - 392.23522162
+    rotation_deg:
+    - -0.48233192
+    - -48.53455331
+    - -90.01196741
+- id: tc125c-1
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2076.45265832
+    - 1771.77380877
+    - 522.30844885
+    rotation_deg:
+    - 131.46454152
+    - 0.33950247
+    - -0.35563058
+- id: tc125c-2
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - -2079.59957068
+    - 1496.77084997
+    - 279.30130986
+    rotation_deg:
+    - 90.44567884
+    - -41.46365275
+    - 89.34438186
+- id: tube-c-5
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 500
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -2078.17623703
+    - 1437.15423858
+    - 604.33271464
+    rotation_deg:
+    - 41.46544615
+    - -0.00735543
+    - -0.00364349
+- id: tube-c-5-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 500
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -712.23047493
+    - 1437.41167431
+    - 604.81349732
+    rotation_deg:
+    - 41.61100544
+    - -0.007383
+    - -0.00366084
+- id: tube-c-6
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 300
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -2078.0261145
+    - 1634.27232936
+    - 400.80487935
+    rotation_deg:
+    - 131.46452906
+    - 0.33711212
+    - -0.35774279
+- id: tc125c-1-copy
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - -713.76458204
+    - 1488.1776342
+    - 271.34032133
+    rotation_deg:
+    - 48.38993279
+    - -0.33394648
+    - 179.63952652
+- id: tc125c-2-copy
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - -710.6178113
+    - 1762.56235675
+    - 515.04532581
+    rotation_deg:
+    - 89.54599125
+    - 41.60920287
+    - -90.65706565
+- id: tube-c-6-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 300
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -712.19119663
+    - 1625.36999921
+    - 393.19282689
+    rotation_deg:
+    - 48.3899204
+    - -0.33633159
+    - 179.6416449
+- id: tc104c-1-copy-2
+  catalog: tubeclamp.TC104C
+  parameters: {}
+  pose:
+    position_mm:
+    - -712.19119663
+    - 1625.36999921
+    - 393.19282689
+    rotation_deg:
+    - -0.48232553
+    - -48.38899402
+    - -90.01197331
+- id: tube-c-7
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1300
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -1397.2394455
+    - 1492.47773822
+    - 275.32405497
+    rotation_deg:
+    - 90.50758399
+    - 48.85867314
+    - 90.02178679
+- id: tube-c-7-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1300
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -1394.09265329
+    - 1766.80407606
+    - 519.0947938
+    rotation_deg:
+    - 90.51595903
+    - 48.85860736
+    - 90.03298796
+joints:
+- id: tc148c-1-branch-tube-c-1
+  type: socket
+  a:
+    part: tc148c-1
+    port: branch
+  b:
+    part: tube-c-1
+    end: start
+  insertion_mm: 21.599998576489785
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1
+  type: socket
+  a:
+    part: tc148c-2
+    port: branch
+  b:
+    part: tube-c-1
+    end: end
+  insertion_mm: 21.599998596489932
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy
+  type: socket
+  a:
+    part: tc148c-1-copy
+    port: branch
+  b:
+    part: tube-c-1-copy
+    end: start
+  insertion_mm: 21.600000554724847
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy
+  type: socket
+  a:
+    part: tc148c-2-copy
+    port: branch
+  b:
+    part: tube-c-1-copy
+    end: end
+  insertion_mm: 21.600000523744328
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy-2
+  type: socket
+  a:
+    part: tc148c-1-copy-2
+    port: branch
+  b:
+    part: tube-c-1-copy-2
+    end: start
+  insertion_mm: 21.59999957728109
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy-2
+  type: socket
+  a:
+    part: tc148c-2-copy-2
+    port: branch
+  b:
+    part: tube-c-1-copy-2
+    end: end
+  insertion_mm: 21.599999590942293
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-through-tube-c-2
+  type: socket
+  a:
+    part: tc148c-2
+    port: through
+  b:
+    part: tube-c-2
+    at_mm: 2738.560131330122
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-copy-through-tube-c-2
+  type: socket
+  a:
+    part: tc148c-1-copy
+    port: through
+  b:
+    part: tube-c-2
+    at_mm: 2711.560303590128
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-through-tube-c-2-copy
+  type: socket
+  a:
+    part: tc148c-1
+    port: through
+  b:
+    part: tube-c-2-copy
+    at_mm: 2693.044288887015
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-copy-2-through-tube-c-2-copy
+  type: socket
+  a:
+    part: tc148c-2-copy-2
+    port: through
+  b:
+    part: tube-c-2-copy
+    at_mm: 2721.544470949814
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy-3
+  type: socket
+  a:
+    part: tc148c-1-copy-3
+    port: branch
+  b:
+    part: tube-c-1-copy-3
+    end: start
+  insertion_mm: 21.600005215518
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy-3
+  type: socket
+  a:
+    part: tc148c-2-copy-3
+    port: branch
+  b:
+    part: tube-c-1-copy-3
+    end: end
+  insertion_mm: 21.59999663961068
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy-4
+  type: socket
+  a:
+    part: tc148c-1-copy-4
+    port: branch
+  b:
+    part: tube-c-1-copy-4
+    end: start
+  insertion_mm: 21.600003696223027
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy-4
+  type: socket
+  a:
+    part: tc148c-2-copy-4
+    port: branch
+  b:
+    part: tube-c-1-copy-4
+    end: end
+  insertion_mm: 21.599995183614833
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy-5
+  type: socket
+  a:
+    part: tc148c-1-copy-5
+    port: branch
+  b:
+    part: tube-c-1-copy-5
+    end: start
+  insertion_mm: 21.599997366092165
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy-5
+  type: socket
+  a:
+    part: tc148c-2-copy-5
+    port: branch
+  b:
+    part: tube-c-1-copy-5
+    end: end
+  insertion_mm: 21.60000601762345
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy-6
+  type: socket
+  a:
+    part: tc148c-1-copy-6
+    port: branch
+  b:
+    part: tube-c-1-copy-6
+    end: start
+  insertion_mm: 21.599998261886874
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy-6
+  type: socket
+  a:
+    part: tc148c-2-copy-6
+    port: branch
+  b:
+    part: tube-c-1-copy-6
+    end: end
+  insertion_mm: 21.60000695805808
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy-7
+  type: socket
+  a:
+    part: tc148c-1-copy-7
+    port: branch
+  b:
+    part: tube-c-1-copy-7
+    end: start
+  insertion_mm: 21.60001105657862
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy-7
+  type: socket
+  a:
+    part: tc148c-2-copy-7
+    port: branch
+  b:
+    part: tube-c-1-copy-7
+    end: end
+  insertion_mm: 21.600000001598612
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-branch-tube-c-1-copy-8
+  type: socket
+  a:
+    part: tc148c-1-copy-8
+    port: branch
+  b:
+    part: tube-c-1-copy-8
+    end: start
+  insertion_mm: 21.600001379117373
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-branch-tube-c-1-copy-8
+  type: socket
+  a:
+    part: tc148c-2-copy-8
+    port: branch
+  b:
+    part: tube-c-1-copy-8
+    end: end
+  insertion_mm: 21.6000013791154
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-copy-3-through-tube-c-3
+  type: socket
+  a:
+    part: tc148c-1-copy-3
+    port: through
+  b:
+    part: tube-c-3
+    at_mm: 291.16466695850886
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 20
+- id: tc148c-2-copy-8-through-tube-c-2
+  type: socket
+  a:
+    part: tc148c-2-copy-8
+    port: through
+  b:
+    part: tube-c-2
+    at_mm: 953.9117451832872
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-copy-5-through-tube-c-3
+  type: socket
+  a:
+    part: tc148c-2-copy-5
+    port: through
+  b:
+    part: tube-c-3
+    at_mm: 255.52400492020888
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-copy-4-through-tube-c-3
+  type: socket
+  a:
+    part: tc148c-1-copy-4
+    port: through
+  b:
+    part: tube-c-3
+    at_mm: 1183.487699067818
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-copy-6-through-tube-c-3
+  type: socket
+  a:
+    part: tc148c-2-copy-6
+    port: through
+  b:
+    part: tube-c-3
+    at_mm: 1155.0581976568023
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-copy-3-through-tube-c-2-copy
+  type: socket
+  a:
+    part: tc148c-2-copy-3
+    port: through
+  b:
+    part: tube-c-2-copy
+    at_mm: 1064.9885266288725
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-copy-5-through-tube-c-2
+  type: socket
+  a:
+    part: tc148c-1-copy-5
+    port: through
+  b:
+    part: tube-c-2
+    at_mm: 1060.6450307447017
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-copy-8-through-tube-c-2-copy
+  type: socket
+  a:
+    part: tc148c-1-copy-8
+    port: through
+  b:
+    part: tube-c-2-copy
+    at_mm: 908.3959081090475
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-copy-7-through-tube-c-2
+  type: socket
+  a:
+    part: tc148c-2-copy-7
+    port: through
+  b:
+    part: tube-c-2
+    at_mm: 59.76583915566562
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-copy-4-through-tube-c-2-copy
+  type: socket
+  a:
+    part: tc148c-2-copy-4
+    port: through
+  b:
+    part: tube-c-2-copy
+    at_mm: 172.66549463965976
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-copy-7-through-tube-c-2-copy
+  type: socket
+  a:
+    part: tc148c-1-copy-7
+    port: through
+  b:
+    part: tube-c-2-copy
+    at_mm: 14.250002299695552
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-1-copy-6-through-tube-c-2
+  type: socket
+  a:
+    part: tc148c-1-copy-6
+    port: through
+  b:
+    part: tube-c-2
+    at_mm: 161.1108334789369
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 20
+- id: tc148c-1-copy-2-through-tube-c-4
+  type: socket
+  a:
+    part: tc148c-1-copy-2
+    port: through
+  b:
+    part: tube-c-4
+    at_mm: 120.00000000679142
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc148c-2-copy-through-tube-c-4
+  type: socket
+  a:
+    part: tc148c-2-copy
+    port: through
+  b:
+    part: tube-c-4
+    at_mm: 150.0000000020798
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc179c-1-through-tube-c-4
+  type: socket
+  a:
+    part: tc179c-1
+    port: through
+  b:
+    part: tube-c-4
+    at_mm: 13.100000622017888
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc179c-2-through-tube-c-3
+  type: socket
+  a:
+    part: tc179c-2
+    port: through
+  b:
+    part: tube-c-3
+    at_mm: 13.099999995322833
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc101c-1-through-tube-c-3
+  type: socket
+  a:
+    part: tc101c-1
+    port: through
+  b:
+    part: tube-c-3
+    at_mm: 57.949675054975614
+  insertion_mm: 0
+  locked: false
+  fit_tolerance_mm: 2
+- id: tc101c-2-through-tube-c-4
+  type: socket
+  a:
+    part: tc101c-2
+    port: through
+  b:
+    part: tube-c-4
+    at_mm: 62.60471103325028
+  insertion_mm: 0
+  locked: false
+  fit_tolerance_mm: 2
+- id: tc101c-2-branch-tube-c-5-copy
+  type: socket
+  a:
+    part: tc101c-2
+    port: branch
+  b:
+    part: tube-c-5-copy
+    end: end
+  insertion_mm: 23.999999987297215
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc101c-1-branch-tube-c-5
+  type: socket
+  a:
+    part: tc101c-1
+    port: branch
+  b:
+    part: tube-c-5
+    end: end
+  insertion_mm: 24.00000001054996
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc104c-1-copy-branch-tube-c-5
+  type: socket
+  a:
+    part: tc104c-1-copy
+    port: branch
+  b:
+    part: tube-c-5
+    end: start
+  insertion_mm: 29.36000000312002
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc104c-1-copy-through-tube-c-6
+  type: socket
+  a:
+    part: tc104c-1-copy
+    port: through
+  b:
+    part: tube-c-6
+    at_mm: 162.9422715651931
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc125c-1-z-tube-c-6
+  type: socket
+  a:
+    part: tc125c-1
+    port: z
+  b:
+    part: tube-c-6
+    end: start
+  insertion_mm: 29.999999984930962
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc125c-2-x-tube-c-6
+  type: socket
+  a:
+    part: tc125c-2
+    port: x
+  b:
+    part: tube-c-6
+    end: end
+  insertion_mm: 30.000000006538862
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc125c-1-z-tube-c-6-copy
+  type: socket
+  a:
+    part: tc125c-1-copy
+    port: z
+  b:
+    part: tube-c-6-copy
+    end: start
+  insertion_mm: 29.999990000176517
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc125c-2-x-tube-c-6-copy
+  type: socket
+  a:
+    part: tc125c-2-copy
+    port: x
+  b:
+    part: tube-c-6-copy
+    end: end
+  insertion_mm: 29.999999995017774
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc104c-1-copy-2-branch-tube-c-5-copy
+  type: socket
+  a:
+    part: tc104c-1-copy-2
+    port: branch
+  b:
+    part: tube-c-5-copy
+    end: start
+  insertion_mm: 29.3600000084059
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc104c-1-copy-2-through-tube-c-6-copy
+  type: socket
+  a:
+    part: tc104c-1-copy-2
+    port: through
+  b:
+    part: tube-c-6-copy
+    at_mm: 150
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc125c-1-copy-x-tube-c-7
+  type: socket
+  a:
+    part: tc125c-1-copy
+    port: x
+  b:
+    part: tube-c-7
+    end: end
+  insertion_mm: 29.999999992711682
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc125c-2-copy-z-tube-c-7-copy
+  type: socket
+  a:
+    part: tc125c-2-copy
+    port: z
+  b:
+    part: tube-c-7-copy
+    end: end
+  insertion_mm: 29.999999994906794
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc125c-2-z-tube-c-7
+  type: socket
+  a:
+    part: tc125c-2
+    port: z
+  b:
+    part: tube-c-7
+    end: start
+  insertion_mm: 31.11477902826836
+  locked: true
+  fit_tolerance_mm: 2
+anchors: []
+name: Two-bearing carriage contact regression

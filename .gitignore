@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+node_modules/
+dist/
+build/
+output/
+.pipesim/
+*.log
+sources/inspiration/page.html

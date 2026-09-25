@@ -1,0 +1,128 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: "GT2 linear stage \xB7 coupled motor and carriage"
+parts:
+- id: base
+  catalog: generic.box
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 100
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    width_mm: 600
+    depth_mm: 160
+    height_mm: 40
+    mass_kg: 10
+- id: pulley
+  catalog: adafruit.GT2-20T-5
+  pose:
+    position_mm:
+    - -220
+    - 0
+    - 140
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: carriage
+  catalog: generic.box
+  pose:
+    position_mm:
+    - -150
+    - 0
+    - 180
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    width_mm: 80
+    depth_mm: 80
+    height_mm: 35
+    mass_kg: 2
+joints:
+- id: motor
+  type: revolute
+  a:
+    part: base
+    frame:
+      position_mm:
+      - -220
+      - 0
+      - 40
+      axis:
+      - 0
+      - 0
+      - 1
+  b:
+    part: pulley
+  motor:
+    mode: position
+    target: 0
+    max_torque_nm: 2
+    kp: 50
+    kd: 1
+    schedule:
+    - time_s: 0
+      target: 0
+    - time_s: 3
+      target: 1800
+- id: travel
+  type: prismatic
+  a:
+    part: base
+    frame:
+      position_mm:
+      - -150
+      - 0
+      - 80
+      axis:
+      - 1
+      - 0
+      - 0
+  b:
+    part: carriage
+  limits:
+    slide_mm:
+    - 0
+    - 300
+anchors:
+- part: base
+  surface: fixture
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - -9.81
+drives:
+- id: belt
+  type: gt2
+  driver: motor
+  follower: travel
+  teeth: 20
+  pitch_mm: 2
+  belt_width_mm: 6
+  belt_length_mm: 1164
+  max_force_n: 200
+  route_mm:
+  - - -220
+    - -20
+    - 140
+  - - 220
+    - -20
+    - 140
+  - - 220
+    - 20
+    - 140
+  - - -220
+    - 20
+    - 140
+  - - -220
+    - -20
+    - 140

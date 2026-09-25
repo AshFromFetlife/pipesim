@@ -1,0 +1,59 @@
+{
+  "title": "125 - Standard Elbow (90degree)",
+  "url": "https://www.tubeclamp.com.au/products/tc125",
+  "retrieved": "2026-09-07T11:43:58.559448+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC125Hero.jpg?v=1750803416",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC125Front.jpg?v=1696818507",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC125_2599ba4e-9c59-476c-aa96-42f6c4bd8c69.gif?v=1750803416",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC125Side.jpg?v=1722222986",
+    "https://cdn.shopify.com/s/files/1/1384/6879/products/TC125-3.jpg?v=1722222986",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/tc125-1_9e7842b5-4cb1-426b-830a-788a56edf4d6.jpg?v=1722222986",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC125TechnicalDiagram-2025.jpg?v=1750803416"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC125A",
+      "weight": 360,
+      "price": 1035
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC125B",
+      "weight": 480,
+      "price": 1167
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC125C",
+      "weight": 780,
+      "price": 1577
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC125D",
+      "weight": 1020,
+      "price": 1902
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC125E",
+      "weight": 1560,
+      "price": 3536
+    },
+    {
+      "title": "T21 - 21mm OD Pipe",
+      "sku": "TC125T",
+      "weight": 240,
+      "price": 1004
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC125TechnicalDiagram-2025.jpg?v=1750803416",
+      "sha256": "3c5048576693c510cd70ec5b03173d8cc49aed342fa40ca154b90bbf6e3e1541"
+    }
+  ]
+}

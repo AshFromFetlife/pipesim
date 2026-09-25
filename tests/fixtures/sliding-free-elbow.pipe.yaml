@@ -1,0 +1,307 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Two sliding arms and an unconnected elbow
+parts:
+- id: tc128c-1
+  catalog: tubeclamp.TC128C
+  parameters: {}
+  pose:
+    position_mm:
+    - -1373.12
+    - -150
+    - 400
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: tc128c-2
+  catalog: tubeclamp.TC128C
+  parameters: {}
+  pose:
+    position_mm:
+    - -306.88
+    - 916.24
+    - 400
+    rotation_deg:
+    - 0
+    - 0
+    - 180
+- id: tc128c-3
+  catalog: tubeclamp.TC128C
+  parameters: {}
+  pose:
+    position_mm:
+    - -1373.12
+    - 916.24
+    - 400
+    rotation_deg:
+    - 90
+    - 0
+    - 0
+- id: tc128c-4
+  catalog: tubeclamp.TC128C
+  parameters: {}
+  pose:
+    position_mm:
+    - -306.88
+    - -150
+    - 400
+    rotation_deg:
+    - 0
+    - 0
+    - 90
+- id: tube-c-1
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -306.88
+    - 383.12
+    - 400
+    rotation_deg:
+    - -90
+    - 0
+    - 0
+- id: tube-c-2
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -840
+    - 916.24
+    - 400
+    rotation_deg:
+    - -90
+    - 0
+    - 90
+- id: tube-c-3
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -1373.12
+    - 383.12
+    - 400
+    rotation_deg:
+    - 90
+    - 0
+    - 0
+- id: tube-c-4
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -840
+    - -150
+    - 400
+    rotation_deg:
+    - 0
+    - 90
+    - 0
+- id: tc116c-1
+  catalog: tubeclamp.TC116C
+  parameters: {}
+  pose:
+    position_mm:
+    - -1373.12
+    - 400
+    - 400
+    rotation_deg:
+    - 90
+    - 0
+    - 0
+- id: tc116c-4
+  catalog: tubeclamp.TC116C
+  parameters: {}
+  pose:
+    position_mm:
+    - -880
+    - -150
+    - 400
+    rotation_deg:
+    - 0
+    - -90
+    - 0
+- id: tc125c-1
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - -801.5
+    - 400
+    - 430
+    rotation_deg:
+    - 90
+    - 0
+    - -90
+- id: tube-c-7
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 450
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -880
+    - 108.2
+    - 400
+    rotation_deg:
+    - -90
+    - 0
+    - 0
+- id: tube-c-8
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 450
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -1114.92
+    - 400
+    - 400
+    rotation_deg:
+    - 0
+    - -90
+    - 0
+joints:
+- id: tc128c-2-x-tube-c-2
+  type: socket
+  a:
+    part: tc128c-2
+    port: x
+  b:
+    part: tube-c-2
+    end: start
+  insertion_mm: 29.680000000000007
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc128c-3-x-tube-c-2
+  type: socket
+  a:
+    part: tc128c-3
+    port: x
+  b:
+    part: tube-c-2
+    end: end
+  insertion_mm: 29.680000000000064
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc128c-2-y-tube-c-1
+  type: socket
+  a:
+    part: tc128c-2
+    port: y
+  b:
+    part: tube-c-1
+    end: end
+  insertion_mm: 29.67999999999995
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc128c-3-z-tube-c-3
+  type: socket
+  a:
+    part: tc128c-3
+    port: z
+  b:
+    part: tube-c-3
+    end: start
+  insertion_mm: 29.67999999999995
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc128c-1-y-tube-c-3
+  type: socket
+  a:
+    part: tc128c-1
+    port: y
+  b:
+    part: tube-c-3
+    end: end
+  insertion_mm: 29.679999999999993
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc128c-4-x-tube-c-1
+  type: socket
+  a:
+    part: tc128c-4
+    port: x
+  b:
+    part: tube-c-1
+    end: start
+  insertion_mm: 29.679999999999993
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc128c-4-y-tube-c-4
+  type: socket
+  a:
+    part: tc128c-4
+    port: y
+  b:
+    part: tube-c-4
+    end: end
+  insertion_mm: 29.680000000000007
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc116c-1-through-tube-c-3
+  type: socket
+  a:
+    part: tc116c-1
+    port: through
+  b:
+    part: tube-c-3
+    at_mm: 483.12
+  insertion_mm: 0
+  locked: false
+  metadata:
+    snapshot_reference_coordinates:
+      slide_mm: 70
+      angle_deg: 0
+- id: tc116c-4-through-tube-c-4
+  type: socket
+  a:
+    part: tc116c-4
+    port: through
+  b:
+    part: tube-c-4
+    at_mm: 460
+  insertion_mm: 0
+  locked: false
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc116c-4-y-tube-c-7
+  type: socket
+  a:
+    part: tc116c-4
+    port: y
+  b:
+    part: tube-c-7
+    end: start
+  insertion_mm: 30
+  locked: false
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc116c-1-x-tube-c-8
+  type: socket
+  a:
+    part: tc116c-1
+    port: x
+  b:
+    part: tube-c-8
+    end: end
+  insertion_mm: 30
+  locked: true
+anchors: []
+loads: []

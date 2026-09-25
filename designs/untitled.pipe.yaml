@@ -1,0 +1,114 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Untitled creation
+parts:
+- id: tc104c-1
+  catalog: tubeclamp.TC104C
+  parameters: {}
+  pose:
+    position_mm:
+    - 160
+    - 1200
+    - 90
+    rotation_deg:
+    - 90
+    - 0
+    - -90
+- id: tc104c-2
+  catalog: tubeclamp.TC104C
+  parameters: {}
+  pose:
+    position_mm:
+    - 160
+    - 110
+    - 90
+    rotation_deg:
+    - 90
+    - 0
+    - 90
+- id: tube-c-1
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1024
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - 160
+    - 655
+    - 90
+    rotation_deg:
+    - -90
+    - 0
+    - 0
+- id: tube-c-2
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - 690.25
+    - 110
+    - 90
+    rotation_deg:
+    - 180
+    - -90
+    - 0
+- id: tube-c-3
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+    wall_mm: 3.2
+  pose:
+    position_mm:
+    - -370.25
+    - 1200
+    - 90
+    rotation_deg:
+    - 0
+    - -90
+    - 0
+joints:
+- id: tc104c-2-branch-tube-c-1
+  type: socket
+  a:
+    part: tc104c-2
+    port: branch
+  b:
+    part: tube-c-1
+    end: start
+  insertion_mm: 29.4
+  locked: true
+- id: tc104c-1-branch-tube-c-1
+  type: socket
+  a:
+    part: tc104c-1
+    port: branch
+  b:
+    part: tube-c-1
+    end: end
+  insertion_mm: 29.4
+  locked: true
+- id: tc104c-2-run_end-tube-c-2
+  type: socket
+  a:
+    part: tc104c-2
+    port: run_end
+  b:
+    part: tube-c-2
+    end: start
+  insertion_mm: 500
+  locked: true
+- id: tc104c-1-run_end-tube-c-3
+  type: socket
+  a:
+    part: tc104c-1
+    port: run_end
+  b:
+    part: tube-c-3
+    end: start
+  insertion_mm: 500
+  locked: true
+anchors: []
+loads: []
+results: {}

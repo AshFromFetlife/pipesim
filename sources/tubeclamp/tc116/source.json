@@ -1,0 +1,64 @@
+{
+  "title": "116 - Corner Middle Elbow (Side Outlet Tee)",
+  "url": "https://www.tubeclamp.com.au/products/tc116",
+  "retrieved": "2026-09-07T17:25:14.929729+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC116Hero.jpg?v=1750743058",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC116TechnicalDiagram-2025.jpg?v=1750743058",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC116.gif?v=1750743058",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC116ZD_aab25119-ee85-47b5-8f76-45b8a965a152.jpg?v=1750743058",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC116Side.jpg?v=1750743058",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC116Top.jpg?v=1750743058"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC116A",
+      "weight": 360,
+      "price": 1169
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC116B",
+      "weight": 540,
+      "price": 1266
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC116C",
+      "weight": 840,
+      "price": 1822
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC116D",
+      "weight": 1080,
+      "price": 2065
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC116E",
+      "weight": 1620,
+      "price": 3536
+    },
+    {
+      "title": "T21 - 21mm OD Pipe",
+      "sku": "TC116T",
+      "weight": 240,
+      "price": 1132
+    },
+    {
+      "title": "Clamp On - 48mm OD Pipe",
+      "sku": "TC116ZD",
+      "weight": 1370,
+      "price": 4231
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC116TechnicalDiagram-2025.jpg?v=1750743058",
+      "sha256": "0bafabe5c98a2d316e0d5bb814570ef229ffc99bcf65417e7007a3266288195d"
+    }
+  ]
+}

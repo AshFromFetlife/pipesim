@@ -1,0 +1,48 @@
+{
+  "title": "179 - Locking Ring",
+  "url": "https://www.tubeclamp.com.au/products/tc179",
+  "retrieved": "2026-09-07T11:44:45.192858+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179Hero.jpg?v=1696814580",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179TechnicalDiagram-2025.jpg?v=1746750882",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179_55328901-d1c2-4323-8406-6c88dfb06949.gif?v=1746750882",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179Top.jpg?v=1746750882",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179Front.jpg?v=1746750882",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179InUse.jpg?v=1746750882",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179Side.jpg?v=1746750882",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179withtube-web.jpg?v=1746750882"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC179A",
+      "weight": 120,
+      "price": 632
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC179B",
+      "weight": 180,
+      "price": 809
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC179C",
+      "weight": 240,
+      "price": 895
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC179D",
+      "weight": 300,
+      "price": 1059
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC179TechnicalDiagram-2025.jpg?v=1746750882",
+      "sha256": "6e9a82965155c173392482211324ec8fec499d92b38cd265f2e7cdb907f2363b"
+    }
+  ]
+}

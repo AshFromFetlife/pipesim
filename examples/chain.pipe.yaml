@@ -1,0 +1,32 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Chain by length
+description: Select the chain to change its length. Move whole chain holds its shape for layout; Pose links shapes
+  individual links without expanding the tree. The first link is ceiling-mounted; release that anchor to move the
+  whole chain. Simulation releases all of the spherical link joints.
+parts: []
+joints: []
+objects:
+- id: chain
+  template: chain
+  parameters:
+    length_mm: 1000
+    link_catalog: generic.chain-link
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 1300
+    rotation_deg:
+    - 0
+    - 30
+    - 0
+anchors:
+- part: chain/link-1
+  surface: ceiling
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - -9.81

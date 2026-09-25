@@ -1,0 +1,40 @@
+{
+  "title": "136 - Split Tee",
+  "url": "https://www.tubeclamp.com.au/products/tc136",
+  "retrieved": "2026-09-07T17:43:52.127127+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC136Side.jpg?v=1718061910",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC136TechnicalDiagram-2025.jpg?v=1746744929",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC136Front.jpg?v=1746744929",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC136.gif?v=1746744929",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC136Top.jpg?v=1746744929",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC136withtube-web.jpg?v=1746744929"
+  ],
+  "variants": [
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC136B",
+      "weight": 600,
+      "price": 3914
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC136C",
+      "weight": 840,
+      "price": 4449
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC136D",
+      "weight": 1080,
+      "price": 4772
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC136TechnicalDiagram-2025.jpg?v=1746744929",
+      "sha256": "6c8bbca43c172aeb99fe302ae8affd1dfed1d96ae7ae8267634100b83e946915"
+    }
+  ]
+}

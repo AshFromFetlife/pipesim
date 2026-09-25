@@ -1,0 +1,41 @@
+{
+  "title": "137 - Split (Clamp-On) Crossover",
+  "url": "https://www.tubeclamp.com.au/products/tc137",
+  "retrieved": "2026-09-07T17:43:52.158479+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137Hero.jpg?v=1697589087",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137TechnicalDiagram-2025.jpg?v=1746744967",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137.gif?v=1746744967",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137Front.jpg?v=1746744967",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137Top.jpg?v=1746744967",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137Side.jpg?v=1746744967",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137withtube-web.jpg?v=1746744967"
+  ],
+  "variants": [
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC137B",
+      "weight": 600,
+      "price": 4119
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC137C",
+      "weight": 840,
+      "price": 4634
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC137D",
+      "weight": 1080,
+      "price": 5031
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC137TechnicalDiagram-2025.jpg?v=1746744967",
+      "sha256": "80ead0e325b7df42571de1c7137b7ae0698c3ff2e8f445805bcc103f809ced08"
+    }
+  ]
+}

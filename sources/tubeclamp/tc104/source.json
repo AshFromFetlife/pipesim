@@ -1,0 +1,54 @@
+{
+  "title": "104 - Long Tee (Three Socket Tee)",
+  "url": "https://www.tubeclamp.com.au/products/tc104",
+  "retrieved": "2026-09-07T11:43:58.524413+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104Hero.jpg?v=1717367076",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104TechnicalDiagram-2025.jpg?v=1746684574",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104_Interior_Cutaway.gif?v=1771995116",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104Front.jpg?v=1771995099",
+    "https://cdn.shopify.com/s/files/1/1384/6879/products/TC104-2.jpg?v=1771995099",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104Side.jpg?v=1771995099",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104.gif?v=1771995099",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104withtube-web.jpg?v=1771995099"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC104A",
+      "weight": 420,
+      "price": 1472
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC104B",
+      "weight": 660,
+      "price": 1500
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC104C",
+      "weight": 1020,
+      "price": 2279
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC104D",
+      "weight": 1320,
+      "price": 2453
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC104E",
+      "weight": 2040,
+      "price": 5219
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC104TechnicalDiagram-2025.jpg?v=1746684574",
+      "sha256": "3cf370bcdc56271d585fda9300a5e18f0dcd68a4827b84c36c51d3a41405ed9b"
+    }
+  ]
+}

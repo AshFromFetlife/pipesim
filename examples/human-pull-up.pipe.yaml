@@ -1,0 +1,1120 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Human pull-up · held arms, swinging legs
+description: Photo-inspired C42 pull-up cage with overhead ladder rungs. Both hands grip the front bar. Bounded
+  upper-body posture motors hold the bent arms; hips, knees and ankles remain passive. Initially bent legs swing
+  under gravity, without animation tracks. Floor flanges are explicitly anchored.
+parts:
+- id: foot-front-left
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - -500.0
+    - -550.0
+    - 0.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: top-front-left
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - -500.0
+    - -550.0
+    - 2300.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 90.0
+- id: post-front-left
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - -500.0
+    - -550.0
+    - 1146.6
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 2241.2
+- id: foot-front-right
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - 500.0
+    - -550.0
+    - 0.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: top-front-right
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 500.0
+    - -550.0
+    - 2300.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 180.0
+- id: post-front-right
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 500.0
+    - -550.0
+    - 1146.6
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 2241.2
+- id: foot-back-left
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - -500.0
+    - 550.0
+    - 0.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: top-back-left
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - -500.0
+    - 550.0
+    - 2300.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 0.0
+- id: post-back-left
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - -500.0
+    - 550.0
+    - 1146.6
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 2241.2
+- id: foot-back-right
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - 500.0
+    - 550.0
+    - 0.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: top-back-right
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 500.0
+    - 550.0
+    - 2300.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - -90.0
+- id: post-back-right
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 500.0
+    - 550.0
+    - 1146.6
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 2241.2
+- id: top-bar-front
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - -550.0
+    - 2300.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 934.4
+- id: top-bar-back
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - 550.0
+    - 2300.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 934.4
+- id: top-bar-left
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - -500.0
+    - 0.0
+    - 2300.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 1034.4
+- id: top-bar-right
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 500.0
+    - 0.0
+    - 2300.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 1034.4
+- id: lower-front-left
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - -500.0
+    - -550.0
+    - 200.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: lower-front-right
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - 500.0
+    - -550.0
+    - 200.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 180.0
+- id: lower-back-left
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - -500.0
+    - 550.0
+    - 200.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 0.0
+- id: lower-back-right
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - 500.0
+    - 550.0
+    - 200.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 180.0
+- id: lower-bar-front
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - -550.0
+    - 200.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 933.6
+- id: lower-bar-back
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - 550.0
+    - 200.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 933.6
+- id: lower-bar-left
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - -500.0
+    - 0.0
+    - 200.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 1033.6
+- id: lower-bar-right
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 500.0
+    - 0.0
+    - 200.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 1033.6
+- id: middle-front-left
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - -500.0
+    - -550.0
+    - 1250.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: middle-front-right
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - 500.0
+    - -550.0
+    - 1250.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 180.0
+- id: middle-back-left
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - -500.0
+    - 550.0
+    - 1250.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 0.0
+- id: middle-back-right
+  catalog: tubeclamp.TC116C
+  pose:
+    position_mm:
+    - 500.0
+    - 550.0
+    - 1250.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 180.0
+- id: middle-bar-back
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - 550.0
+    - 1250.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 933.6
+- id: middle-bar-left
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - -500.0
+    - 0.0
+    - 1250.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 1033.6
+- id: middle-bar-right
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 500.0
+    - 0.0
+    - 1250.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+  parameters:
+    length_mm: 1033.6
+- id: rung-1-left
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - -500.0
+    - -250.0
+    - 2300.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+- id: rung-1-right
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 500.0
+    - -250.0
+    - 2300.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 180.0
+- id: rung-1
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - -250.0
+    - 2300.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 929.0
+- id: rung-2-left
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - -500.0
+    - 100.0
+    - 2300.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+- id: rung-2-right
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 500.0
+    - 100.0
+    - 2300.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 180.0
+- id: rung-2
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - 100.0
+    - 2300.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 929.0
+- id: rung-3-left
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - -500.0
+    - 400.0
+    - 2300.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+- id: rung-3-right
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 500.0
+    - 400.0
+    - 2300.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 180.0
+- id: rung-3
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 0.0
+    - 400.0
+    - 2300.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+  parameters:
+    length_mm: 929.0
+joints:
+- id: foot-front-left-socket
+  type: socket
+  a:
+    part: foot-front-left
+    port: socket
+  b:
+    part: post-front-left
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: top-front-left-z
+  type: socket
+  a:
+    part: top-front-left
+    port: z
+  b:
+    part: post-front-left
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: foot-front-right-socket
+  type: socket
+  a:
+    part: foot-front-right
+    port: socket
+  b:
+    part: post-front-right
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: top-front-right-z
+  type: socket
+  a:
+    part: top-front-right
+    port: z
+  b:
+    part: post-front-right
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: foot-back-left-socket
+  type: socket
+  a:
+    part: foot-back-left
+    port: socket
+  b:
+    part: post-back-left
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: top-back-left-z
+  type: socket
+  a:
+    part: top-back-left
+    port: z
+  b:
+    part: post-back-left
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: foot-back-right-socket
+  type: socket
+  a:
+    part: foot-back-right
+    port: socket
+  b:
+    part: post-back-right
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: top-back-right-z
+  type: socket
+  a:
+    part: top-back-right
+    port: z
+  b:
+    part: post-back-right
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-front-left-y
+  type: socket
+  a:
+    part: top-front-left
+    port: y
+  b:
+    part: top-bar-front
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-front-right-x
+  type: socket
+  a:
+    part: top-front-right
+    port: x
+  b:
+    part: top-bar-front
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-back-left-x
+  type: socket
+  a:
+    part: top-back-left
+    port: x
+  b:
+    part: top-bar-back
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-back-right-y
+  type: socket
+  a:
+    part: top-back-right
+    port: y
+  b:
+    part: top-bar-back
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-front-left-x
+  type: socket
+  a:
+    part: top-front-left
+    port: x
+  b:
+    part: top-bar-left
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-back-left-y
+  type: socket
+  a:
+    part: top-back-left
+    port: y
+  b:
+    part: top-bar-left
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-front-right-y
+  type: socket
+  a:
+    part: top-front-right
+    port: y
+  b:
+    part: top-bar-right
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-back-right-x
+  type: socket
+  a:
+    part: top-back-right
+    port: x
+  b:
+    part: top-bar-right
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-front-left-through
+  type: socket
+  a:
+    part: lower-front-left
+    port: through
+  b:
+    part: post-front-left
+    at_mm: 174.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: lower-front-right-through
+  type: socket
+  a:
+    part: lower-front-right
+    port: through
+  b:
+    part: post-front-right
+    at_mm: 174.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: lower-back-left-through
+  type: socket
+  a:
+    part: lower-back-left
+    port: through
+  b:
+    part: post-back-left
+    at_mm: 174.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: lower-back-right-through
+  type: socket
+  a:
+    part: lower-back-right
+    port: through
+  b:
+    part: post-back-right
+    at_mm: 174.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: lower-front-left-x
+  type: socket
+  a:
+    part: lower-front-left
+    port: x
+  b:
+    part: lower-bar-front
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-front-right-x
+  type: socket
+  a:
+    part: lower-front-right
+    port: x
+  b:
+    part: lower-bar-front
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-back-left-x
+  type: socket
+  a:
+    part: lower-back-left
+    port: x
+  b:
+    part: lower-bar-back
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-back-right-x
+  type: socket
+  a:
+    part: lower-back-right
+    port: x
+  b:
+    part: lower-bar-back
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-front-left-y
+  type: socket
+  a:
+    part: lower-front-left
+    port: y
+  b:
+    part: lower-bar-left
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-back-left-y
+  type: socket
+  a:
+    part: lower-back-left
+    port: y
+  b:
+    part: lower-bar-left
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-front-right-y
+  type: socket
+  a:
+    part: lower-front-right
+    port: y
+  b:
+    part: lower-bar-right
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: lower-back-right-y
+  type: socket
+  a:
+    part: lower-back-right
+    port: y
+  b:
+    part: lower-bar-right
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: middle-front-left-through
+  type: socket
+  a:
+    part: middle-front-left
+    port: through
+  b:
+    part: post-front-left
+    at_mm: 1224.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: middle-front-right-through
+  type: socket
+  a:
+    part: middle-front-right
+    port: through
+  b:
+    part: post-front-right
+    at_mm: 1224.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: middle-back-left-through
+  type: socket
+  a:
+    part: middle-back-left
+    port: through
+  b:
+    part: post-back-left
+    at_mm: 1224.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: middle-back-right-through
+  type: socket
+  a:
+    part: middle-back-right
+    port: through
+  b:
+    part: post-back-right
+    at_mm: 1224.0
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: middle-back-left-x
+  type: socket
+  a:
+    part: middle-back-left
+    port: x
+  b:
+    part: middle-bar-back
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: middle-back-right-x
+  type: socket
+  a:
+    part: middle-back-right
+    port: x
+  b:
+    part: middle-bar-back
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: middle-front-left-y
+  type: socket
+  a:
+    part: middle-front-left
+    port: y
+  b:
+    part: middle-bar-left
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: middle-back-left-y
+  type: socket
+  a:
+    part: middle-back-left
+    port: y
+  b:
+    part: middle-bar-left
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: middle-front-right-y
+  type: socket
+  a:
+    part: middle-front-right
+    port: y
+  b:
+    part: middle-bar-right
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: middle-back-right-y
+  type: socket
+  a:
+    part: middle-back-right
+    port: y
+  b:
+    part: middle-bar-right
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: rung-1-left-through
+  type: socket
+  a:
+    part: rung-1-left
+    port: through
+  b:
+    part: top-bar-left
+    at_mm: 267.2
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: rung-1-right-through
+  type: socket
+  a:
+    part: rung-1-right
+    port: through
+  b:
+    part: top-bar-right
+    at_mm: 267.2
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: rung-1-left-branch
+  type: socket
+  a:
+    part: rung-1-left
+    port: branch
+  b:
+    part: rung-1
+    end: start
+  insertion_mm: 24
+  locked: true
+  torque_nm: 40
+- id: rung-1-right-branch
+  type: socket
+  a:
+    part: rung-1-right
+    port: branch
+  b:
+    part: rung-1
+    end: end
+  insertion_mm: 24
+  locked: true
+  torque_nm: 40
+- id: rung-2-left-through
+  type: socket
+  a:
+    part: rung-2-left
+    port: through
+  b:
+    part: top-bar-left
+    at_mm: 617.2
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: rung-2-right-through
+  type: socket
+  a:
+    part: rung-2-right
+    port: through
+  b:
+    part: top-bar-right
+    at_mm: 617.2
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: rung-2-left-branch
+  type: socket
+  a:
+    part: rung-2-left
+    port: branch
+  b:
+    part: rung-2
+    end: start
+  insertion_mm: 24
+  locked: true
+  torque_nm: 40
+- id: rung-2-right-branch
+  type: socket
+  a:
+    part: rung-2-right
+    port: branch
+  b:
+    part: rung-2
+    end: end
+  insertion_mm: 24
+  locked: true
+  torque_nm: 40
+- id: rung-3-left-through
+  type: socket
+  a:
+    part: rung-3-left
+    port: through
+  b:
+    part: top-bar-left
+    at_mm: 917.2
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: rung-3-right-through
+  type: socket
+  a:
+    part: rung-3-right
+    port: through
+  b:
+    part: top-bar-right
+    at_mm: 917.2
+  insertion_mm: 0
+  locked: true
+  torque_nm: 40
+- id: rung-3-left-branch
+  type: socket
+  a:
+    part: rung-3-left
+    port: branch
+  b:
+    part: rung-3
+    end: start
+  insertion_mm: 24
+  locked: true
+  torque_nm: 40
+- id: rung-3-right-branch
+  type: socket
+  a:
+    part: rung-3-right
+    port: branch
+  b:
+    part: rung-3
+    end: end
+  insertion_mm: 24
+  locked: true
+  torque_nm: 40
+- id: left-hand-grip
+  type: revolute
+  a:
+    part: top-bar-front
+    at_mm: 698.2
+  b:
+    part: person/left_hand
+    port: grip
+  damping: 0.02
+  metadata:
+    human_grip: true
+    assumption: No-slip grasp with free rotation about the bar; no grip fatigue or release model
+- id: right-hand-grip
+  type: revolute
+  a:
+    part: top-bar-front
+    at_mm: 236.2
+  b:
+    part: person/right_hand
+    port: grip
+  damping: 0.02
+  metadata:
+    human_grip: true
+    assumption: No-slip grasp with free rotation about the bar; no grip fatigue or release model
+anchors:
+- part: foot-front-left
+  surface: floor
+  label: Bolted flange; anchor capacity must be selected for the actual floor
+- part: foot-front-right
+  surface: floor
+  label: Bolted flange; anchor capacity must be selected for the actual floor
+- part: foot-back-left
+  surface: floor
+  label: Bolted flange; anchor capacity must be selected for the actual floor
+- part: foot-back-right
+  surface: floor
+  label: Bolted flange; anchor capacity must be selected for the actual floor
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - -9.81
+metadata:
+  reference_url: https://in.pinterest.com/pin/808466570608639102/
+  dimensions_status: Example dimensions chosen for this mannequin; not measured from the photograph
+  grip_assumption: Hands cannot slide along or release the bar; each may rotate about the bar axis
+  posture_assumption: Finite joint-torque controllers approximate isometric upper-body effort; strengths are adjustable
+    assumptions
+  damping_assumption: Passive viscous resistance of 1 N m s/rad per anatomical axis; adjustable, not measured physiology
+  simulation_duration_s: 4
+  camera:
+    eye_mm:
+    - 3000
+    - -4300
+    - 2750
+    target_mm:
+    - 0
+    - 0
+    - 1250
+objects:
+- id: person
+  template: human
+  parameters:
+    stature_mm: 1750
+    mass_kg: 75
+    pose: pull-up
+    grip_diameter_mm: 42.4
+    hold_joints:
+    - upper_body
+    strength_scale: 6
+    joint_damping_nms_rad: 1
+    joint_angles_deg:
+      right_hip:
+      - 6
+      - 0
+      - 0
+  pose:
+    position_mm:
+    - 0.0
+    - -720.29194236
+    - 654.85665899
+    rotation_deg:
+    - 11.3237882
+    - 0.0
+    - 180.0

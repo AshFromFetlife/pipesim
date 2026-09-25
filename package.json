@@ -1,0 +1,17 @@
+{
+  "name": "pipesim-editor-assets",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vendored Three.js assets for the offline PipeSim desktop browser editor",
+  "type": "module",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "check": "node --check pipesim/web/app.js && node --test tests/editor-snapping.test.mjs tests/editor-interactions.test.mjs"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

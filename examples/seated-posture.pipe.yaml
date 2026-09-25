@@ -1,0 +1,60 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Seated human · bounded posture control
+parts:
+- id: seat
+  catalog: generic.panel
+  pose:
+    position_mm:
+    - 0
+    - -100
+    - 425
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    width_mm: 650
+    depth_mm: 550
+    thickness_mm: 50
+joints: []
+anchors:
+- part: seat
+  surface: fixture
+  label: Bench supported by a fixed test fixture
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - -9.81
+objects:
+- id: person
+  template: human
+  parameters:
+    stature_mm: 1750
+    mass_kg: 75
+    pose: seated
+    hold_pose: true
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - -393.75
+tests:
+- id: seat-width
+  type: seat
+  human: person
+  seat: seat
+  expect: true
+- id: reach-far
+  type: reach
+  human: person
+  hand: right
+  target_mm:
+  - 200
+  - 2500
+  - 1200
+  expect: false
+description: Finite joint torques hold a seated reference posture. This is an engineering posture controller, without
+  active balance or muscle physiology.

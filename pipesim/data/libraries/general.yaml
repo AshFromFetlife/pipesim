@@ -1,0 +1,520 @@
+format: pipesim-library/1
+name: Materials, framing, motion and user-defined primitives
+materials:
+  steel-assumed:
+    density_kg_m3: 7850
+    youngs_modulus_pa: 200000000000.0
+    poisson_ratio: 0.3
+    yield_strength_pa: 250000000.0
+    status: assumed-grade
+    notes: Isotropic elastic model; replace with purchased tube grade and certificate.
+  cast-iron:
+    density_kg_m3: 7200
+    youngs_modulus_pa: 170000000000.0
+    poisson_ratio: 0.27
+    status: approximate-elastic; fracture strength unknown
+  aluminium-6063-assumed:
+    density_kg_m3: 2700
+    youngs_modulus_pa: 69000000000.0
+    poisson_ratio: 0.33
+    yield_strength_pa: 160000000.0
+    status: assumed-temper
+    notes: 6063 reported by MiniTec; temper and yield assumption need verification.
+  hardwood-assumed:
+    density_kg_m3: 650
+    youngs_modulus_pa: 11000000000.0
+    poisson_ratio: 0.3
+    yield_strength_pa: 40000000.0
+    status: assumed-longitudinal
+    notes: Beam-only longitudinal approximation; grain, knots, moisture and joint splitting are unmodelled.
+  plywood-assumed:
+    density_kg_m3: 650
+    youngs_modulus_pa: 7000000000.0
+    poisson_ratio: 0.3
+    status: rigid-panel-only
+  polymer-assumed:
+    density_kg_m3: 1240
+    youngs_modulus_pa: 2000000000.0
+    poisson_ratio: 0.35
+    status: unrated; print anisotropy unmodelled
+  rubber:
+    density_kg_m3: 1100
+    status: rigid contact approximation
+  human-tissue:
+    density_kg_m3: 1000
+    status: rigid segment approximation
+parts:
+  porta.DOW-19:
+    name: "Porta Eucalyptus Grandis dowel \xB7 19 mm"
+    kind: member
+    material: hardwood-assumed
+    color: '#c9a06e'
+    parameters:
+      length_mm: 1000
+    geometry:
+    - type: cylinder
+      diameter_mm: 19
+      length_mm: $length_mm
+    section:
+      type: solid_round
+      diameter_mm: 19
+    stock_lengths_mm:
+    - 1200
+    - 1800
+    - 2400
+    - 3000
+    source:
+      supplier: Porta
+      sku: DOW-19
+      url: https://www.porta.com.au/products/mouldings/dowels/dowel-19
+      retrieved: '2026-09-07'
+      geometry_status: supplier dimensions; timber stiffness and strength assumed
+      assumptions:
+      - 19 mm is not compatible with the 18 mm printable reference
+      - Replace material data with species, moisture and grade measurements
+  porta.DAR-3018:
+    name: "Porta Eucalyptus Grandis DAR \xB7 30 \xD7 18 mm"
+    kind: member
+    material: hardwood-assumed
+    color: '#c9a06e'
+    parameters:
+      length_mm: 1000
+    geometry:
+    - type: box
+      size_mm:
+      - 30
+      - 18
+      - $length_mm
+    section:
+      type: rectangular
+      width_mm: 30
+      depth_mm: 18
+    stock_lengths_mm:
+    - 1200
+    - 1800
+    - 2400
+    - 2700
+    - 3000
+    source:
+      supplier: Porta
+      sku: DAR-3018
+      url: https://www.porta.com.au/products/mouldings/dressed-boards/dar-3018
+      retrieved: '2026-09-07'
+      geometry_status: supplier dimensions; longitudinal beam material approximation
+  minitec.21.1018:
+    name: "MiniTec Power-Lock 45 \xB7 21.1018/0"
+    kind: connector
+    material: steel-assumed
+    mass_kg: 0.029
+    color: '#92a6b1'
+    geometry:
+    - type: box
+      size_mm:
+      - 18
+      - 12
+      - 5
+    - type: cylinder
+      diameter_mm: 8
+      length_mm: 25
+      position_mm:
+      - 0
+      - 0
+      - -15
+    ports:
+      end_screw:
+        type: mount
+        position_mm:
+        - 0
+        - 0
+        - -2.5
+        axis:
+        - 0
+        - 0
+        - -1
+        assembly: bolt
+        thread: M8
+      slot:
+        type: mount
+        position_mm:
+        - 0
+        - 0
+        - 2.5
+        axis:
+        - 0
+        - 0
+        - 1
+        assembly: slide
+        profile: MiniTec-45
+    source:
+      supplier: MiniTec Framing
+      sku: 21.1018/0
+      url: https://www.minitecframing.com/PDF/Catalog_Sections/MiniTec_Fasteners.pdf
+      assembly_url: https://www.minitecframing.com/Products/Profile_Fasteners/Profile_Fasteners_PDF/MiniTec_Fastener_Technical_Data.pdf
+      retrieved: '2026-09-07'
+      geometry_status: approximate fastener envelope; not machining geometry
+      assumptions:
+      - "M8 \xD7 25 screw and 0.029 kg are catalogue data; connecting-element envelope is estimated"
+      - Requires M8 tapping of profile end; slide second profile over gripping element before locking at 12 Nm
+      - Use supplier assembly drawing for actual slot engagement and tool access
+    strength:
+      rating_status: supplier lists 6000 N static connection load; application and load direction must be verified
+      supplier_static_load_n: 6000
+      required_torque_nm: 12
+  minitec.20.1006:
+    name: "MiniTec 45 \xD7 45 \xB7 20.1006"
+    kind: member
+    material: aluminium-6063-assumed
+    color: '#a7b7c2'
+    parameters:
+      length_mm: 1000
+    geometry:
+    - type: extrusion
+      size_mm:
+      - 45
+      - 45
+      - $length_mm
+    section:
+      type: explicit
+      area_mm2: 811.8518518518518
+      iy_mm4: 159340
+      ix_mm4: 159340
+      j_mm4: 134160
+      cy_mm: 22.5
+      cx_mm: 22.5
+      width_mm: 45
+      depth_mm: 45
+    mass_per_m_kg: 2.192
+    stock_lengths_mm:
+    - 6000
+    source:
+      supplier: MiniTec Framing
+      sku: '20.1006'
+      url: https://www.minitecframing.com/Products/Aluminum_Profiles/Aluminum_Profile_Catalog_Pages/20.1006_Aluminum_Profile_45x45.html
+      torsion_source_url: https://shop.minitec.co.uk/product/45-x-45-profile/
+      geometry_status: simplified T-slot envelope
+      dimensions: "45 \xD7 45 mm; Ix=Iy=15.934 cm4; 2.192 kg/m from US catalogue"
+      assumptions:
+      - Mass differs in UK catalogue (2.205 kg/m); US value used
+      - Visual cross-section approximate; FEA uses published section properties
+  generic.dowel-18:
+    name: "Hardwood dowel \xB7 18 mm"
+    kind: member
+    material: hardwood-assumed
+    color: '#c9a06e'
+    parameters:
+      length_mm: 1000
+    geometry:
+    - type: cylinder
+      diameter_mm: 18
+      length_mm: $length_mm
+    section:
+      type: solid_round
+      diameter_mm: 18
+    stock_lengths_mm:
+    - 1200
+    - 2400
+    source:
+      geometry_status: generic-parametric
+      status: Select actual timber species and supplier before fabrication
+  generic.dowel-elbow-18:
+    name: "18 mm dowel elbow \xB7 printable concept"
+    kind: connector
+    material: polymer-assumed
+    color: '#ef9b50'
+    geometry:
+    - type: tube
+      diameter_mm: 28
+      wall_mm: 4.8
+      length_mm: 40
+      position_mm:
+      - 20
+      - 0
+      - 0
+      axis:
+      - 1
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 28
+      wall_mm: 4.8
+      length_mm: 40
+      position_mm:
+      - 0
+      - 0
+      - 20
+      axis:
+      - 0
+      - 0
+      - 1
+    ports:
+      x:
+        type: socket
+        position_mm:
+        - 40
+        - 0
+        - 0
+        axis:
+        - 1
+        - 0
+        - 0
+        diameter_mm: 18
+        profile: round
+        through: false
+        engagement_mm: 24
+        min_engagement_mm: 15.6
+        assembly: glue
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      z:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 40
+        axis:
+        - 0
+        - 0
+        - 1
+        diameter_mm: 18
+        profile: round
+        through: false
+        engagement_mm: 24
+        min_engagement_mm: 15.6
+        assembly: glue
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+    source:
+      reference_url: https://www.printables.com/model/1320655-connectors-for-18mm-tubedowel
+      geometry_status: original illustrative design, not a copy of the linked model
+      status: Linked Printables files could not be retrieved; import the original mesh with its licence to use it
+    strength:
+      rating_status: unknown
+  generic.panel:
+    name: Timber panel / plank / sleeper
+    kind: panel
+    material: plywood-assumed
+    color: '#c29a66'
+    parameters:
+      width_mm: 1200
+      depth_mm: 600
+      thickness_mm: 30
+    geometry:
+    - type: box
+      size_mm:
+      - $width_mm
+      - $depth_mm
+      - $thickness_mm
+    source:
+      geometry_status: user-dimensioned
+  generic.box:
+    name: "Abstract load \xB7 box"
+    kind: load
+    color: '#de795c'
+    parameters:
+      width_mm: 200
+      depth_mm: 200
+      height_mm: 200
+      mass_kg: 20
+    geometry:
+    - type: box
+      size_mm:
+      - $width_mm
+      - $depth_mm
+      - $height_mm
+    mass_kg: $mass_kg
+    source:
+      geometry_status: user-defined rigid load
+  generic.wheel:
+    name: "Wheel \xB7 configurable axle and flange"
+    kind: wheel
+    material: rubber
+    color: '#333e48'
+    parameters:
+      diameter_mm: 100
+      width_mm: 30
+      mass_kg: 1
+    geometry:
+    - type: cylinder
+      diameter_mm: $diameter_mm
+      length_mm: $width_mm
+      axis:
+      - 0
+      - 1
+      - 0
+    mass_kg: $mass_kg
+    friction: 0.85
+    ports:
+      axle:
+        type: pin
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        assembly: bolt
+      mount:
+        type: mount
+        position_mm:
+        - 0
+        - 0
+        - 65
+        axis:
+        - 0
+        - 0
+        - 1
+        assembly: bolt
+    source:
+      geometry_status: generic envelope; supply actual wheel mount dimensions
+  generic.chain-link:
+    name: "Chain link \xB7 configurable ring proxy"
+    kind: chain
+    material: steel-assumed
+    color: '#87949e'
+    parameters:
+      diameter_mm: 30
+      wire_mm: 5
+    geometry:
+    - type: tube
+      diameter_mm: $diameter_mm
+      wall_mm: $wire_mm
+      length_mm: $wire_mm
+      axis:
+      - 0
+      - 1
+      - 0
+    ports:
+      a:
+        type: eye
+        position_mm:
+        - 0
+        - 0
+        - -10
+        axis:
+        - 0
+        - 1
+        - 0
+        assembly: hook
+      b:
+        type: eye
+        position_mm:
+        - 0
+        - 0
+        - 10
+        axis:
+        - 0
+        - 1
+        - 0
+        assembly: hook
+    source:
+      geometry_status: generic ring contact proxy; no load rating
+  generic.d-link:
+    name: "D shackle \xB7 generic"
+    kind: connector
+    material: steel-assumed
+    geometry:
+    - type: tube
+      diameter_mm: 40
+      wall_mm: 8.0
+      length_mm: 8
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    ports:
+      eye:
+        type: eye
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        assembly: hook
+    source:
+      geometry_status: generic ring proxy; no load rating
+  adafruit.GT2-20T-5:
+    name: "GT2 pulley \xB7 20 teeth \xB7 5 mm bore"
+    kind: rigid
+    material: aluminium-6063-assumed
+    mass_kg: 0.006
+    color: '#b8c6ce'
+    geometry:
+    - type: tube
+      diameter_mm: 16
+      wall_mm: 5.5
+      length_mm: 16
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - 1
+    ports:
+      shaft:
+        type: socket
+        diameter_mm: 5
+        profile: round
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - 1
+        through: true
+        engagement_mm: 16
+        min_engagement_mm: 10
+        assembly: slide
+      belt:
+        type: belt
+        pitch_mm: 2
+        teeth: 20
+        width_mm: 6
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - 1
+    source:
+      supplier: Adafruit
+      sku: '1251'
+      url: https://www.adafruit.com/product/1251
+      status: archived / no longer stocked
+      geometry_status: dimension-derived envelope; tooth profile omitted
+  adafruit.GT2-belt:
+    name: "GT2 timing belt \xB7 2 mm pitch \xB7 6 mm wide"
+    kind: belt
+    mass_kg: 0.03
+    color: '#293b42'
+    parameters:
+      length_mm: 1164
+    geometry:
+    - type: box
+      size_mm:
+      - $length_mm
+      - 6
+      - 1.5
+    source:
+      supplier: Adafruit
+      sku: '1184'
+      url: https://www.adafruit.com/product/1184
+      geometry_status: straight stock representation; routed belt described by drive.route_mm
+      assumptions:
+      - Mass and thickness estimated; tooth strength unknown

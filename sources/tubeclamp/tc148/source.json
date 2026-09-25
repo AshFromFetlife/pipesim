@@ -1,0 +1,54 @@
+{
+  "title": "148 - Swivel Short Tee (60 - 180 Degrees)",
+  "url": "https://www.tubeclamp.com.au/products/tc148",
+  "retrieved": "2026-09-08T09:17:51.113804+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148Hero.jpg?v=1750815005",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148TechnicalDiagram-2025.jpg?v=1750815005",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148gif.gif?v=1750815005",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148InUse.jpg?v=1750815005",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148Pair.jpg?v=1746745653",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148withtube2-web.jpg?v=1750815005",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148Front.jpg?v=1746745653",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148Side.jpg?v=1746745653"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC148A",
+      "weight": 300,
+      "price": 1205
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC148B",
+      "weight": 420,
+      "price": 1237
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC148C",
+      "weight": 600,
+      "price": 1630
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC148D",
+      "weight": 780,
+      "price": 1780
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC148E",
+      "weight": 1110,
+      "price": 2622
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC148TechnicalDiagram-2025.jpg?v=1750815005",
+      "sha256": "6dd89f26c80f90df23b5e842b2df60f2bb50dc789e5de4899c96f16cf37d4fb1"
+    }
+  ]
+}

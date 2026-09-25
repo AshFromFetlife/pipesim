@@ -1,0 +1,139 @@
+/* Follow the browser/OS preference, including native inputs and scrollbars.
+   The viewport reads these same tokens on startup and preference changes. */
+:root {
+  color-scheme: light dark;
+  --viewport-background: #eef3f5;
+  --viewport-floor: #f0f4f5;
+  --viewport-grid-major: #c6d3d8;
+  --viewport-grid-minor: #dce5e9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e0e9ed;
+    --muted: #a0b2bc;
+    --line: #34434c;
+    --teal: #8ed4ba;
+    --teal-light: #263f38;
+    --orange: #e3ad64;
+    --panel: #1b252e;
+    --surface: #202d36;
+    --raised: #2a3a44;
+    --field: #15212a;
+    --secondary: #b6c7d0;
+    --warning: #e8c483;
+    --warning-surface: #393122;
+    --danger: #efac9f;
+    --danger-surface: #442d2b;
+    --viewport-background: #151e26;
+    --viewport-floor: #111b23;
+    --viewport-grid-major: #49616c;
+    --viewport-grid-minor: #30414d;
+    color: var(--ink);
+    background: #121c23;
+  }
+
+  .app-header, .inspector-pane, .status-bar, dialog, .button {
+    background: var(--panel);
+    color: var(--ink);
+  }
+  .workspace-bar, .library-pane, .library-bottom, .view-topline,
+  .view-bottom, .timeline {
+    background: var(--surface);
+  }
+  .view-pane { background: var(--viewport-background); }
+
+  .brand-sub, .file-symbol, .local-badge, .button.ghost,
+  .workspace-label, .workspace-label span, .mode-tabs button,
+  .workspace-actions, .pane-tabs button, .library-search > span,
+  .library-search kbd, .library-caption, .library-caption button,
+  .part-code, .part-vendor, .part-plus, .library-bottom p,
+  .view-caption, .view-tools button, .floating-tools button,
+  .axis-compass span, .view-bottom, #snap-summary, .time-ticks,
+  .timeline > button:nth-child(2), #capture-frame, .inspector-top,
+  .inspector-icon, .inspect-section h3, .inspect-section p, .inspect-id,
+  .chip.gray, .field label, .single-field label, .property-row,
+  .check-label, .empty-state p, .outline-label, .outline-group > summary,
+  .outline-part, .outline-part span, .status-bar, .unit-badge,
+  .issue p, .metric span, .build-step span, .modal-header button,
+  #modal-content p, #modal-content .option-row small,
+  #canvas-fallback, .empty-library {
+    color: var(--muted);
+  }
+  .library-search input::placeholder { color: var(--muted); }
+  .part-name, .property-row strong, .wide-button { color: var(--secondary); }
+  .mode-tabs button.active, .pane-tabs button.active,
+  .joint-card label, .chip, #time-label, .results-link {
+    color: var(--teal);
+  }
+
+  .pane-tabs span, .part-thumb, .unit-badge { background: var(--raised); }
+  .library-search, .library-search input, .filter-row select,
+  .field input, .single-field input, .single-field select,
+  #modal-content textarea {
+    background: var(--field);
+    color: var(--ink);
+  }
+  .wide-button, .joint-card, .metric, .axis-compass button {
+    background: var(--surface);
+  }
+  .floating-tools { background: #202d36f2; }
+  .divider, .floating-tools div { background: var(--line); }
+
+  .part-card, .library-search kbd, .wide-button, .view-topline,
+  .floating-tools, .view-bottom, .timeline, #capture-frame,
+  .inspect-section, .chip.gray, .field input, .single-field input,
+  .single-field select, .joint-card, .issue, .metric, .build-step,
+  dialog, #modal-content textarea, #modal-content .option-row {
+    border-color: var(--line);
+  }
+  .chip { border-color: #426755; }
+  .part-card { border-top-color: transparent; border-left-color: transparent; border-right-color: transparent; }
+  .button:hover, .part-card:hover, .wide-button:hover,
+  .floating-tools button:hover, #modal-content .option-row:hover {
+    background: var(--raised);
+  }
+  .part-card:hover, .wide-button:hover, #modal-content .option-row:hover {
+    border-color: #54756a;
+  }
+  .view-tools button.active, .view-tools button:hover,
+  .floating-tools button.active, .timeline > button:first-child,
+  .outline-part.active, .inspect-action, .build-step.active {
+    background: var(--teal-light);
+    color: var(--teal);
+  }
+  .inspect-action:hover { background: #315346; }
+  .inspect-action.secondary { background: var(--surface); color: var(--secondary); }
+  .inspect-action.secondary:hover { background: var(--raised); }
+  .build-step.active { border-color: #547c68; }
+  .button.primary { background: #386e64; border-color: #538a7d; color: #f1faf6; }
+  .button.primary:hover { background: #447e72; }
+  .wide-button span:last-child { color: var(--teal); }
+  .field input:focus, .single-field input:focus { border-color: var(--teal); }
+  button:focus-visible, input:focus-visible, select:focus-visible,
+  textarea:focus-visible { outline-color: var(--teal); }
+  input[type="checkbox"], .timeline input { accent-color: var(--teal); }
+
+  .axis-compass button:first-child { color: #9dceb1; border-color: #567564; }
+  .axis-compass button:nth-child(2) { color: #e2afa2; border-color: #886559; }
+  .axis-compass button:nth-child(3) { color: #a2c6e2; border-color: #58758a; }
+  .empty-state .empty-symbol { color: #748e9c; }
+  .selection-label { background: var(--panel); color: var(--teal); border-color: #608c7b; }
+  .placement-hint, .build-note {
+    background: var(--warning-surface);
+    color: var(--warning);
+    border-color: #79653e;
+  }
+  .report-symbol { background: var(--teal-light); color: var(--teal); }
+  .report-symbol.warn { background: var(--warning-surface); color: var(--warning); }
+  .report-symbol.error { background: var(--danger-surface); color: var(--danger); }
+  .issue .issue-code { color: var(--warning); }
+  .issue.error .issue-code { color: var(--danger); }
+  .metric strong { color: var(--teal); }
+  dialog::backdrop { background: #080e14b3; }
+  #toast { background: #2a514d; color: #edf9f3; }
+  #toast.error { background: #683e36; color: #fff1ed; }
+  .part-list, #inspector, #outline-content, #modal-content {
+    scrollbar-color: #4a616d transparent;
+  }
+}

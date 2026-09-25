@@ -1,0 +1,38 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: "Analytical benchmark \xB7 cantilever"
+parts:
+- id: beam
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 500
+    - 0
+    - 1000
+    rotation_deg:
+    - 0
+    - 90
+    - 0
+  parameters:
+    length_mm: 1000
+joints: []
+anchors:
+- part: beam
+  surface: wall
+  position_mm:
+  - 0
+  - 0
+  - 1000
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - 0
+loads:
+- part: beam
+  at_mm: 1000
+  force_n:
+  - 0
+  - 0
+  - -1000

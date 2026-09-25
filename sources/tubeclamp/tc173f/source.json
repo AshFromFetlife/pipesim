@@ -1,0 +1,52 @@
+{
+  "title": "173F - Swivel Female",
+  "url": "https://www.tubeclamp.com.au/products/tc173f",
+  "retrieved": "2026-09-07T11:44:00.358852+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173FHero.jpg?v=1697766888",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173FTechnicalDiagram-2025.jpg?v=1746750426",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173F.gif?v=1746750426",
+    "https://cdn.shopify.com/s/files/1/1384/6879/products/TC173F-1.jpg?v=1746750426",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173FTop.jpg?v=1746750426",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173FSide.jpg?v=1746750426"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC173FA",
+      "weight": 480,
+      "price": 880
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC173FB",
+      "weight": 600,
+      "price": 950
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC173FC",
+      "weight": 720,
+      "price": 1187
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC173FD",
+      "weight": 840,
+      "price": 1419
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC173FE",
+      "weight": 1200,
+      "price": 3194
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC173FTechnicalDiagram-2025.jpg?v=1746750426",
+      "sha256": "648b159a22334df8b62b23c7df79a40f2d07264e5f29531c1c31899519bb3f8b"
+    }
+  ]
+}

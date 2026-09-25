@@ -1,0 +1,24 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: "Human fit lab \xB7 19 rigid segments"
+parts: []
+joints: []
+anchors: []
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - -9.81
+objects:
+- id: person
+  template: human
+  parameters:
+    stature_mm: 1750
+    mass_kg: 75
+    pose: standing
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 0

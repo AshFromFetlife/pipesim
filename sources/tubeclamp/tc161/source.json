@@ -1,0 +1,52 @@
+{
+  "title": "161 - Standard Crossover",
+  "url": "https://www.tubeclamp.com.au/products/tc161",
+  "retrieved": "2026-09-07T17:43:52.127541+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/tc161hero.jpg?v=1750809717",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC161TechnicalDiagram-2025.jpg?v=1750809717",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC161.gif?v=1750809717",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC161Side.jpg?v=1746747040",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC161Front.jpg?v=1746747040",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC161withtube-web.jpg?v=1750809717"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe",
+      "sku": "TC161A",
+      "weight": 300,
+      "price": 937
+    },
+    {
+      "title": "B34 - 34mm OD Pipe",
+      "sku": "TC161B",
+      "weight": 420,
+      "price": 968
+    },
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC161C",
+      "weight": 660,
+      "price": 1398
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC161D",
+      "weight": 840,
+      "price": 1664
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC161E",
+      "weight": 1260,
+      "price": 2790
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC161TechnicalDiagram-2025.jpg?v=1750809717",
+      "sha256": "184e58a6a4253d7deef1d458901bdf5de4ca8a7a63156967822c4eebdf279756"
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "title": "132 - Standard Railing Base Flange (232)",
+  "url": "https://www.tubeclamp.com.au/products/tc132",
+  "retrieved": "2026-09-07T11:43:59.418194+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132Hero.jpg?v=1715123771",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132TechnicalDiagram-2026_revised.jpg?v=1784077282",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132.gif?v=1747884091",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132Front.jpg?v=1747884091",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132Side.jpg?v=1747884091",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132Top.jpg?v=1747884091",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132D2026.jpg?v=1784507663",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC232Hero.jpg?v=1750814718",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC232BlackHero.jpg?v=1732762484"
+  ],
+  "variants": [
+    {
+      "title": "A27 - 27mm OD Pipe / Oval",
+      "sku": "TC132A",
+      "weight": 600,
+      "price": 1719
+    },
+    {
+      "title": "B34 - 34mm OD Pipe / Oval",
+      "sku": "TC132B",
+      "weight": 900,
+      "price": 1964
+    },
+    {
+      "title": "C42 - 42mm OD Pipe / Oval",
+      "sku": "TC132C",
+      "weight": 1320,
+      "price": 2603
+    },
+    {
+      "title": "C42 - 42mm OD Pipe / Rectangular",
+      "sku": "TC232C",
+      "weight": 1320,
+      "price": 2603
+    },
+    {
+      "title": "D48 - 48mm OD Pipe / Oval",
+      "sku": "TC132D",
+      "weight": 1560,
+      "price": 3250
+    },
+    {
+      "title": "D48 - 48mm OD Pipe / Rectangular",
+      "sku": "TC232D",
+      "weight": 1320,
+      "price": 3250
+    },
+    {
+      "title": "D48 - 48mm OD Pipe (Black Painted) / Rectangular",
+      "sku": "TC232D (Painted)",
+      "weight": 1560,
+      "price": 4043
+    },
+    {
+      "title": "E60 - 60mm OD Pipe / Oval",
+      "sku": "TC132E",
+      "weight": 2040,
+      "price": 4675
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC132TechnicalDiagram-2026_revised.jpg?v=1784077282",
+      "sha256": "c845863bf939e33c13dbc59f36e15bc5e2c944527352221777fa29d5e7c93190"
+    }
+  ]
+}

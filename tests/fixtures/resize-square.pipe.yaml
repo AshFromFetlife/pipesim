@@ -1,0 +1,192 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Locked square resize fixture
+parts:
+- id: corner-0
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 0.0
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: corner-1
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 1065.6
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 180.0
+- id: corner-2
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 1065.6
+    - 1065.6
+    - 500.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 180.0
+- id: corner-3
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 0.0
+    - 1065.6
+    - 500.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 0.0
+- id: bottom
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 532.8
+    - 0.0
+    - 500.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+- id: right
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 1065.6
+    - 532.8
+    - 500.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+- id: top
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 532.8
+    - 1065.6
+    - 500.0
+    rotation_deg:
+    - 0.0
+    - -90.0
+    - 0.0
+- id: left
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 0.0
+    - 532.8
+    - 500.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 0.0
+joints:
+- id: bottom-start
+  type: socket
+  a:
+    part: corner-0
+    port: x
+  b:
+    part: bottom
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: bottom-end
+  type: socket
+  a:
+    part: corner-1
+    port: x
+  b:
+    part: bottom
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: right-start
+  type: socket
+  a:
+    part: corner-1
+    port: y
+  b:
+    part: right
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: right-end
+  type: socket
+  a:
+    part: corner-2
+    port: y
+  b:
+    part: right
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-start
+  type: socket
+  a:
+    part: corner-2
+    port: x
+  b:
+    part: top
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-end
+  type: socket
+  a:
+    part: corner-3
+    port: x
+  b:
+    part: top
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: left-start
+  type: socket
+  a:
+    part: corner-3
+    port: y
+  b:
+    part: left
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: left-end
+  type: socket
+  a:
+    part: corner-0
+    port: y
+  b:
+    part: left
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+anchors: []
+environment:
+  ground: false

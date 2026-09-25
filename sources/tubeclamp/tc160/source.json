@@ -1,0 +1,41 @@
+{
+  "title": "160 - Clamp-On Cross",
+  "url": "https://www.tubeclamp.com.au/products/tc160",
+  "retrieved": "2026-09-07T17:43:52.114984+00:00",
+  "images": [
+    "https://cdn.shopify.com/s/files/1/1384/6879/products/TC160-1.jpg?v=1571439738",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC160TechnicalDiagram-2025.jpg?v=1746746494",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC160.gif?v=1746746494",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC160Inuse.jpg?v=1746746494",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC160Top.jpg?v=1746746494",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC160Side.jpg?v=1746746494",
+    "https://cdn.shopify.com/s/files/1/1384/6879/files/TC160withtube-web.jpg?v=1746746494"
+  ],
+  "variants": [
+    {
+      "title": "C42 - 42mm OD Pipe",
+      "sku": "TC160C",
+      "weight": 420,
+      "price": 1170
+    },
+    {
+      "title": "D48 - 48mm OD Pipe",
+      "sku": "TC160D",
+      "weight": 660,
+      "price": 1507
+    },
+    {
+      "title": "E60 - 60mm OD Pipe",
+      "sku": "TC160E",
+      "weight": 780,
+      "price": 2336
+    }
+  ],
+  "downloads": [
+    {
+      "path": "drawing-0.jpg",
+      "url": "https://cdn.shopify.com/s/files/1/1384/6879/files/TC160TechnicalDiagram-2025.jpg?v=1746746494",
+      "sha256": "38d6a373db24934a91d8280a0a6f627e2afd5c2408d2e036e606995e161182b3"
+    }
+  ]
+}

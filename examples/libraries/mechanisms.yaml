@@ -1,0 +1,119 @@
+format: pipesim-library/1
+name: Reusable user-defined mechanisms
+objects:
+  demo.caster:
+    parts:
+    - id: plate
+      pose:
+        position_mm:
+        - 0
+        - 0
+        - 159
+      body:
+        kind: rigid
+        mass_kg: 0.4
+        geometry:
+        - type: box
+          size_mm:
+          - 70
+          - 70
+          - 6
+        color: '#8597a3'
+    - id: fork
+      pose:
+        position_mm:
+        - 0
+        - 0
+        - 100
+      body:
+        kind: rigid
+        mass_kg: 0.5
+        geometry:
+        - type: box
+          size_mm:
+          - 15
+          - 8
+          - 100
+          position_mm:
+          - 0
+          - -23
+          - 0
+        - type: box
+          size_mm:
+          - 15
+          - 8
+          - 100
+          position_mm:
+          - 0
+          - 23
+          - 0
+        - type: box
+          size_mm:
+          - 60
+          - 56
+          - 8
+          position_mm:
+          - 0
+          - 0
+          - 50
+        color: '#8597a3'
+    - id: wheel
+      catalog: generic.wheel
+      pose:
+        position_mm:
+        - 0
+        - 0
+        - 50
+    joints:
+    - id: swivel
+      type: revolute
+      a:
+        part: plate
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - -3
+          axis:
+          - 0
+          - 0
+          - 1
+      b:
+        part: fork
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - 56
+          axis:
+          - 0
+          - 0
+          - 1
+      limits:
+        angle_deg:
+        - -180
+        - 180
+      damping: 0.05
+    - id: axle
+      type: revolute
+      a:
+        part: fork
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - -50
+          axis:
+          - 0
+          - 1
+          - 0
+      b:
+        part: wheel
+        frame:
+          axis:
+          - 0
+          - 1
+          - 0
+      damping: 0.005
+    metadata:
+      status: generic caster mechanism; replace dimensions and capacities with purchased hardware

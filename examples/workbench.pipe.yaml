@@ -1,0 +1,365 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: "Workshop bench \xB7 C42 steel + timber"
+parts:
+- id: foot-1
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - -550
+    - -280
+    - 0
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: leg-1
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - -550
+    - -280
+    - 411.35
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    length_mm: 770.7
+- id: top-flange-1
+  catalog: tubeclamp.TC131C
+  pose:
+    position_mm:
+    - -550
+    - -280
+    - 820
+    rotation_deg:
+    - 180
+    - 0
+    - 0
+- id: foot-2
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - 550
+    - -280
+    - 0
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: leg-2
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 550
+    - -280
+    - 411.35
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    length_mm: 770.7
+- id: top-flange-2
+  catalog: tubeclamp.TC131C
+  pose:
+    position_mm:
+    - 550
+    - -280
+    - 820
+    rotation_deg:
+    - 180
+    - 0
+    - 0
+- id: foot-3
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - -550
+    - 280
+    - 0
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: leg-3
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - -550
+    - 280
+    - 411.35
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    length_mm: 770.7
+- id: top-flange-3
+  catalog: tubeclamp.TC131C
+  pose:
+    position_mm:
+    - -550
+    - 280
+    - 820
+    rotation_deg:
+    - 180
+    - 0
+    - 0
+- id: foot-4
+  catalog: tubeclamp.TC132C
+  pose:
+    position_mm:
+    - 550
+    - 280
+    - 0
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: leg-4
+  catalog: tubeclamp.tube-C
+  pose:
+    position_mm:
+    - 550
+    - 280
+    - 411.35
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    length_mm: 770.7
+- id: top-flange-4
+  catalog: tubeclamp.TC131C
+  pose:
+    position_mm:
+    - 550
+    - 280
+    - 820
+    rotation_deg:
+    - 180
+    - 0
+    - 0
+- id: worktop
+  catalog: generic.panel
+  pose:
+    position_mm:
+    - 0
+    - 0
+    - 835
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+  parameters:
+    width_mm: 1400
+    depth_mm: 800
+    thickness_mm: 30
+joints:
+- id: lower-1
+  type: socket
+  a:
+    part: foot-1
+    port: socket
+  b:
+    part: leg-1
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: upper-1
+  type: socket
+  a:
+    part: top-flange-1
+    port: socket
+  b:
+    part: leg-1
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: timber-1
+  type: fixed
+  a:
+    part: top-flange-1
+    port: mount
+  b:
+    part: worktop
+    frame:
+      position_mm:
+      - -550
+      - -280
+      - -15
+      axis:
+      - 0
+      - 0
+      - -1
+  assembly: bolt
+  metadata:
+    hardware: Four appropriately selected timber fasteners through the TC131 mounting holes; verify pull-out for
+      this panel
+- id: lower-2
+  type: socket
+  a:
+    part: foot-2
+    port: socket
+  b:
+    part: leg-2
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: upper-2
+  type: socket
+  a:
+    part: top-flange-2
+    port: socket
+  b:
+    part: leg-2
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: timber-2
+  type: fixed
+  a:
+    part: top-flange-2
+    port: mount
+  b:
+    part: worktop
+    frame:
+      position_mm:
+      - 550
+      - -280
+      - -15
+      axis:
+      - 0
+      - 0
+      - -1
+  assembly: bolt
+  metadata:
+    hardware: Four appropriately selected timber fasteners through the TC131 mounting holes; verify pull-out for
+      this panel
+- id: lower-3
+  type: socket
+  a:
+    part: foot-3
+    port: socket
+  b:
+    part: leg-3
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: upper-3
+  type: socket
+  a:
+    part: top-flange-3
+    port: socket
+  b:
+    part: leg-3
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: timber-3
+  type: fixed
+  a:
+    part: top-flange-3
+    port: mount
+  b:
+    part: worktop
+    frame:
+      position_mm:
+      - -550
+      - 280
+      - -15
+      axis:
+      - 0
+      - 0
+      - -1
+  assembly: bolt
+  metadata:
+    hardware: Four appropriately selected timber fasteners through the TC131 mounting holes; verify pull-out for
+      this panel
+- id: lower-4
+  type: socket
+  a:
+    part: foot-4
+    port: socket
+  b:
+    part: leg-4
+    end: start
+  insertion_mm: 60
+  locked: true
+  torque_nm: 40
+- id: upper-4
+  type: socket
+  a:
+    part: top-flange-4
+    port: socket
+  b:
+    part: leg-4
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: timber-4
+  type: fixed
+  a:
+    part: top-flange-4
+    port: mount
+  b:
+    part: worktop
+    frame:
+      position_mm:
+      - 550
+      - 280
+      - -15
+      axis:
+      - 0
+      - 0
+      - -1
+  assembly: bolt
+  metadata:
+    hardware: Four appropriately selected timber fasteners through the TC131 mounting holes; verify pull-out for
+      this panel
+anchors:
+- part: foot-1
+  surface: floor
+  label: Two selected floor anchors through the TC132 bolt holes
+- part: foot-2
+  surface: floor
+  label: Two selected floor anchors through the TC132 bolt holes
+- part: foot-3
+  surface: floor
+  label: Two selected floor anchors through the TC132 bolt holes
+- part: foot-4
+  surface: floor
+  label: Two selected floor anchors through the TC132 bolt holes
+environment:
+  ground: true
+  gravity_m_s2:
+  - 0
+  - 0
+  - -9.81
+description: "A 1400 \xD7 800 mm work surface on four flange-mounted steel legs. Floor anchors are explicit; bolt\
+  \ the top flanges to the timber."
+loads:
+- part: worktop
+  force_n:
+  - 0
+  - 0
+  - -1000
+  point_mm:
+  - 350
+  - 0
+  - 0
+build:
+  kerf_mm: 3
+  end_trim_mm: 5
+  stock_lengths_mm:
+  - 6000
+  require_stability: true

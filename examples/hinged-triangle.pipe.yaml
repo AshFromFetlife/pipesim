@@ -1,0 +1,415 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Hinged triangle · thread the final pipe
+parts:
+- id: corner-0
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 0.0
+    - 0.0
+    - 60.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 0.0
+- id: corner-1
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 1065.6
+    - 0.0
+    - 60.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 180.0
+- id: corner-2
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 1065.6
+    - 1065.6
+    - 60.0
+    rotation_deg:
+    - 0.0
+    - 0.0
+    - 180.0
+- id: corner-3
+  catalog: tubeclamp.TC128C
+  pose:
+    position_mm:
+    - 0.0
+    - 1065.6
+    - 60.0
+    rotation_deg:
+    - 180.0
+    - 0.0
+    - 0.0
+- id: bottom
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 532.8
+    - 0.0
+    - 60.0
+    rotation_deg:
+    - -0.0
+    - 90.0
+    - 0.0
+- id: right
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 1065.6
+    - 532.8
+    - 60.0
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+- id: top
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 532.8
+    - 1065.6
+    - 60.0
+    rotation_deg:
+    - 0.0
+    - -90.0
+    - 0.0
+- id: left
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 0.0
+    - 532.8
+    - 60.0
+    rotation_deg:
+    - 90.0
+    - 0.0
+    - 0.0
+- id: lower-front
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 1065.6
+    - 200.0
+    - 60.0
+    rotation_deg:
+    - 90.0
+    - -60.0
+    - 180.0
+- id: leg-front
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 797.85
+    - 200.0
+    - 523.75660373
+    rotation_deg:
+    - 0.0
+    - -30.0
+    - 0.0
+- id: upper-front
+  catalog: tubeclamp.TC148C
+  pose:
+    position_mm:
+    - 520.2
+    - 185.75
+    - 1004.66051045
+    rotation_deg:
+    - -90.0
+    - 60.0
+    - 0.0
+- id: top-bar
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 520.2
+    - 535.75
+    - 1004.66051045
+    rotation_deg:
+    - -90.0
+    - 0.0
+    - 0.0
+- id: lower-back
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 1065.6
+    - 850.0
+    - 60.0
+    rotation_deg:
+    - 90.0
+    - -75.0
+    - 180.0
+- id: leg-back
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 927.00240135
+    - 850.0
+    - 577.25327998
+    rotation_deg:
+    - 0.0
+    - -15.0
+    - 0.0
+- id: upper-back
+  catalog: tubeclamp.TC148C
+  pose:
+    position_mm:
+    - 783.2801856
+    - 835.75
+    - 1113.63189132
+    rotation_deg:
+    - -90.0
+    - 75.0
+    - 0.0
+- id: lower-left
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 0.0
+    - 500.0
+    - 60.0
+    rotation_deg:
+    - -90.0
+    - -60.0
+    - 0.0
+- id: leg-left
+  catalog: tubeclamp.tube-C
+  parameters:
+    length_mm: 1000
+  pose:
+    position_mm:
+    - 267.75
+    - 500.0
+    - 523.75660373
+    rotation_deg:
+    - 0.0
+    - 30.0
+    - 0.0
+- id: upper-left
+  catalog: tubeclamp.TC101C
+  pose:
+    position_mm:
+    - 535.5
+    - 500.0
+    - 987.51320745
+    rotation_deg:
+    - 90.0
+    - 60.0
+    - 180.0
+joints:
+- id: bottom-start
+  type: socket
+  a:
+    part: corner-0
+    port: x
+  b:
+    part: bottom
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: bottom-end
+  type: socket
+  a:
+    part: corner-1
+    port: x
+  b:
+    part: bottom
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: right-start
+  type: socket
+  a:
+    part: corner-1
+    port: y
+  b:
+    part: right
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: right-end
+  type: socket
+  a:
+    part: corner-2
+    port: y
+  b:
+    part: right
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-start
+  type: socket
+  a:
+    part: corner-2
+    port: x
+  b:
+    part: top
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: top-end
+  type: socket
+  a:
+    part: corner-3
+    port: x
+  b:
+    part: top
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: left-start
+  type: socket
+  a:
+    part: corner-3
+    port: y
+  b:
+    part: left
+    end: start
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: left-end
+  type: socket
+  a:
+    part: corner-0
+    port: y
+  b:
+    part: left
+    end: end
+  insertion_mm: 30
+  locked: true
+  torque_nm: 40
+- id: hinge-front
+  type: socket
+  a:
+    part: lower-front
+    port: through
+  b:
+    part: right
+    at_mm: 167.20000000000005
+  insertion_mm: 0
+  locked: false
+- id: lower-seat-front
+  type: socket
+  a:
+    part: lower-front
+    port: branch
+  b:
+    part: leg-front
+    end: start
+  insertion_mm: 24
+  locked: true
+- id: upper-seat-front
+  type: socket
+  a:
+    part: upper-front
+    port: branch
+  b:
+    part: leg-front
+    end: end
+  insertion_mm: 21.6
+  locked: true
+- id: thread-front
+  type: socket
+  a:
+    part: upper-front
+    port: through
+  b:
+    part: top-bar
+    at_mm: 150
+  insertion_mm: 0
+  locked: false
+- id: hinge-back
+  type: socket
+  a:
+    part: lower-back
+    port: through
+  b:
+    part: right
+    at_mm: 817.2
+  insertion_mm: 0
+  locked: false
+- id: lower-seat-back
+  type: socket
+  a:
+    part: lower-back
+    port: branch
+  b:
+    part: leg-back
+    end: start
+  insertion_mm: 24
+  locked: true
+- id: upper-seat-back
+  type: socket
+  a:
+    part: upper-back
+    port: branch
+  b:
+    part: leg-back
+    end: end
+  insertion_mm: 21.6
+  locked: true
+- id: hinge-left
+  type: socket
+  a:
+    part: lower-left
+    port: through
+  b:
+    part: left
+    at_mm: 532.8
+  insertion_mm: 0
+  locked: false
+- id: lower-seat-left
+  type: socket
+  a:
+    part: lower-left
+    port: branch
+  b:
+    part: leg-left
+    end: start
+  insertion_mm: 24
+  locked: true
+- id: upper-seat-left
+  type: socket
+  a:
+    part: upper-left
+    port: branch
+  b:
+    part: leg-left
+    end: end
+  insertion_mm: 24
+  locked: true
+anchors:
+- part: corner-0
+  surface: fixture
+environment:
+  ground: true
+description: 'A square supports three 1000 mm pipes, each with a tee at both ends. The different tee offsets require
+  continuous angles rather than exact 15 degree increments. The top pipe is in the front socket: connect it through
+  upper-back and then upper-left, keeping the screws loose until the frame is fitted.'
