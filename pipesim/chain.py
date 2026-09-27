@@ -1,4 +1,4 @@
-"""Length-controlled chains with stable link IDs and physical articulated joints."""
+"""Length-controlled chain, rope and webbing segments with articulated joints."""
 import copy
 import math
 
@@ -32,17 +32,31 @@ def dimensions(parameters, library):
     count = max(1, math.ceil(length/pitch-1e-10))
     if count > MAX_LINKS:
         raise DocumentError(f'Chain length exceeds {MAX_LINKS} links ({MAX_LINKS*pitch:g} mm for this link)')
+    strength = definition.get('break_force_n')
+    if strength is not None and (isinstance(strength, bool) or not isinstance(strength, (int, float))
+                                 or not math.isfinite(strength) or strength <= 0):
+        raise DocumentError('Flexible segment break force must be a positive finite number')
+    rigidity = definition.get('axial_rigidity_n')
+    if rigidity is not None and (isinstance(rigidity, bool) or not isinstance(rigidity, (int, float))
+                                 or not math.isfinite(rigidity) or rigidity <= 0):
+        raise DocumentError('Flexible segment axial rigidity must be a positive finite number')
     return {'count': count, 'pitch_mm': pitch, 'length_mm': count*pitch,
-            'requested_length_mm': length, 'link_catalog': catalog, 'a': a, 'b': b}
+            'requested_length_mm': length, 'link_catalog': catalog, 'a': a, 'b': b,
+            'profile': definition.get('flexible_profile', 'chain'), 'break_force_n': strength,
+            'axial_rigidity_n': rigidity,
+            'break_strain': strength/rigidity if strength is not None and rigidity is not None else None}
 
 
-def _joint(index):
-    return {'id': f'join-{index}', 'type': 'spherical',
+def _joint(index, strength=None):
+    joint = {'id': f'join-{index}', 'type': 'spherical',
             'a': {'part': f'link-{index}', 'port': 'a'},
             'b': {'part': f'link-{index+1}', 'port': 'b'},
             'limits': {'rotation_deg': [[-80, 80], [-80, 80], [-180, 180]]},
             'damping': .001, 'assembly': 'hook',
             'metadata': {'chain_link': True}}
+    if strength is not None:
+        joint['break_force_n'] = strength
+    return joint
 
 
 def generate(parameters, library, components=None):
@@ -60,7 +74,10 @@ def generate(parameters, library, components=None):
         if set(saved) != expected:
             raise DocumentError('This chain has individually removed or renamed links. Restore its link sequence before setting its length.')
     parts = []
-    roll = Rotation.from_rotvec((a-b)/info['pitch_mm']*np.pi/2).as_matrix()
+    # Interleaved metal rings alternate by 90 degrees. Rope and webbing keep
+    # their cross-section orientation between segments until posed or twisted.
+    roll = (Rotation.from_rotvec((a-b)/info['pitch_mm']*np.pi/2).as_matrix()
+            if info['profile'] == 'chain' else np.eye(3))
     for i in range(1, count+1):
         name = f'link-{i}'
         if name in saved:
@@ -84,7 +101,7 @@ def generate(parameters, library, components=None):
             # Do not silently repair an intentionally detached internal joint.
             if components and i < len(saved):
                 raise DocumentError(f'Reconnect join-{i} before setting the chain length')
-            joints.append(_joint(i))
+            joints.append(_joint(i, info['break_force_n']))
     result.update(parts=parts, joints=joints, parameter_reference=copy.deepcopy(parameters))
     return result
 

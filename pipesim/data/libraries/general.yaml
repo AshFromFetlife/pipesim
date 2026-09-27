@@ -32,6 +32,9 @@ materials:
     youngs_modulus_pa: 7000000000.0
     poisson_ratio: 0.3
     status: rigid-panel-only
+  padded-panel-assumed:
+    density_kg_m3: 180
+    status: rigid layered contact proxy; cushion compression is not simulated
   polymer-assumed:
     density_kg_m3: 1240
     youngs_modulus_pa: 2000000000.0
@@ -308,6 +311,29 @@ parts:
       - $thickness_mm
     source:
       geometry_status: user-dimensioned
+  generic.padded-panel:
+    name: Padded panel / gym seat / backrest
+    kind: panel
+    material: padded-panel-assumed
+    color: '#354550'
+    friction: 0.85
+    restitution: 0.02
+    parameters:
+      width_mm: 400
+      depth_mm: 300
+      thickness_mm: 60
+      padding_mm: 45
+      edge_inset_mm: 5
+    panel_layers:
+      padding_mm: $padding_mm
+      edge_inset_mm: $edge_inset_mm
+      backing_density_kg_m3: 650
+      padding_density_kg_m3: 60
+      backing_color: '#66584b'
+      padding_color: '#354550'
+    source:
+      geometry_status: dimensioned backing and upholstery envelope
+      assumptions: [Rigid contact at the pad surface; no foam compression or pressure distribution]
   generic.box:
     name: "Abstract load \xB7 box"
     kind: load
@@ -412,6 +438,106 @@ parts:
         assembly: hook
     source:
       geometry_status: generic ring contact proxy; no load rating
+  generic.chain-heavy-100:
+    name: "Machine chain · 100 mm link"
+    kind: chain
+    flexible_profile: chain
+    color: '#707b84'
+    mass_kg: 1.2
+    break_force_n: 60000
+    axial_rigidity_n: 2000000
+    geometry:
+    - type: tube
+      diameter_mm: 100
+      wall_mm: 15
+      length_mm: 15
+      axis: [0, 1, 0]
+    ports:
+      a: {type: eye, position_mm: [0, 0, -40], axis: [0, 1, 0], assembly: hook}
+      b: {type: eye, position_mm: [0, 0, 40], axis: [0, 1, 0], assembly: hook}
+    source:
+      geometry_status: illustrative link envelope and mass
+      strength_status: illustrative simulation threshold; replace with a verified component rating
+  generic.rope-jute-6:
+    name: "Jute rope · 6 mm"
+    kind: chain
+    flexible_profile: rope
+    color: '#b49a70'
+    mass_kg: 0.0006
+    break_force_n: 350
+    axial_rigidity_n: 30000
+    geometry:
+    - {type: cylinder, diameter_mm: 6, length_mm: 20}
+    ports:
+      a: {type: eye, position_mm: [0, 0, -10], axis: [0, 0, 1]}
+      b: {type: eye, position_mm: [0, 0, 10], axis: [0, 0, 1]}
+    source:
+      geometry_status: round segment proxy
+      strength_status: illustrative simulation threshold; replace with a verified rope rating
+  generic.rope-nylon-10:
+    name: "Nylon rope · 10 mm"
+    kind: chain
+    flexible_profile: rope
+    color: '#e8ddd0'
+    mass_kg: 0.0018
+    break_force_n: 2000
+    axial_rigidity_n: 50000
+    geometry:
+    - {type: cylinder, diameter_mm: 10, length_mm: 25}
+    ports:
+      a: {type: eye, position_mm: [0, 0, -12.5], axis: [0, 0, 1]}
+      b: {type: eye, position_mm: [0, 0, 12.5], axis: [0, 0, 1]}
+    source:
+      geometry_status: round segment proxy
+      strength_status: illustrative simulation threshold; replace with a verified rope rating
+  generic.rope-polypropylene-12:
+    name: "Polypropylene rope · 12 mm"
+    kind: chain
+    flexible_profile: rope
+    color: '#2479a4'
+    mass_kg: 0.0025
+    break_force_n: 1200
+    axial_rigidity_n: 25000
+    geometry:
+    - {type: cylinder, diameter_mm: 12, length_mm: 25}
+    ports:
+      a: {type: eye, position_mm: [0, 0, -12.5], axis: [0, 0, 1]}
+      b: {type: eye, position_mm: [0, 0, 12.5], axis: [0, 0, 1]}
+    source:
+      geometry_status: round segment proxy
+      strength_status: illustrative simulation threshold; replace with a verified rope rating
+  generic.strap-ratchet-25:
+    name: "Ratchet webbing · 25 × 1.5 mm"
+    kind: chain
+    flexible_profile: strap
+    color: '#db8741'
+    mass_kg: 0.001
+    break_force_n: 5000
+    axial_rigidity_n: 150000
+    geometry:
+    - {type: box, size_mm: [25, 1.5, 25]}
+    ports:
+      a: {type: eye, position_mm: [0, 0, -12.5], axis: [0, 0, 1]}
+      b: {type: eye, position_mm: [0, 0, 12.5], axis: [0, 0, 1]}
+    source:
+      geometry_status: flat webbing segment proxy
+      strength_status: illustrative simulation threshold; replace with a verified strap rating
+  generic.strap-seatbelt-65:
+    name: "Wide nylon webbing · 65 × 2.2 mm"
+    kind: chain
+    flexible_profile: strap
+    color: '#293743'
+    mass_kg: 0.0035
+    break_force_n: 8000
+    axial_rigidity_n: 200000
+    geometry:
+    - {type: box, size_mm: [65, 2.2, 25]}
+    ports:
+      a: {type: eye, position_mm: [0, 0, -12.5], axis: [0, 0, 1]}
+      b: {type: eye, position_mm: [0, 0, 12.5], axis: [0, 0, 1]}
+    source:
+      geometry_status: flat webbing segment proxy
+      strength_status: illustrative simulation threshold; replace with a verified strap rating
   generic.d-link:
     name: "D shackle \xB7 generic"
     kind: connector

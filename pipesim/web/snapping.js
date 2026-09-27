@@ -3,8 +3,8 @@ import * as THREE from 'three';
 export function socketOccupied(scene, id, name, ignore=null) {
   const fitting=scene.parts.find(p=>p.id===id), port=fitting?.ports[name];
   const excluded=new Set([name,...(port?.excludes||[])]);
-  return scene.joints.some(j=>j.id!==ignore&&[j.a,j.b].some(e=>e.part===id&&
-    (excluded.has(e.port)||fitting.ports[e.port]?.excludes?.includes(name))));
+  const used=[...scene.joints.filter(j=>j.id!==ignore).flatMap(j=>[j.a,j.b]),...(scene.draft_attachments||[]).map(a=>({part:a.connector,port:a.port}))];
+  return used.some(e=>e.part===id&&(excluded.has(e.port)||fitting.ports[e.port]?.excludes?.includes(name)));
 }
 
 function fits(member, socket) {

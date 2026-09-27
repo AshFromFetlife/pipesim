@@ -146,6 +146,29 @@ def test_component_size_and_mass_controls_scale_saved_geometry_and_joint_frames(
     with pytest.raises(DocumentError,match='edited pose'): update_object_parameters(after,'person',params)
 
 
+def test_mass_edit_of_regrouped_human_updates_girth_and_keeps_pose(factory,blank):
+    original=human(factory,blank)
+    before=factory(regroup_object(factory(expand_objects(original,'person')),'person'))
+    parameters=copy.deepcopy(before.doc['objects'][0]['parameters'])
+    parameters['mass_kg']=100
+    after=factory(update_object_parameters(before,'person',parameters))
+    for name in before.parts:
+        if name.startswith('person/'):
+            assert np.allclose(before.parts[name].matrix,after.parts[name].matrix,atol=1e-6,rtol=0)
+    for name in ('pelvis','lumbar','thorax'):
+        old=before.parts['person/'+name].shapes[0]['size_mm']
+        new=after.parts['person/'+name].shapes[0]['size_mm']
+        assert new[0]>old[0] and new[1]>old[1]
+        assert new[2]==pytest.approx(old[2])
+    old=before.parts['person/right_thigh'].shapes[0]
+    new=after.parts['person/right_thigh'].shapes[0]
+    assert new['radius_mm']>old['radius_mm']
+    assert new['length_mm']<old['length_mm']
+    for joint in after.joints:
+        pa,pb,_=after.joint_frames(joint)
+        assert np.linalg.norm(pa-pb)<1e-6
+
+
 def test_grouped_design_yaml_save_reload_preserves_physics(factory,blank,tmp_path):
     before=human(factory,blank);doc=regroup_object(factory(expand_objects(before,'person')),'person')
     path=tmp_path/'person.pipe.yaml';write(path,doc)

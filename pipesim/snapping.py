@@ -78,6 +78,9 @@ def move_document(assembly, poses):
     doc=copy.deepcopy(assembly.doc)
     for spec in doc['parts']:
         if spec['id'] in poses: spec['pose']=pose_of(posed.parts[spec['id']].matrix)
+    if doc.get('draft_subassemblies'):
+        from .symmetry import fit_moved_centered_runs
+        fit_moved_centered_runs(posed, doc, set(poses))
     if coordinates:
         # Rebase the authored zero and remaining joint travel, including drives,
         # without expanding unrelated reusable objects in the user's document.

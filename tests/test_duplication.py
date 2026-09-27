@@ -4,11 +4,98 @@ import numpy as np
 import pytest
 
 from pipesim.document import Assembly, DocumentError, write
-from pipesim.duplication import duplicate, duplicate_members
+from pipesim.duplication import duplicate, duplicate_draft, duplicate_members
 from pipesim.editing import expand_objects, relocate_design
 from pipesim.grouping import regroup_object
 from pipesim.geometry import mesh_for_part
 from pipesim.math3d import transform
+
+
+def draft_graph():
+    def fitting(identifier, position, ports):
+        return {'id': identifier, 'body': {'kind': 'connector', 'mass_kg': .2,
+            'geometry': [{'type': 'sphere', 'radius_mm': 6, 'position_mm': [0, 0, 80]}],
+            'ports': ports}, 'pose': {'position_mm': position}}
+    def socket(axis, through=False):
+        return {'type': 'socket', 'profile': 'round', 'diameter_mm': 42.4,
+                'position_mm': [0, 0, 0], 'axis': axis, 'engagement_mm': 40,
+                'through': through}
+    return {'format': 'pipesim/1', 'units': 'mm-kg-s-N-deg', 'name': 'Draft duplicate',
+        'parts': [fitting('left', [0, 0, 100], {'end': socket([1, 0, 0])}),
+                  fitting('right', [1000, 0, 100], {'end': socket([-1, 0, 0])}),
+                  fitting('hub', [500, 0, 100], {'through': socket([1, 0, 0], True),
+                                                'branch': socket([0, 1, 0])}),
+                  {'id': 'board', 'body': {'kind': 'rigid', 'mass_kg': 1,
+                     'geometry': [{'type': 'box', 'size_mm': [20, 20, 10]}]},
+                   'pose': {'position_mm': [500, 100, 100]}},
+                  fitting('unrelated', [2000, 0, 100], {'end': socket([1, 0, 0])})],
+        'joints': [{'id': 'board-mount', 'type': 'fixed',
+                    'a': {'part': 'hub', 'frame': {'position_mm': [0, 100, 0]}},
+                    'b': {'part': 'board'}}],
+        'anchors': [{'part': 'left', 'surface': 'fixture'}],
+        'draft_subassemblies': [{'id': 'frame', 'runs': [
+            {'id': 'rail', 'catalog': 'tubeclamp.tube-C', 'start_mm': [0, 0, 100],
+             'end_mm': [1000, 0, 100], 'attachments': [
+                 {'connector': 'left', 'port': 'end', 'end': 'start', 'insertion_mm': 20},
+                 {'connector': 'right', 'port': 'end', 'end': 'end', 'insertion_mm': 20},
+                 {'connector': 'hub', 'port': 'through'}]},
+            {'id': 'branch', 'catalog': 'tubeclamp.tube-C', 'start_mm': [500, -20, 100],
+             'end_mm': [500, 600, 100], 'attachments': [
+                 {'connector': 'hub', 'port': 'branch', 'end': 'start', 'insertion_mm': 20}]},
+            {'id': 'spare', 'catalog': 'tubeclamp.tube-C', 'start_mm': [2000, 0, 100],
+             'end_mm': [2400, 0, 100], 'attachments': []}]}]}
+
+
+def test_duplicate_connected_draft_structure_keeps_internal_connections_and_excludes_unrelated(factory):
+    from pipesim.drafting import preview, runs
+
+    source = factory(draft_graph())
+    before = copy.deepcopy(source.doc)
+    result = duplicate_draft(source, 'branch', count=2, offset_mm=[0, 250, 0])
+    after = factory(result['document'])
+    assert source.doc == before
+    assert result['selected'] == 'branch-copy-2'
+    assert result['parts_per_copy'] == 6
+    assert len(after.anchors) == 1
+    assert len(after.joints) == 3
+    assert len(result['document']['draft_subassemblies']) == 3
+    for record in result['copies']:
+        assert set(record['runs']) == {'rail', 'branch'}
+        assert set(record['parts']) == {'left', 'right', 'hub', 'board'}
+        assert len(record['joints']) == 1
+        rail = next(run for run in runs(after.doc) if run['id'] == record['runs']['rail'])
+        assert {a['connector'] for a in rail['attachments']} == {
+            record['parts']['left'], record['parts']['right'], record['parts']['hub']}
+        assert 'spare' not in record['runs'] and 'unrelated' not in record['parts']
+        assert np.allclose(after.parts[record['parts']['hub']].matrix[:3, 3],
+                           source.parts['hub'].matrix[:3, 3]+record['offset_mm'])
+    assert all(not run['conflicts'] for run in preview(after))
+
+
+def test_duplicate_mirrored_draft_moves_its_plane_with_each_copy(factory):
+    from pipesim.drafting import preview
+
+    doc = draft_graph()
+    doc['draft_subassemblies'] = [{'id': 'mirror', 'runs': [
+        {'id': 'symmetric', 'catalog': 'tubeclamp.tube-C',
+         'start_mm': [-500, 0, 100], 'end_mm': [500, 0, 100]}],
+         'mirrors': [{'id': 'left-right', 'axis': 'x', 'offset_mm': 0,
+                      'run_modes': {'symmetric': 'centered'}}]}]
+    result = duplicate_draft(factory(doc), 'symmetric', count=2, offset_mm=[250, 0, 0])
+    after = factory(result['document'])
+    assert [group['mirrors'][0]['offset_mm'] for group in after.doc['draft_subassemblies']] == [0, 250, 500]
+    assert [group['mirrors'][0]['run_modes'] for group in after.doc['draft_subassemblies'][1:]] == [
+        {'symmetric-copy': 'centered'}, {'symmetric-copy-2': 'centered'}]
+    assert all(not part['conflicts'] for part in preview(after))
+
+
+def test_duplicate_draft_avoids_ids_of_unrelated_existing_runs(factory):
+    doc = draft_graph()
+    doc['draft_subassemblies'][0]['runs'][-1]['id'] = 'rail-copy'
+    result = duplicate_draft(factory(doc), 'rail')
+    after = factory(result['document'])
+    assert result['copies'][0]['runs']['rail'] == 'rail-copy-2'
+    assert len({run['id'] for group in after.doc['draft_subassemblies'] for run in group['runs']}) == 5
 
 
 def graph(blank, factory):
@@ -79,6 +166,24 @@ def test_multiple_copies_are_independent_unique_and_spaced_on_the_grid(blank, fa
     assert result['document']['parts'][9]['body']['mass_kg'] == 2
 
 
+def test_duplicate_uses_signed_xyz_step_for_each_copy(blank, factory):
+    source = graph(blank, factory)
+    result = duplicate(source, 'c', 'subassembly', count=3, offset_mm=[0, -250, 75])
+    assert_copies(source, result, factory)
+    assert [copy['offset_mm'] for copy in result['copies']] == [
+        [0, -250, 75], [0, -500, 150], [0, -750, 225]]
+    assert result['selected'] == 'c-copy-3'
+
+
+@pytest.mark.parametrize('offset', [[0, 0, 0], [1, 2], ['1', 0, 0], [float('nan'), 0, 0], [True, 0, 0]])
+def test_invalid_duplicate_offset_keeps_original_unchanged(blank, factory, offset):
+    source = graph(blank, factory)
+    before = copy.deepcopy(source.doc)
+    with pytest.raises(DocumentError, match='offset'):
+        duplicate(source, 'c', count=2, offset_mm=offset)
+    assert source.doc == before
+
+
 def test_short_copy_of_a_generated_limb_keeps_saved_pose_and_physics_without_owning_person(blank, factory):
     doc = copy.deepcopy(blank)
     doc['objects'] = [{'id': 'person', 'template': 'human', 'parameters': {'hold_joints': ['arms']},
@@ -105,7 +210,8 @@ def test_whole_human_preserves_coordinates_tracks_motors_and_drives_when_detache
     if anchored:
         doc['anchors'] = [{'part': 'person/left_foot', 'surface': 'fixture'}]
     source = factory(doc)
-    result = duplicate(source, 'person/right_hand', 'subassembly', count=2)
+    result = duplicate(source, 'person/right_hand', 'subassembly', count=2,
+                       offset_mm=[0, -125, 75] if anchored else None)
     after = assert_copies(source, result, factory)
     assert len(after.parts) == 57 and len(after.joints) == 54
     assert len(result['document']['objects']) == 3 and result['document']['parts'] == []
@@ -115,7 +221,8 @@ def test_whole_human_preserves_coordinates_tracks_motors_and_drives_when_detache
         assert track['keyframes'] == doc['animation']['tracks'][0]['keyframes']
         drive = next(d for d in result['document']['drives'] if d['driver'] == record['joints']['person/right_elbow'])
         assert drive['follower'] == record['joints']['person/left_elbow']
-        assert drive['route_mm'][0] == [900+record['offset_mm'][0], 300, 500]
+        assert drive['route_mm'][0] == [900+record['offset_mm'][0],
+                                        300+record['offset_mm'][1], 500+record['offset_mm'][2]]
 
 
 def test_neighbours_of_a_posed_limb_keep_only_internal_articulation(blank, factory):

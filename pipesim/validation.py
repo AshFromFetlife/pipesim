@@ -34,7 +34,7 @@ class CollisionWorld:
     def __enter__(self): return self
     def __exit__(self,*args): self.close()
 
-def support(assembly,subset=None,tolerance_mm=1.):
+def support(assembly,subset=None,tolerance_mm=1.,cancelled=None):
     """Quasi-static gravity support polygon for each currently rigid component.
 
     Mounting fixtures are declared external constraints. Ground contacts are actual
@@ -50,6 +50,9 @@ def support(assembly,subset=None,tolerance_mm=1.):
     z=assembly.doc.get('environment',{}).get('ground_z_mm',0)
     results=[]
     for group in groups.groups():
+        if cancelled:
+            from .drafting import _check_cancelled
+            _check_cancelled(cancelled)
         masses=[assembly.parts[p].mass for p in group]
         com=np.average([point(assembly.parts[p].matrix,assembly.parts[p].center_of_mass) for p in group],axis=0,weights=masses)
         if set(group)&anchored:
@@ -68,12 +71,16 @@ def support(assembly,subset=None,tolerance_mm=1.):
         results.append({'parts':group,'stable':bool(stable),'basis':'ground support polygon' if len(points) else 'no support','center_of_mass_mm':com.tolist(),'margin_mm':margin,'contacts_xy_mm':points.tolist()})
     return {'stable':all(g['stable'] for g in results),'components':results,'assumptions':['Gravity acts along -Z','Declared anchors have adequate capacity','No dynamic disturbances or friction analysis']}
 
-def validate(assembly,collisions=True,build=False):
+def validate(assembly,collisions=True,build=False,cancelled=None):
+    assembly.require_finished('validation')
+    from .drafting import _check_cancelled
+    _check_cancelled(cancelled)
     issues=[]
     def issue(code,message,parts=(),severity='error',**details):
         issues.append({'code':code,'severity':severity,'message':message,'parts':list(parts),**details})
     occupied={}; member_ends={}
     for p in assembly.parts.values():
+        _check_cancelled(cancelled)
         try:
             if p.mass<=0: issue('MASS','Part mass must be positive; use an anchor for a fixed body',[p.id])
             if p.kind=='member' and p.length<=0: issue('LENGTH','Cut length must be positive',[p.id])
@@ -88,6 +95,7 @@ def validate(assembly,collisions=True,build=False):
             mesh_for_part(p)
         except (ValueError,KeyError,TypeError) as exc: issue('GEOMETRY',str(exc),[p.id])
     for j in assembly.joints:
+        _check_cancelled(cancelled)
         a,b=assembly.parts[j['a']['part']],assembly.parts[j['b']['part']]
         kind=joint_kind(j)
         for endpoint,p in ((j['a'],a),(j['b'],b)):
@@ -162,7 +170,7 @@ def validate(assembly,collisions=True,build=False):
         for key in ('driver','follower'):
             if drive[key] not in knownj: issue('DRIVE_REFERENCE',f"{drive['id']} references unknown joint {drive[key]}")
         if drive.get('type')=='gt2' and abs(drive.get('pitch_mm',2)-2)>1e-8: issue('BELT_PITCH','GT2 drive must use 2 mm pitch')
-    components=support(assembly) if not any(i['code'] in ('MASS','GEOMETRY','DIMENSION','LENGTH','WALL') for i in issues) else {'stable':False,'components':[]}
+    components=support(assembly,cancelled=cancelled) if not any(i['code'] in ('MASS','GEOMETRY','DIMENSION','LENGTH','WALL') for i in issues) else {'stable':False,'components':[]}
     if not components['stable']: issue('UNSUPPORTED','One or more rigid components lacks a gravity support polygon or world anchor',severity='warning')
     if collisions and not any(i['severity']=='error' for i in issues):
         rigid={pid:i for i,g in enumerate(assembly.rigid_groups()) for pid in g}
@@ -170,6 +178,7 @@ def validate(assembly,collisions=True,build=False):
         for j in assembly.joints: joints_by_pair.setdefault(frozenset([j['a']['part'],j['b']['part']]),[]).append(j)
         with CollisionWorld(assembly) as world:
             for a,b in itertools.combinations(assembly.parts,2):
+                _check_cancelled(cancelled)
                 contacts=world.contacts(a,b)
                 overlaps=[c for c in contacts if c[8]*1000 < -1.]
                 if not overlaps: continue

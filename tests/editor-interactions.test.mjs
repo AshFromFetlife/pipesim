@@ -12,6 +12,8 @@ import * as Three from 'three';
 import {STLLoader as ThreeSTLLoader} from 'three/addons/loaders/STLLoader.js';
 import * as snapping from '../pipesim/web/snapping.js';
 import * as settings from '../pipesim/web/snap-settings.js';
+import * as drafting from '../pipesim/web/drafting.js';
+import {HUMAN_POSES} from '../pipesim/web/human-poses.js';
 
 let server,url,bootstrap,workspace;
 before(async()=>{
@@ -39,10 +41,336 @@ const fixture=(catalog='TC101C')=>({format:'pipesim/1',units:'mm-kg-s-N-deg',nam
   {id:'pipe',catalog:'tubeclamp.tube-C',parameters:{length_mm:1000},pose:{position_mm:[0,0,500]}},
   {id:'tee',catalog:'tubeclamp.'+catalog,pose:{position_mm:[300,0,500]}}],joints:[],anchors:[{part:'pipe',surface:'fixture'}]});
 
-async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOverride=()=>({}),interceptFetch=()=>null}={}){
+const draftFixture=()=>({format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Draft interaction',parts:
+  [['left',0,[1,0,0]],['right',1000,[-1,0,0]]].map(([id,x,axis])=>({id,
+    body:{kind:'connector',mass_kg:.2,geometry:[{type:'sphere',radius_mm:6,position_mm:axis.map(a=>-80*a)}],
+      ports:{socket:{type:'socket',position_mm:[0,0,0],axis,diameter_mm:42.4,profile:'round',engagement_mm:40,min_engagement_mm:15}}},
+    pose:{position_mm:[x,0,100]}})),joints:[]});
+
+const draftDuplicateGraph=()=>{
+  const doc=draftFixture();
+  doc.parts.push({id:'hub',body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:6,position_mm:[0,0,80]}],
+    ports:{through:{type:'socket',through:true,profile:'round',diameter_mm:42.4,
+      position_mm:[0,0,0],axis:[1,0,0],engagement_mm:40},
+    branch:{type:'socket',profile:'round',diameter_mm:42.4,position_mm:[0,0,0],
+      axis:[0,1,0],engagement_mm:40}}},pose:{position_mm:[500,0,100]}});
+  doc.parts.push({id:'board',body:{kind:'rigid',mass_kg:1,geometry:[{type:'box',size_mm:[20,20,10]}]},
+    pose:{position_mm:[500,100,100]}});
+  doc.joints.push({id:'board-mount',type:'fixed',a:{part:'hub',frame:{position_mm:[0,100,0]}},b:{part:'board'}});
+  doc.draft_subassemblies=[{id:'frame',runs:[
+    {id:'rail',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20},
+      {connector:'hub',port:'through'}]},
+    {id:'branch',catalog:'tubeclamp.tube-C',start_mm:[500,-20,100],end_mm:[500,600,100],attachments:[
+      {connector:'hub',port:'branch',end:'start',insertion_mm:20}]},
+    {id:'spare',catalog:'tubeclamp.tube-C',start_mm:[2000,0,100],end_mm:[2400,0,100],attachments:[]}]}];
+  return doc;
+};
+
+const largeDraftFixture=()=>{
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Large draft',parts:[],joints:[],draft_subassemblies:[{id:'frame',runs:[]}]};
+  for(let i=0;i<100;i++){
+    const y=i*100;
+    for(const [side,x,axis] of [['left',0,[1,0,0]],['right',1000,[-1,0,0]]])doc.parts.push({id:`${side}-${i}`,
+      body:{kind:'connector',mass_kg:.2,geometry:[{type:'sphere',radius_mm:6,position_mm:axis.map(a=>-80*a)}],
+        ports:{socket:{type:'socket',position_mm:[0,0,0],axis,diameter_mm:42.4,profile:'round',engagement_mm:40,min_engagement_mm:15}}},
+      pose:{position_mm:[x,y,100]}});
+    doc.draft_subassemblies[0].runs.push({id:`run-${i}`,catalog:'tubeclamp.tube-C',start_mm:[0,y,100],end_mm:[1000,y,100]});
+  }
+  return doc;
+};
+
+test('draft connections appear on both the pipe and connector and detach from either side',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}
+    ]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');
+    assert.match(ui.document.querySelector('#inspector').textContent,/CONNECTIONS · 2/);
+    ui.select('left');
+    assert.match(ui.document.querySelector('#inspector').textContent,/CONNECTIONS 1/);
+    assert.match(ui.document.querySelector('#inspector').textContent,/run.*DRAFT.*socket · start/s);
+    assert.doesNotMatch(ui.document.querySelector('#inspector').textContent,/No connections/);
+    ui.document.querySelector('[data-draft-connector-detach]').click();
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,1);
+    assert.match(ui.document.querySelector('#inspector').textContent,/No connections/);
+    ui.select('right');
+    assert.match(ui.document.querySelector('#inspector').textContent,/run.*DRAFT.*socket · end/s);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===2);
+    ui.select('left');
+    assert.match(ui.document.querySelector('#inspector').textContent,/CONNECTIONS 1/);
+  }finally{await ui.close();}
+});
+
+test('deleting connected draft pipes and fittings keeps mirrors and undo valid',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'frame',runs:[
+    {id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}]},
+    {id:'spare',catalog:'tubeclamp.tube-C',start_mm:[0,0,300],end_mm:[600,0,300],attachments:[]}],
+    mirrors:[{id:'midline',axis:'y',offset_mm:0,run_modes:{run:'in_plane',spare:'in_plane'}}],
+    mirror_parts:['left','right']}];
+  const ui=await editor(doc);try{
+    ui.select('run');ui.document.querySelector('#draft-delete').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs.length===1&&!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes,{spare:'in_plane'});
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs.length===2);
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'in_plane');
+    ui.select('left');ui.document.querySelector('#delete-part').click();
+    await ui.wait(()=>ui.state.doc.parts.length===1&&!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].attachments.map(a=>a.connector),['right']);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].mirror_parts,['right']);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.parts.length===2);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,2);
+  }finally{await ui.close();}
+});
+
+test('hovering a draft connection highlights its fitting and socket without changing selection',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');
+    const cards=[...ui.document.querySelectorAll('.draft-connection-card')];
+    const mesh=id=>{let found;ui.partObjects.get(id).traverse(child=>{if(child.isMesh&&!found)found=child;});return found;};
+    cards[0].dispatchEvent(new ui.window.MouseEvent('mouseenter'));
+    assert.equal(mesh('left').material.emissive.getHexString(),'f3ba62');
+    assert.equal(mesh('right').material.emissive.getHexString(),'000000');
+    assert.ok(ui.ports.children.some(node=>node.userData.part==='left'&&node.userData.port==='socket'&&node.geometry.parameters.radius===12));
+    assert.equal(ui.state.selected,'run');
+    cards[0].dispatchEvent(new ui.window.MouseEvent('mouseleave'));
+    assert.equal(mesh('left').material.emissive.getHexString(),'000000');
+    cards[1].focus();
+    assert.equal(mesh('right').material.emissive.getHexString(),'f3ba62');
+    cards[1].blur();
+    assert.equal(mesh('right').material.emissive.getHexString(),'000000');
+  }finally{await ui.close();}
+});
+
+test('draft mirror previews pipes and connectors, then discards or keeps the copies',async()=>{
+  const doc=draftFixture();for(const part of doc.parts)part.pose.position_mm[1]=200;
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,200,100],end_mm:[1000,200,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');ui.document.querySelector('#draft-mirror-add').click();
+    ui.document.querySelector('#mirror-axis').value='y';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors?.length===1&&ui.document.querySelector('[data-mirror-remove]'));
+    ui.tick();assert.equal(ui.mirrorCopies.size,3);
+    const copy=[...ui.mirrorCopies.values()].find(record=>record.source===ui.partObjects.get('left'));
+    assert.equal(new Three.Vector3().setFromMatrixPosition(copy.clone.matrix).y,-200);
+    const previewMesh=copy.clone.getObjectByProperty('type','Mesh');
+    assert.equal(previewMesh.material.transparent,true);
+    assert.equal(previewMesh.material.opacity,.4);
+    assert.equal(ui.state.doc.parts.length,2,'preview copies are not saved parts yet');
+    ui.document.querySelector('[data-mirror-remove]').click();
+    [...ui.document.querySelectorAll('#modal-actions button')].find(button=>button.textContent==='Discard copies').click();
+    await ui.wait(()=>!ui.state.doc.draft_subassemblies[0].mirrors);
+    ui.tick();assert.equal(ui.mirrorCopies.size,0);
+    ui.document.querySelector('#draft-mirror-add').click();ui.document.querySelector('#mirror-axis').value='y';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors?.length===1&&ui.document.querySelector('[data-mirror-remove]'));
+    ui.document.querySelector('[data-mirror-remove]').click();
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.draft_subassemblies[0].mirrors);
+    assert.equal(ui.state.doc.parts.length,4);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs.length,2);
+    assert.ok(ui.state.doc.parts.some(part=>part.id.startsWith('left-mirror-')&&part.body.geometry[0].type==='mesh'));
+    assert.equal(ui.state.undo.length,4);
+  }finally{await ui.close();}
+});
+
+test('adding a fitting reuses a stale mirrored ID without duplicating mirror_parts',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,200,100],end_mm:[1000,200,100],attachments:[]}],
+    mirrors:[{id:'side',axis:'y',offset_mm:0}],mirror_parts:['tc101c-1','deleted-fitting']}];
+  const ui=await editor(doc);try{
+    ui.document.querySelector('[data-catalog="tubeclamp.TC101C"]').click();
+    await ui.wait(()=>ui.state.doc.parts.some(part=>part.id==='tc101c-1')&&
+      ui.state.scene.parts.some(part=>part.id==='tc101c-1'));
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].mirror_parts,['tc101c-1']);
+    assert.equal(ui.state.scene.parts.some(part=>part.id==='tc101c-1'),true);
+    ui.document.querySelector('#delete-part').click();
+    await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.parts.length);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].mirror_parts,[]);
+    ui.document.querySelector('[data-catalog="tubeclamp.TC101C"]').click();
+    await ui.wait(()=>ui.state.scene.parts.some(part=>part.id==='tc101c-1'));
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].mirror_parts,['tc101c-1']);
+  }finally{await ui.close();}
+});
+
+test('adding a mirror automatically centers a perpendicular pipe, including later resizes',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[-499,0,100],end_mm:[501,0,100],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');ui.document.querySelector('#draft-mirror-add').click();
+    ui.document.querySelector('#mirror-axis').value='x';ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors?.length===1&&ui.document.querySelector('[data-mirror-mode]'));
+    ui.tick();assert.equal(ui.mirrorCopies.size,0,'a centered pipe is shared, not doubled');
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'centered');
+    assert.equal(ui.document.querySelector('[data-mirror-mode]').value,'centered');
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].start_mm,[-500,0,100]);
+    const length=ui.document.querySelector('#draft-length');length.value='1200';length.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.deepEqual(run.start_mm,[-600,0,100]);assert.deepEqual(run.end_mm,[600,0,100]);
+    ui.tick();assert.equal(ui.mirrorCopies.size,0);
+    const mode=ui.document.querySelector('[data-mirror-mode]');mode.value='free';mode.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run==='free');
+    const freeLength=ui.document.querySelector('#draft-length');freeLength.value='1400';freeLength.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.deepEqual(run.start_mm,[-600,0,100]);assert.deepEqual(run.end_mm,[800,0,100]);
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'free');
+  }finally{await ui.close();}
+});
+
+test('new draft pipes lying in an existing mirror plane are pinned there',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'existing',catalog:'tubeclamp.tube-C',
+    start_mm:[100,200,100],end_mm:[300,200,100],attachments:[]}],
+    mirrors:[{id:'side',axis:'x',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.document.querySelector('#category').value='member';
+    ui.document.querySelector('#category').dispatchEvent(new ui.window.Event('change'));
+    ui.document.querySelector('[data-catalog="tubeclamp.tube-C"]').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs.length===2);
+    const group=ui.state.doc.draft_subassemblies[0],added=group.runs.find(run=>run.id!=='existing');
+    assert.equal(group.mirrors[0].run_modes[added.id],'in_plane');
+    assert.equal(added.start_mm[0],0);assert.equal(added.end_mm[0],0);
+  }finally{await ui.close();}
+});
+
+test('an existing centered pipe gains its mirror mode when opened',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[-500,0,100],end_mm:[500,0,100],attachments:[]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'centered');
+    assert.equal(ui.state.dirty,true);
+  }finally{await ui.close();}
+});
+
+test('an attached centered pipe keeps its effective span constrained',async()=>{
+  const doc=draftFixture();doc.parts=doc.parts.slice(0,1);
+  doc.parts[0].pose.position_mm=[-480,0,100];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[-500,0,100],end_mm:[500,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20}]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'centered');
+    const length=ui.document.querySelector('#draft-length');assert.equal(length.disabled,false);
+    length.value='1200';length.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.deepEqual(ui.state.doc.parts[0].pose.position_mm,[-580,0,100]);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].start_mm,[-600,0,100]);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].end_mm,[600,0,100]);
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'centered');
+    assert.deepEqual(ui.state.scene.parts.find(part=>part.id==='run').pose.position_mm,[0,0,100]);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').length_mm,1200);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[0]===-480);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].end_mm,[500,0,100]);
+  }finally{await ui.close();}
+});
+
+test('connecting an off-centre end fitting grows the mirrored draft span',async()=>{
+  const doc=draftFixture();doc.parts=doc.parts.slice(0,1);
+  doc.parts[0].pose.position_mm=[-483,0,100];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[-500,0,100],end_mm:[500,0,100],attachments:[]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0,run_modes:{run:'centered'}}]}];
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'run',connector:'left',port:'socket',end:'start',insertion_mm:20});
+    const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.deepEqual(run.start_mm,[-503,0,100]);
+    assert.deepEqual(run.end_mm,[503,0,100]);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').length_mm,1006);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('a second end snap absorbs a small mirror mismatch within the socket',async()=>{
+  const doc=draftFixture();doc.parts[0].pose.position_mm=[-480,0,100];doc.parts[1].pose.position_mm=[477,0,100];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[-500,0,100],end_mm:[500,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20}]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0,run_modes:{run:'centered'}}]}];
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'run',connector:'right',port:'socket',end:'end',insertion_mm:20});
+    const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.equal(run.attachments[1].insertion_mm,23);
+    assert.deepEqual(run.start_mm,[-500,0,100]);assert.deepEqual(run.end_mm,[500,0,100]);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').length_mm,1000);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('a centered pipe with a through fitting grows equally on both sides',async()=>{
+  const doc=draftFixture();doc.parts=doc.parts.slice(0,1);
+  doc.parts[0].pose.position_mm=[0,0,100];
+  doc.parts[0].body.ports.socket.through=true;
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[-500,0,100],end_mm:[500,0,100],attachments:[{connector:'left',port:'socket'}]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'centered');
+    const length=ui.document.querySelector('#draft-length');length.value='1200';length.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].start_mm,[-600,0,100]);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].end_mm,[600,0,100]);
+    assert.deepEqual(ui.state.doc.parts[0].pose.position_mm,[0,0,100]);
+    assert.deepEqual(ui.state.scene.parts.find(part=>part.id==='run').pose.position_mm,[0,0,100]);
+  }finally{await ui.close();}
+});
+
+test('two planes do not draw the same centered pipe twice',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[-500,200,100],end_mm:[500,200,100],attachments:[]}],
+    mirrors:[{id:'across',axis:'x',offset_mm:0,run_modes:{run:'centered'}},
+      {id:'along',axis:'y',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.tick();
+    assert.equal(ui.mirrorCopies.size,1);
+    assert.equal([...ui.mirrorCopies.values()][0].clone.matrix.elements[13],-200);
+  }finally{await ui.close();}
+});
+
+test('finalizing a mirrored draft run commits both sides in one edit',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,200,100],end_mm:[1000,200,100],attachments:[]}],
+    mirrors:[{id:'mirror-1',axis:'y',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');ui.tick();assert.equal(ui.mirrorCopies.size,1);
+    ui.document.querySelector('#draft-finalize-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.draft_subassemblies);
+    assert.deepEqual(new Set(ui.state.doc.parts.map(part=>part.id)),new Set(['run','run-mirror-mirror-1']));
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies?.[0].mirrors?.length===1);
+    ui.tick();assert.equal(ui.mirrorCopies.size,1);
+  }finally{await ui.close();}
+});
+
+async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOverride=()=>({}),interceptFetch=()=>null,storedHotkeys=null}={}){
   const html=await readFile('pipesim/web/index.html','utf8');const dom=new JSDOM(html,{url});const window=dom.window;
   const document=window.document,timers=[],captures=new Set();let frame,inFlight=0;
   if(storedDefaults)window.localStorage.setItem('pipesim.snap-defaults.v1',storedDefaults);
+  if(storedHotkeys)window.localStorage.setItem('pipesim.library-hotkeys.v1',storedHotkeys);
   window.matchMedia=()=>({matches:false,addEventListener(){}});
   window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
   window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
@@ -52,7 +380,7 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   window.HTMLElement.prototype.releasePointerCapture=id=>captures.delete(id);
   class Renderer {constructor(){this.domElement=document.createElement('canvas');this.shadowMap={};}setPixelRatio(){}setSize(){}render(scene,camera){scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);this.domElement.dataset.rendered='true';}dispose(){}}
   class Controls extends Three.EventDispatcher {constructor(camera){super();this.camera=camera;this.target=new Three.Vector3();this.enabled=true;}update(){this.camera.lookAt(this.target);this.camera.updateMatrixWorld();}dispose(){}}
-  class Gizmo extends Three.EventDispatcher {constructor(){super();this.axis=null;this.dragging=false;}getHelper(){return new Three.Group();}setSize(){}setTranslationSnap(v){this.translationSnap=v;}setRotationSnap(v){this.rotationSnap=v;}attach(o){this.object=o;}detach(){this.object=null;}setMode(m){this.mode=m;}}
+  class Gizmo extends Three.EventDispatcher {constructor(){super();this.axis=null;this.dragging=false;}getHelper(){return new Three.Group();}setSize(){}setTranslationSnap(v){this.translationSnap=v;}setRotationSnap(v){this.rotationSnap=v;}setSpace(s){this.space=s;}attach(o){this.object=o;}detach(){this.object=null;}setMode(m){this.mode=m;}}
   const resolved=await post('resolve',doc);
   const fetchEditor=async(path,options)=>{
     if(path==='/api/bootstrap')return new Response(JSON.stringify({...bootstrap,path:'output/ui-test.pipe.yaml',document:doc,scene:resolved,...bootstrapOverride()}));
@@ -64,11 +392,13 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
   const evaluate=new AsyncFunction('THREE','OrbitControls','TransformControls','GLTFLoader','STLLoader','OBJLoader','connectionCandidates','clearConnectionIntent','alignmentDelta','socketOccupied','rotationAlignment',
     'DEFAULT_SNAP_SETTINGS','loadSnapDefaults','saveSnapDefaults','validateSnapSettings',
+    'draftRuns','draftRun','draftPreview','HUMAN_POSES',
     'window','document','devicePixelRatio','getComputedStyle','ResizeObserver','requestAnimationFrame','fetch','setTimeout','clearTimeout',
-    source+'\nreturn {state, camera, scene, partObjects, viewport, gizmo};');
+    source+'\nreturn {state, camera, orbit, scene, partObjects, ports, viewport, gizmo, snapGhost, mirrorGhost, mirrorCopies, draftConnect};');
   const app=await evaluate({...Three,WebGLRenderer:Renderer},Controls,Gizmo,class{},MeshLoader,class{},
     snapping.connectionCandidates,snapping.clearConnectionIntent,snapping.alignmentDelta,snapping.socketOccupied,snapping.rotationAlignment,
     settings.DEFAULT_SNAP_SETTINGS,settings.loadSnapDefaults,settings.saveSnapDefaults,settings.validateSnapSettings,
+    drafting.draftRuns,drafting.draftRun,drafting.draftPreview,HUMAN_POSES,
     window,document,1,()=>({getPropertyValue:()=> '#dce5e9'}),class{constructor(callback){this.callback=callback;}observe(){this.callback();}},callback=>{frame=callback;},fetchEditor,
     (callback,delay)=>{const timer=setTimeout(callback,delay);timers.push(timer);return timer;},clearTimeout);
   const tick=()=>frame?.(performance.now());tick();
@@ -80,6 +410,615 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   const drain=async()=>{await wait(()=>inFlight===0,45000);await pause(30);};
   return {...app,document,window,wait,select,pixel,pointer,drag,tick,drain,async close(){await drain();timers.forEach(clearTimeout);dom.window.close();}};
 }
+
+test('new pipes use quick draft connections and finalize to one exact cut length',async()=>{
+  const ui=await editor(draftFixture());try{
+    ui.document.querySelector('#category').value='member';
+    ui.document.querySelector('#category').dispatchEvent(new ui.window.Event('change'));
+    ui.document.querySelector('[data-catalog="tubeclamp.tube-C"]').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies?.[0].runs.length===1);
+    const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.equal(ui.state.doc.parts.length,2);
+    assert.equal(ui.state.scene.parts.find(p=>p.id===run.id).draft,true);
+    ui.document.querySelector('[data-tool="connect"]').click();
+    ui.select('left');
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Connect draft run');
+    ui.document.querySelector('#modal-actions .primary').click();
+    assert.equal(run.attachments.length,1);
+    ui.select('right');
+    assert.equal(run.attachments.length,2);
+    assert.equal(ui.state.scene.parts.find(p=>p.id===run.id).length_mm,1060);
+    ui.document.querySelector('#finalize-draft').click();
+    await ui.wait(()=>!ui.state.doc.draft_subassemblies);
+    assert.equal(ui.state.doc.parts.find(p=>p.id===run.id).parameters.length_mm,1060);
+    assert.equal(ui.state.doc.joints.length,2);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies?.[0].runs.length===1);
+    assert.equal(ui.state.doc.parts.length,2);
+  }finally{await ui.close();}
+});
+
+test('library card menu assigns a persistent number hotkey without adding a part',async()=>{
+  const catalog='tubeclamp.TC101C',ui=await editor(fixture());let saved;
+  try{
+    const actions=ui.document.querySelector(`[data-library-actions="${catalog}"]`);
+    actions.click();assert.equal(ui.state.doc.parts.length,2);
+    assert.equal(ui.document.querySelector('#library-actions-menu').getAttribute('role'),'menu');
+    ui.document.querySelector('[data-library-command="set"]').click();
+    const capture=ui.document.querySelector('#hotkey-capture');
+    capture.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'1',code:'Digit1',bubbles:true,cancelable:true}));
+    assert.equal(capture.value,'1');
+    [...ui.document.querySelectorAll('#modal-actions button')].find(b=>b.textContent==='Save hotkey').click();
+    await ui.wait(()=>!ui.document.querySelector('#modal').open);
+    assert.match(ui.document.querySelector(`[data-catalog="${catalog}"]`).textContent,/1/);
+    saved=ui.window.localStorage.getItem('pipesim.library-hotkeys.v1');
+    assert.equal(JSON.parse(saved)[catalog],'1');
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'1',code:'Digit1',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.parts.length===3);
+    assert.equal(ui.state.doc.parts.at(-1).catalog,catalog);
+    ui.document.querySelector('[data-left="outline"]').focus();
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'1',code:'Digit1',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.parts.length===4);
+    assert.equal(ui.state.undo.length,2);
+  }finally{await ui.close();}
+  const fresh=await editor(fixture(),null,{storedHotkeys:saved});try{
+    assert.ok(fresh.document.querySelector(`[data-catalog="${catalog}"] .part-hotkey`));
+    fresh.document.querySelector('#part-search').focus();
+    fresh.document.dispatchEvent(new fresh.window.KeyboardEvent('keydown',{key:'1',code:'Digit1',bubbles:true,cancelable:true}));
+    await pause(50);assert.equal(fresh.state.doc.parts.length,2);
+    fresh.document.querySelector('#part-search').blur();
+    fresh.document.dispatchEvent(new fresh.window.KeyboardEvent('keydown',{key:'1',code:'Digit1',bubbles:true,cancelable:true}));
+    await fresh.wait(()=>fresh.state.doc.parts.length===3);
+  }finally{await fresh.close();}
+});
+
+test('library hotkeys can be reassigned, removed, and use Alt+Shift+letter',async()=>{
+  const ui=await editor(fixture());try{
+    const assign=(catalog,key,code,modifiers={})=>{
+      ui.document.querySelector(`[data-library-actions="${catalog}"]`).click();
+      ui.document.querySelector('[data-library-command="set"]').click();
+      ui.document.querySelector('#hotkey-capture').dispatchEvent(new ui.window.KeyboardEvent('keydown',
+        {key,code,bubbles:true,cancelable:true,...modifiers}));
+      ui.document.querySelector('#modal-actions .primary').click();
+    };
+    assign('tubeclamp.TC101C','2','Digit2');await ui.wait(()=>!ui.document.querySelector('#modal').open);
+    ui.document.querySelector('#category').value='all';
+    ui.document.querySelector('#category').dispatchEvent(new ui.window.Event('change'));
+    assign('tubeclamp.tube-C','2','Digit2');await ui.wait(()=>!ui.document.querySelector('#modal').open);
+    const saved=JSON.parse(ui.window.localStorage.getItem('pipesim.library-hotkeys.v1'));
+    assert.equal(saved['tubeclamp.TC101C'],undefined);assert.equal(saved['tubeclamp.tube-C'],'2');
+    ui.document.querySelector('[data-left="outline"]').focus();
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'2',code:'Digit2',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies?.[0].runs.length===1);
+    assign('tubeclamp.TC101C','T','KeyT',{altKey:true,shiftKey:true});await ui.wait(()=>!ui.document.querySelector('#modal').open);
+    ui.document.querySelector('[data-left="outline"]').focus();
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'T',code:'KeyT',altKey:true,shiftKey:true,bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.parts.length===3);
+    ui.document.querySelector('[data-library-actions="tubeclamp.tube-C"]').click();
+    ui.document.querySelector('[data-library-command="remove"]').click();
+    assert.equal(JSON.parse(ui.window.localStorage.getItem('pipesim.library-hotkeys.v1'))['tubeclamp.tube-C'],undefined);
+    assert.equal(ui.document.querySelector('[data-catalog="tubeclamp.tube-C"] .part-hotkey'),null);
+  }finally{await ui.close();}
+});
+
+test('Finalize subassembly leaves a disconnected draft structure in the same stored group',async()=>{
+  const doc=draftFixture();
+  doc.parts.push(...doc.parts.map(part=>({...structuredClone(part),id:part.id+'-other',
+    pose:{position_mm:[part.pose.position_mm[0],500,100]}})));
+  doc.anchors=[{part:'left',surface:'fixture'}];
+  const run=(id,suffix,y)=>({id,catalog:'tubeclamp.tube-C',start_mm:[0,y,100],end_mm:[1000,y,100],attachments:[
+    {connector:'left'+suffix,port:'socket',end:'start',insertion_mm:20},
+    {connector:'right'+suffix,port:'socket',end:'end',insertion_mm:20}
+  ]});
+  doc.draft_subassemblies=[{id:'draft-1',runs:[run('run-a','',0),run('run-b','-other',500)]}];
+  const ui=await editor(doc);try{
+    ui.select('run-a');ui.document.querySelector('#draft-finalize-selected').click();
+    await ui.wait(()=>!ui.state.placementPending);
+    assert.ok(ui.state.doc.parts.some(p=>p.id==='run-a'));
+    assert.equal(ui.state.doc.parts.some(p=>p.id==='run-b'),false);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs.map(r=>r.id),['run-b']);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run-b').draft,true);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies?.[0].runs.length===2);
+    assert.equal(ui.state.doc.parts.some(p=>p.id==='run-a'),false);
+    ui.document.querySelector('#redo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies?.[0].runs.length===1);
+  }finally{await ui.close();}
+});
+
+test('selected Finalize refuses an older server rather than finalizing every draft run',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[
+    {id:'run-a',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100]},
+    {id:'run-b',catalog:'tubeclamp.tube-C',start_mm:[0,500,100],end_mm:[1000,500,100]}
+  ]}];
+  const ui=await editor(doc,null,{interceptFetch(path){if(path==='/api/draft-finalize-selected')
+    return new Response(JSON.stringify({error:'Unknown operation'}),{status:404});return null;}});
+  try{
+    ui.select('run-a');const before=structuredClone(ui.state.doc);
+    ui.document.querySelector('#draft-finalize-selected').click();await ui.wait(()=>!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc,before);assert.equal(ui.state.undo.length,0);
+    assert.match(ui.document.querySelector('#toast').textContent,/restart the PipeSim server/);
+  }finally{await ui.close();}
+});
+
+test('Repair alignment closes a small draft mismatch without finalizing and supports Undo',async()=>{
+  const doc=draftFixture();doc.parts[1].pose.position_mm[1]=7;
+  doc.anchors=[{part:'left',surface:'fixture'}];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}
+    ]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');assert.ok(ui.state.scene.parts.find(p=>p.id==='run').conflicts.some(c=>c.code==='POSITION_MISMATCH'));
+    ui.document.querySelector('#draft-repair-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&ui.state.scene.parts.find(p=>p.id==='run').conflicts.length===0);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].id,'run');
+    assert.equal(ui.state.doc.parts.length,2);assert.equal(ui.state.doc.joints.length,0);
+    assert.ok(Math.abs(ui.state.doc.parts.find(p=>p.id==='right').pose.position_mm[1])<.01);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='run').conflicts.some(c=>c.code==='POSITION_MISMATCH'));
+    assert.equal(ui.state.doc.parts.find(p=>p.id==='right').pose.position_mm[1],7);
+  }finally{await ui.close();}
+});
+
+test('Repair keeps a connected cross-pipe centered when moving its shared through fitting',async()=>{
+  const doc=draftFixture();doc.parts=[{id:'junction',body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:6}],ports:{
+      through:{type:'socket',through:true,profile:'round',diameter_mm:42.4,
+        position_mm:[0,0,0],axis:[0,1,0],engagement_mm:34},
+      end:{type:'socket',profile:'round',diameter_mm:42.4,
+        position_mm:[0,0,0],axis:[-1,0,0],engagement_mm:40,min_engagement_mm:15}}},
+    pose:{position_mm:[280,500,100]}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[
+    {id:'cross',catalog:'tubeclamp.tube-C',start_mm:[-300,500,100],end_mm:[300,500,100],
+      attachments:[{connector:'junction',port:'end',end:'end',insertion_mm:20}]},
+    {id:'rail',catalog:'tubeclamp.tube-C',start_mm:[278.9,0,100],end_mm:[278.9,1000,100],
+      attachments:[{connector:'junction',port:'through'}]}],
+    mirrors:[{id:'midline',axis:'x',offset_mm:0,run_modes:{cross:'centered'}}]}];
+  const ui=await editor(doc);try{
+    ui.select('rail');ui.document.querySelector('#draft-repair-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&ui.state.scene.parts.find(p=>p.id==='rail').conflicts.length===0);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='cross').conflicts.length,0);
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.cross,'centered');
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].end_mm[0]<300,true);
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('Repair and Finalize clear a submillimetre through engagement shortfall',async()=>{
+  const doc=draftFixture();doc.parts=[{id:'through',body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:6,position_mm:[0,80,0]}],ports:{bore:{type:'socket',through:true,
+      profile:'round',diameter_mm:42.4,position_mm:[0,0,0],axis:[1,0,0],engagement_mm:34}}},
+    pose:{position_mm:[16.9,.001,100]}}];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[{connector:'through',port:'bore'}]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').conflicts[0].code,'THROUGH_FIT');
+    ui.document.querySelector('#draft-repair-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&ui.state.scene.parts.find(part=>part.id==='run').conflicts.length===0);
+    assert.ok(ui.state.doc.parts[0].pose.position_mm[0]>17);
+    ui.document.querySelector('#draft-finalize-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.draft_subassemblies);
+    assert.equal(ui.state.doc.joints[0].type,'socket');
+  }finally{await ui.close();}
+});
+
+test('Repair keeps a fine-tuned through fitting at its current draft station',async()=>{
+  const doc=draftFixture();
+  doc.anchors=[{part:'left',surface:'fixture'},{part:'right',surface:'fixture'}];
+  doc.parts.push({id:'through',body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:6,position_mm:[0,80,0]}],
+    ports:{bore:{type:'socket',through:true,profile:'round',diameter_mm:42.4,
+      position_mm:[0,0,0],axis:[1,0,0],engagement_mm:34}}},
+    pose:{position_mm:[650,7,100]}});
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20},
+      {connector:'through',port:'bore',at_mm:520}
+    ]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');
+    const conflicts=ui.state.scene.parts.find(p=>p.id==='run').conflicts;
+    assert.deepEqual(conflicts.map(c=>c.code),['THROUGH_FIT']);
+    assert.ok(Math.abs(conflicts[0].residual_mm-7)<.01);
+    ui.document.querySelector('#draft-repair-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&ui.state.scene.parts.find(p=>p.id==='run').conflicts.length===0);
+    const position=ui.state.doc.parts.find(p=>p.id==='through').pose.position_mm;
+    assert.ok(Math.abs(position[0]-650)<.01);
+    assert.ok(Math.abs(position[1])<.01);
+    assert.ok(ui.state.doc.draft_subassemblies);
+  }finally{await ui.close();}
+});
+
+test('panel fastener dialog attaches chosen flange bolt holes without editing joint JSON',async()=>{
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Board on flanges',parts:[
+    {id:'board',catalog:'generic.panel',parameters:{width_mm:800,depth_mm:200,thickness_mm:30},
+      pose:{position_mm:[0,0,50]}},
+    {id:'left-flange',catalog:'tubeclamp.TC131T',pose:{position_mm:[-300,0,0]}},
+    {id:'right-flange',catalog:'tubeclamp.TC131T',pose:{position_mm:[300,0,0]}}
+  ],joints:[],anchors:[{part:'left-flange',surface:'fixture'}]};
+  const ui=await editor(doc);try{
+    ui.select('board');ui.document.querySelector('#fasten-panel').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Fasten board at bolt holes');
+    const holes=[...ui.document.querySelectorAll('[data-panel-hole]')];
+    assert.equal(holes.length,8);
+    for(const [i,hole] of holes.entries())hole.checked=i%4<2;
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.length===4);
+    assert.equal(ui.state.undo.length,1);
+    assert.ok(ui.state.doc.joints.every(j=>j.type==='fixed'&&j.b.part==='board'&&j.a.port.startsWith('bolt')));
+    assert.ok(ui.state.doc.joints.every(j=>j.metadata.hardware.includes('local X')));
+    assert.equal(new Set(ui.state.doc.joints.map(j=>j.a.part+'/'+j.a.port)).size,4);
+    assert.deepEqual(new Set(ui.state.doc.joints.map(j=>j.a.part)),new Set(['left-flange','right-flange']));
+    const report=await post('validate',ui.state.doc);
+    assert.equal(report.valid,true,report.issues?.map(i=>i.code).join(', '));
+    ui.select('board');ui.document.querySelector('#fasten-panel').click();
+    assert.equal(ui.document.querySelectorAll('[data-panel-hole]').length,4,'used holes are unavailable');
+    ui.document.querySelector('#modal-actions button').click();
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.joints.length===0);
+  }finally{await ui.close();}
+});
+
+test('padded panel uses board sizing and bolt-hole fastening controls',async()=>{
+  const doc=blankDesign('Padded rest');
+  doc.parts=[
+    {id:'rest',catalog:'generic.padded-panel',parameters:{width_mm:800,depth_mm:200,thickness_mm:60,padding_mm:45,edge_inset_mm:5},pose:{position_mm:[0,0,50]}},
+    {id:'left-flange',catalog:'tubeclamp.TC131T',pose:{position_mm:[-300,0,0]}},
+    {id:'right-flange',catalog:'tubeclamp.TC131T',pose:{position_mm:[300,0,0]}}
+  ];
+  const ui=await editor(doc);try{
+    ui.select('rest');
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='rest').geometry.length,2);
+    assert.match(ui.document.querySelector('#fasten-panel').textContent,/padded panel/);
+    ui.document.querySelector('#fasten-panel').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Fasten padded panel at bolt holes');
+    assert.equal(ui.document.querySelectorAll('[data-panel-hole]').length,8);
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.length===8);
+    assert.ok(ui.state.doc.joints.every(j=>j.b.part==='rest'));
+    ui.select('rest');
+    const padding=ui.document.querySelector('[data-param="padding_mm"]');
+    padding.value='35';padding.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='rest').geometry[1].size_mm[2]===35);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='rest').geometry[0].size_mm[2],25);
+  }finally{await ui.close();}
+});
+
+test('padded panel is available from the library with an upholstered top',async()=>{
+  const ui=await editor(blankDesign('Add padded panel'));try{
+    const category=ui.document.querySelector('#category');category.value='panel';
+    category.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    const search=ui.document.querySelector('#part-search');
+    search.value='padded';search.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    const card=ui.document.querySelector('[data-catalog="generic.padded-panel"]');
+    assert.ok(card);
+    card.click();
+    await ui.wait(()=>ui.state.scene.parts.some(p=>p.catalog==='generic.padded-panel'));
+    const part=ui.state.scene.parts.find(p=>p.catalog==='generic.padded-panel');
+    assert.equal(part.geometry.length,2);
+    assert.notEqual(part.geometry[0].color,part.geometry[1].color);
+    assert.equal(part.pose.position_mm[2],30);
+  }finally{await ui.close();}
+});
+
+test('Repair alignment leaves an anchored conflicting draft untouched',async()=>{
+  const doc=draftFixture();doc.parts[1].pose.position_mm[1]=7;
+  doc.anchors=[{part:'left',surface:'fixture'},{part:'right',surface:'fixture'}];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}
+    ]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');const before=structuredClone(ui.state.doc);
+    ui.document.querySelector('#draft-repair-selected').click();
+    await ui.wait(()=>ui.document.querySelector('#modal-title').textContent==='Draft still needs adjustment');
+    assert.deepEqual(ui.state.doc,before);assert.equal(ui.state.undo.length,0);
+    assert.ok(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length);
+  }finally{await ui.close();}
+});
+
+test('Duplicate makes independent draft pipes with the same length and rotation',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{
+    id:'run',catalog:'tubeclamp.tube-C',parameters:{wall_mm:3.2},
+    start_mm:[0,0,100],end_mm:[1200,500,100],locked_length_mm:1300,attachments:[]
+  }]}];
+  const ui=await editor(doc);try{
+    ui.select('run');const original=structuredClone(ui.state.doc.draft_subassemblies[0].runs[0]);
+    ui.document.querySelector('#duplicate-selected').click();
+    await ui.wait(()=>ui.state.selected==='run-copy');
+    const copy=ui.state.doc.draft_subassemblies[0].runs.find(r=>r.id==='run-copy');
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0],original);
+    assert.deepEqual(copy.parameters,original.parameters);
+    assert.equal(copy.locked_length_mm,original.locked_length_mm);
+    assert.deepEqual(copy.attachments,[]);
+    assert.ok(copy.start_mm[0]>original.start_mm[0]);
+    assert.deepEqual(copy.start_mm.slice(1),original.start_mm.slice(1));
+    assert.deepEqual(copy.end_mm.map((v,i)=>v-copy.start_mm[i]),original.end_mm.map((v,i)=>v-original.start_mm[i]));
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs.length===1);
+  }finally{await ui.close();}
+});
+
+test('Duplicate N makes draft pipes in one local edit and one Undo',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{
+    id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[0,0,1100],attachments:[]
+  }]}];
+  let requests=0;const ui=await editor(doc,null,{interceptFetch(path){if(path==='/api/duplicate')requests++;return null;}});
+  try{
+    ui.select('run');ui.document.querySelector('#duplicate-menu-toggle').click();
+    ui.document.querySelector('[data-duplicate="count"]').click();
+    ui.document.querySelector('#duplicate-count').value='100';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs.length===101);
+    assert.equal(requests,0);
+    assert.equal(ui.state.scene.parts.filter(p=>p.draft).length,101);
+    assert.equal(new Set(ui.state.doc.draft_subassemblies[0].runs.map(r=>r.id)).size,101);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs.length===1);
+  }finally{await ui.close();}
+});
+
+test('Duplicate N previews and applies a signed Y/Z step to draft pipes',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{
+    id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[0,0,1100],attachments:[]
+  }]}];
+  const ui=await editor(doc);try{
+    ui.select('run');ui.document.querySelector('#duplicate-menu-toggle').click();
+    ui.document.querySelector('[data-duplicate="count"]').click();
+    ui.document.querySelector('#duplicate-count').value='3';
+    for(const [axis,value] of [0,-250,40].entries()){
+      const input=ui.document.querySelector('#duplicate-offset-'+axis);
+      input.value=String(value);input.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    }
+    assert.equal(ui.snapGhost.children.length,3);
+    assert.deepEqual(ui.snapGhost.children.map(ghost=>ghost.position.toArray()),
+      [[0,-250,640],[0,-500,680],[0,-750,720]]);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs.length,1);
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs.length===4);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs.slice(1).map(run=>run.start_mm),
+      [[0,-250,140],[0,-500,180],[0,-750,220]]);
+    assert.equal(ui.snapGhost.children.length,0);
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('Duplicate of a connected draft pipe keeps the displayed span but leaves connections behind',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{
+    id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],
+    attachments:[{connector:'left',port:'socket',end:'start',insertion_mm:30},{connector:'right',port:'socket',end:'end',insertion_mm:30}]
+  }]}];
+  const ui=await editor(doc);try{
+    ui.select('run');const originalLength=ui.state.scene.parts.find(p=>p.id==='run').length_mm;
+    ui.document.querySelector('#duplicate-selected').click();await ui.wait(()=>ui.state.selected==='run-copy');
+    const copy=ui.state.doc.draft_subassemblies[0].runs.find(r=>r.id==='run-copy');
+    assert.deepEqual(copy.attachments,[]);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run-copy').length_mm,originalLength);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,2);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run-copy').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('Duplicate entire subassembly copies a connected draft graph and undoes in one step',async()=>{
+  const ui=await editor(draftDuplicateGraph());try{
+    ui.select('branch');ui.document.querySelector('#duplicate-menu-toggle').click();
+    assert.ok(ui.document.querySelector('[data-duplicate="subassembly"]'));
+    assert.equal(ui.document.querySelector('[data-duplicate="touching"]'),null);
+    ui.document.querySelector('[data-duplicate="subassembly"]').click();
+    await ui.wait(()=>ui.state.selected==='branch-copy'&&!ui.state.placementPending);
+    const copy=ui.state.doc.draft_subassemblies.find(g=>g.id==='frame-copy');
+    assert.deepEqual(copy.runs.map(r=>r.id),['rail-copy','branch-copy']);
+    assert.deepEqual(new Set(copy.runs[0].attachments.map(a=>a.connector)),
+      new Set(['left-copy','right-copy','hub-copy']));
+    assert.equal(ui.state.doc.parts.some(p=>p.id==='board-copy'),true);
+    assert.equal(ui.state.doc.joints.some(j=>j.id==='board-mount-copy'),true);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs.length,3);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies.length===1);
+    assert.equal(ui.state.doc.parts.some(p=>p.id==='hub-copy'),false);
+  }finally{await ui.close();}
+});
+
+test('Duplicate N previews and copies the whole draft structure at the chosen offset',async()=>{
+  const ui=await editor(draftDuplicateGraph());try{
+    ui.select('rail');ui.document.querySelector('#duplicate-menu-toggle').click();
+    ui.document.querySelector('[data-duplicate="count"]').click();
+    const scope=ui.document.querySelector('#duplicate-scope');
+    assert.deepEqual([...scope.options].map(option=>option.value),['part','subassembly']);
+    scope.value='subassembly';scope.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    for(const [axis,value] of [0,350,20].entries()){
+      const input=ui.document.querySelector('#duplicate-offset-'+axis);
+      input.value=String(value);input.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    }
+    assert.equal(ui.snapGhost.children.length,12);
+    assert.equal(ui.state.doc.draft_subassemblies.length,1);
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies.length===3&&!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc.draft_subassemblies.slice(1).map(g=>g.runs[0].start_mm),
+      [[0,350,120],[0,700,140]]);
+    assert.equal(ui.state.doc.joints.length,3);
+    assert.equal(ui.snapGhost.children.length,0);
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('100 draft graph connections in a 300-part scene avoid the exact connection API',async()=>{
+  let requests=0;const ui=await editor(largeDraftFixture(),null,{interceptFetch(path){if(path.startsWith('/api/'))requests++;return null;}});
+  try{
+    requests=0;
+    const timings=[];
+    for(let i=0;i<100;i++){
+      const start=performance.now();
+      ui.draftConnect({member:`run-${i}`,connector:`left-${i}`,port:'socket',end:'start'});
+      timings.push(performance.now()-start);
+    }
+    timings.sort((a,b)=>a-b);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs.filter(r=>r.attachments?.length===1).length,100);
+    assert.equal(requests,0);
+    assert.ok(timings[94]<150,`p95 draft connection took ${timings[94].toFixed(1)} ms`);
+  }finally{await ui.close();}
+});
+
+test('dragging a draft run into a through socket commits the shown snap and clears its ghost',async()=>{
+  const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.drag(ui.pixel(new Three.Vector3(0,0,500)),ui.pixel(new Three.Vector3(300,0,500)));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===1);
+    const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.equal(run.attachments[0].port,'through');
+    assert.ok(Math.abs(ui.state.scene.parts.find(p=>p.id==='run').pose.position_mm[0]-300)<1,
+      'the actual pipe must occupy the previewed socket position');
+    assert.equal(ui.snapGhost.children.length,0,'the snap ghost must disappear on release');
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('one draft pipe drag records every aligned through socket it passes',async()=>{
+  const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[];
+  doc.parts.push({...structuredClone(doc.parts[0]),id:'tee-2',pose:{position_mm:[300,0,700]}});
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.drag(ui.pixel(new Three.Vector3(0,0,500)),ui.pixel(new Three.Vector3(300,0,500)));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===2);
+    const attachments=ui.state.doc.draft_subassemblies[0].runs[0].attachments;
+    assert.deepEqual(new Set(attachments.map(a=>a.connector)),new Set(['tee','tee-2']));
+    assert.ok(attachments.every(a=>a.port==='through'));
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('one draft pipe drag records nearby through sockets and repair closes their fits',async()=>{
+  const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[];
+  doc.parts.push({...structuredClone(doc.parts[0]),id:'tee-2',pose:{position_mm:[304,0,700],rotation_deg:[0,3,0]}});
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.drag(ui.pixel(new Three.Vector3(0,0,500)),ui.pixel(new Three.Vector3(300,0,500)));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===2);
+    assert.deepEqual(new Set(ui.state.doc.draft_subassemblies[0].runs[0].attachments.map(a=>a.connector)),
+      new Set(['tee','tee-2']));
+    ui.select('run');ui.document.querySelector('#draft-repair-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&
+      ui.state.scene.parts.find(p=>p.id==='run').conflicts.length===0);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,2);
+  }finally{await ui.close();}
+});
+
+test('Repair discovers a visually intersected through socket absent from the draft graph',async()=>{
+  const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[];
+  doc.parts.push({...structuredClone(doc.parts[0]),id:'tee-2',pose:{position_mm:[304,0,700],rotation_deg:[0,3,0]}});
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[300,0,0],end_mm:[300,0,1000],attachments:[{connector:'tee',port:'through'}]}]}];
+  const ui=await editor(doc);try{
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,1);
+    ui.select('run');ui.document.querySelector('#draft-repair-selected').click();
+    await ui.wait(()=>!ui.state.placementPending&&
+      ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===2);
+    assert.deepEqual(new Set(ui.state.doc.draft_subassemblies[0].runs[0].attachments.map(a=>a.connector)),
+      new Set(['tee','tee-2']));
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('dragging a through fitting onto a draft run commits an aligned connection',async()=>{
+  const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.drag(ui.pixel(new Three.Vector3(300,0,500)),ui.pixel(new Three.Vector3(0,0,500)));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===1);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+    assert.equal(ui.snapGhost.children.length,0);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===0);
+    assert.equal(ui.state.doc.parts.find(p=>p.id==='tee').pose.position_mm[0],300);
+  }finally{await ui.close();}
+});
+
+test('toolbox drop aligns a new fitting to the existing draft run',async()=>{
+  const doc=fixture('TC104C');doc.parts=[];doc.anchors=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    const point=ui.pixel(new Three.Vector3(0,0,500));
+    const event=new ui.window.MouseEvent('drop',{clientX:point.x,clientY:point.y,bubbles:true,cancelable:true});
+    Object.defineProperty(event,'dataTransfer',{value:{getData:()=> 'tubeclamp.TC104C'}});
+    ui.document.querySelector('#viewport canvas').dispatchEvent(event);
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===1);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].start_mm,[0,0,0]);
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('toolbox drop above a ground pipe uses nearby geometry depth instead of a distant ground hit',async()=>{
+  const doc=fixture();doc.parts=[{...doc.parts[0],pose:{position_mm:[0,0,25],rotation_deg:[0,90,0]}}];doc.anchors=[];
+  const ui=await editor(doc);try{
+    ui.camera.position.set(0,-3000,600);ui.orbit.target.set(0,0,500);ui.orbit.update();
+    const pixel=ui.pixel(new Three.Vector3(0,0,220));
+    const event=new ui.window.MouseEvent('drop',{clientX:pixel.x,clientY:pixel.y,bubbles:true,cancelable:true});
+    Object.defineProperty(event,'dataTransfer',{value:{getData:()=> 'tubeclamp.TC101C'}});
+    ui.document.querySelector('#viewport canvas').dispatchEvent(event);
+    await ui.wait(()=>ui.state.doc.parts.length===2);
+    const placed=ui.state.doc.parts.find(p=>p.id!=='pipe').pose.position_mm;
+    assert.ok(Math.abs(placed[1])<300,`drop depth drifted ${placed[1]} mm from the pipe`);
+    assert.ok(placed[2]>100,`drop fell to ground: z=${placed[2]}`);
+  }finally{await ui.close();}
+});
+
+test('dragging a fitting over a pipe adopts the pipe depth in perspective',async()=>{
+  const doc=fixture();doc.parts[0].pose={position_mm:[0,0,25],rotation_deg:[0,90,0]};
+  doc.parts[1].pose={position_mm:[0,-700,220]};doc.anchors=[];
+  const ui=await editor(doc);try{
+    ui.state.connectionSnap=false;
+    ui.camera.position.set(0,-3000,600);ui.orbit.target.set(0,0,500);ui.orbit.update();
+    ui.drag(ui.pixel(new Three.Vector3(0,-700,220)),ui.pixel(new Three.Vector3(0,0,220)));
+    await ui.wait(()=>ui.state.doc.parts.find(p=>p.id==='tee').pose.position_mm[1]!==-700);
+    const placed=ui.state.doc.parts.find(p=>p.id==='tee').pose.position_mm;
+    assert.ok(Math.abs(placed[1])<300,`drag stayed at its old depth: ${placed}`);
+    assert.ok(placed[2]>100);
+  }finally{await ui.close();}
+});
+
+test('near-horizon empty-space drop stays within the assembly extent',async()=>{
+  const doc=fixture();doc.anchors=[];
+  const ui=await editor(doc);try{
+    ui.camera.position.set(0,-3000,500);ui.orbit.target.set(0,0,500);ui.orbit.update();
+    const event=new ui.window.MouseEvent('drop',{clientX:450,clientY:320,bubbles:true,cancelable:true});
+    Object.defineProperty(event,'dataTransfer',{value:{getData:()=> 'tubeclamp.TC101C'}});
+    ui.document.querySelector('#viewport canvas').dispatchEvent(event);
+    await ui.wait(()=>ui.state.doc.parts.length===3);
+    const placed=ui.state.doc.parts.at(-1).pose.position_mm;
+    assert.ok(placed.every(Number.isFinite));
+    assert.ok(Math.max(...placed.map(Math.abs))<5000,`drop escaped the scene: ${placed}`);
+    assert.ok(placed[2]>=0);
+  }finally{await ui.close();}
+});
+
+test('gizmo translation rejects a perspective intersection far outside the scene',async()=>{
+  const doc=fixture();doc.anchors=[];
+  const ui=await editor(doc);try{
+    ui.select('tee');ui.document.querySelector('[data-tool="translate"]').click();
+    ui.gizmo.dispatchEvent({type:'mouseDown'});
+    ui.gizmo.object.position.x=1e10;
+    ui.gizmo.dispatchEvent({type:'objectChange'});
+    assert.ok(Math.abs(ui.partObjects.get('tee').position.x)<5000);
+    ui.gizmo.dispatchEvent({type:'mouseUp'});
+    await ui.wait(()=>!ui.state.placementPending);
+    assert.ok(Math.abs(ui.state.doc.parts.find(p=>p.id==='tee').pose.position_mm[0])<5000);
+  }finally{await ui.close();}
+});
 
 for(const z of [500,-10])test(`Drop to floor places a horizontal pipe from Z=${z} and supports Undo`,async()=>{
   const doc=fixture();doc.parts=[{...doc.parts[0],pose:{position_mm:[125,75,z],rotation_deg:[0,90,0]}}];doc.anchors=[];
@@ -249,6 +1188,7 @@ test('snap settings apply to controls and saved defaults load in a fresh editor'
     ui.document.querySelector('#snap-settings-button').click();assert.equal(ui.document.querySelector('#settings-angle').value,'90');
     ui.document.querySelector('[data-snap-preset="45"]').click();ui.document.querySelector('#settings-position').value='25';
     ui.document.querySelector('#settings-capture').value='16';ui.document.querySelector('#settings-align').checked=false;
+    ui.document.querySelector('#settings-keyboard-move').value='125';ui.document.querySelector('#settings-keyboard-rotate').value='12';
     ui.document.querySelector('#modal-actions .primary').click();
     assert.equal(ui.gizmo.translationSnap,25);assert.equal(ui.gizmo.rotationSnap,Math.PI/4);
     stored=ui.window.localStorage.getItem('pipesim.snap-defaults.v1');assert.ok(stored);
@@ -256,11 +1196,195 @@ test('snap settings apply to controls and saved defaults load in a fresh editor'
   }finally{await ui.close();}
   const fresh=await editor(fixture(),stored);try{
     assert.equal(fresh.state.snapSettings.rotationDeg,45);assert.equal(fresh.state.snapSettings.connectionPixels,16);
+    assert.equal(fresh.state.snapSettings.keyboardMoveMm,125);assert.equal(fresh.state.snapSettings.keyboardRotateDeg,12);
     assert.equal(fresh.gizmo.translationSnap,25);assert.equal(fresh.gizmo.rotationSnap,Math.PI/4);
     fresh.document.querySelector('#snap-settings-button').click();fresh.document.querySelector('[data-snap-preset="90"]').click();
     [...fresh.document.querySelectorAll('#modal-actions button')].find(b=>b.textContent==='Apply').click();
     assert.equal(fresh.gizmo.rotationSnap,Math.PI/2);assert.equal(fresh.window.localStorage.getItem('pipesim.snap-defaults.v1'),stored);
+    fresh.select('tee');
+    const key=value=>fresh.document.dispatchEvent(new fresh.window.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
+    key('d');await fresh.wait(()=>fresh.state.doc.parts.find(p=>p.id==='tee').pose.position_mm[0]===425);
+    key('c');await fresh.wait(()=>Math.abs(fresh.state.doc.parts.find(p=>p.id==='tee').pose.rotation_deg[2]-12)<.01);
   }finally{await fresh.close();}
+});
+
+test('keyboard nudges use separate steps, fine movement, and queued held keys',async()=>{
+  const doc=fixture();doc.parts=[doc.parts[0]];doc.anchors=[];
+  const ui=await editor(doc);try{
+    ui.select('pipe');
+    const key=(value,options={})=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true,...options}));
+    key('d');key('d');key('d');
+    await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[0]===300&&!ui.state.placementPending);
+    assert.equal(ui.state.undo.length,2);
+    key('D',{shiftKey:true});await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[0]===310);
+    key('w');await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[1]===100);
+    key('f');await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[2]===600);
+    key('v');await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[2]===500);
+    key('z');await ui.wait(()=>Math.abs(ui.state.doc.parts[0].pose.rotation_deg[0]-15)<.01);
+    key('z',{altKey:true});await ui.wait(()=>Math.abs(ui.state.doc.parts[0].pose.rotation_deg[0])<.01);
+    key('x');await ui.wait(()=>Math.abs(ui.state.doc.parts[0].pose.rotation_deg[1]-15)<.01);
+    key('c',{shiftKey:true});await ui.wait(()=>Math.abs(ui.state.doc.parts[0].pose.rotation_deg[2]-1.5)<.1);
+    const before=structuredClone(ui.state.doc.parts[0].pose);
+    ui.document.querySelector('#part-search').focus();key('d');await pause(60);
+    assert.deepEqual(ui.state.doc.parts[0].pose,before);
+  }finally{await ui.close();}
+});
+
+test('keyboard nudges move and rotate an independent draft pipe without changing length',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{
+    id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[]
+  }]}];
+  const ui=await editor(doc);try{
+    ui.select('run');const key=value=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
+    key('w');const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.equal(run.start_mm[1],100);assert.equal(run.end_mm[1],100);
+    key('c');await ui.wait(()=>ui.state.undo.length===2);
+    const span=new Three.Vector3(...run.end_mm).sub(new Three.Vector3(...run.start_mm));
+    assert.ok(Math.abs(span.length()-1000)<.001);
+    assert.ok(Math.abs(Three.MathUtils.radToDeg(Math.atan2(span.y,span.x))-15)<.001);
+    assert.equal(ui.state.undo.length,2);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].end_mm[1]===100);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].start_mm[1]===0);
+  }finally{await ui.close();}
+});
+
+test('moving a connected draft tube translates its fittings and keeps its socket attachments',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{
+    id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}
+    ]
+  }]}];
+  const ui=await editor(doc);try{
+    ui.select('run');
+    const input=ui.document.querySelector('[data-pose="position_mm"][data-axis="1"]');
+    input.value='250';input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    let run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.deepEqual(ui.state.doc.parts.map(p=>p.pose.position_mm),[[0,250,100],[1000,250,100]]);
+    assert.deepEqual(ui.partObjects.get('left').position.toArray(),[0,250,100]);
+    assert.equal(run.attachments.length,2);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').pose.position_mm[1],250);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').length_mm,1040);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+    assert.equal(ui.state.undo.length,1);
+    ui.drag(ui.pixel(new Three.Vector3(500,250,100)),ui.pixel(new Three.Vector3(600,250,100)));
+    const moved=ui.state.doc.parts[0].pose.position_mm;
+    assert.ok(moved[0]>0);
+    assert.deepEqual(ui.state.doc.parts[1].pose.position_mm,[1000+moved[0],moved[1],moved[2]]);
+    assert.deepEqual(ui.partObjects.get('right').position.toArray(),ui.state.doc.parts[1].pose.position_mm);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].start_mm,moved);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,2);
+    assert.equal(ui.state.undo.length,2);
+    ui.document.activeElement.blur();ui.select('run');
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'w',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[1]===moved[1]+100);
+    assert.equal(ui.state.doc.parts[1].pose.position_mm[1],moved[1]+100);
+    assert.equal(ui.partObjects.get('left').position.y,moved[1]+100);
+    assert.equal(ui.state.undo.length,3);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[1]===moved[1]);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[0]===0);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[1]===0);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,2);
+  }finally{await ui.close();}
+});
+
+test('an anchored draft structure cannot be moved by its tube',async()=>{
+  const doc=draftFixture();doc.anchors=[{part:'left',surface:'fixture'}];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[{connector:'left',port:'socket',end:'start',insertion_mm:20}]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');const before=structuredClone(ui.state.doc);
+    const input=ui.document.querySelector('[data-pose="position_mm"][data-axis="1"]');
+    input.value='250';input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.deepEqual(ui.state.doc,before);assert.equal(ui.state.undo.length,0);
+    assert.match(ui.document.querySelector('#toast').textContent,/fixed to the world/);
+  }finally{await ui.close();}
+});
+
+test('rotation hotkey restores Duplicate button after the placement finishes',async()=>{
+  const ui=await editor(fixture());try{
+    ui.select('tee');
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'c',bubbles:true,cancelable:true}));
+    await ui.wait(()=>!ui.state.placementPending&&Math.abs(ui.state.doc.parts.find(p=>p.id==='tee').pose.rotation_deg[2]-15)<.01);
+    assert.equal(ui.document.querySelector('#duplicate-selected').disabled,false);
+    assert.equal(ui.document.querySelector('#duplicate-menu-toggle').disabled,false);
+    ui.document.querySelector('#duplicate-selected').click();
+    await ui.wait(()=>ui.state.doc.parts.length===3&&!ui.state.placementPending);
+    assert.equal(ui.state.undo.length,2);
+  }finally{await ui.close();}
+});
+
+test('Shift rotates the gizmo around the part’s current local axes',async()=>{
+  const ui=await editor(fixture());try{
+    ui.select('tee');
+    const input=ui.document.querySelector('[data-pose="rotation_deg"][data-axis="2"]');
+    input.value='30';input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>Math.abs((ui.state.doc.parts.find(p=>p.id==='tee').pose.rotation_deg?.[2]||0)-30)<.01);
+    input.blur();ui.state.snap=false;ui.state.snapSettings.alignEnabled=false;
+    ui.document.querySelector('[data-tool="rotate"]').click();
+    assert.equal(ui.gizmo.space,'world');
+    const selected=ui.partObjects.get('tee');
+    const first=new Three.Quaternion().setFromAxisAngle(new Three.Vector3(0,0,1),Math.PI/6);
+    assert.ok(selected.quaternion.angleTo(first)<1e-4);
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'Shift',shiftKey:true,bubbles:true}));
+    assert.equal(ui.gizmo.space,'local');
+    assert.equal(ui.gizmo.object,selected);
+    const localX=new Three.Vector3(1,0,0).applyQuaternion(selected.quaternion);
+    assert.ok(localX.distanceTo(new Three.Vector3(Math.sqrt(3)/2,.5,0))<1e-4);
+    ui.gizmo.axis='X';ui.gizmo.dispatchEvent({type:'mouseDown'});
+    selected.quaternion.multiply(new Three.Quaternion().setFromAxisAngle(new Three.Vector3(1,0,0),Math.PI/6));
+    selected.updateMatrix();ui.gizmo.dispatchEvent({type:'objectChange'});
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keyup',{key:'Shift',bubbles:true}));
+    assert.equal(ui.gizmo.space,'local','the axis must stay fixed for the active drag');
+    ui.gizmo.dispatchEvent({type:'mouseUp'});
+    await ui.wait(()=>ui.state.undo.length===2&&!ui.state.placementPending);
+    const saved=ui.state.doc.parts.find(p=>p.id==='tee').pose.rotation_deg;
+    const actual=new Three.Quaternion().setFromEuler(new Three.Euler(...saved.map(Three.MathUtils.degToRad),'ZYX'));
+    const expected=first.multiply(new Three.Quaternion().setFromAxisAngle(new Three.Vector3(1,0,0),Math.PI/6));
+    assert.ok(actual.angleTo(expected)<1e-4);
+    assert.equal(ui.gizmo.space,'world');
+  }finally{await ui.close();}
+});
+
+test('local rotation grid snap uses the rotated axis',async()=>{
+  const doc=fixture();doc.parts=[doc.parts[1]];doc.anchors=[];
+  doc.parts[0].pose.rotation_deg=[0,0,30];
+  const ui=await editor(doc);try{
+    ui.select('tee');ui.state.snap=true;ui.state.snapSettings.alignEnabled=true;ui.state.snapSettings.rotationDeg=30;
+    ui.document.querySelector('[data-tool="rotate"]').click();
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'Shift',shiftKey:true,bubbles:true}));
+    ui.gizmo.axis='X';ui.gizmo.dispatchEvent({type:'mouseDown'});
+    const selected=ui.partObjects.get('tee');
+    selected.quaternion.multiply(new Three.Quaternion().setFromAxisAngle(new Three.Vector3(1,0,0),Three.MathUtils.degToRad(29)));
+    selected.updateMatrix();ui.gizmo.dispatchEvent({type:'objectChange'});
+    const expected=new Three.Quaternion().setFromAxisAngle(new Three.Vector3(0,0,1),Math.PI/6)
+      .multiply(new Three.Quaternion().setFromAxisAngle(new Three.Vector3(1,0,0),Math.PI/6));
+    assert.ok(selected.quaternion.angleTo(expected)<1e-4);
+    ui.gizmo.dispatchEvent({type:'mouseUp'});
+    await ui.wait(()=>ui.state.undo.length===1&&!ui.state.placementPending);
+    const saved=ui.state.doc.parts[0].pose.rotation_deg;
+    const actual=new Three.Quaternion().setFromEuler(new Three.Euler(...saved.map(Three.MathUtils.degToRad),'ZYX'));
+    assert.ok(actual.angleTo(expected)<1e-4);
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keyup',{key:'Shift',bubbles:true}));
+  }finally{await ui.close();}
+});
+
+test('Alt+D queues duplication immediately after a rotation hotkey',async()=>{
+  const ui=await editor(fixture());try{
+    ui.select('tee');
+    const key=(value,options={})=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',
+      {key:value,bubbles:true,cancelable:true,...options}));
+    key('c');key('d',{altKey:true});
+    await ui.wait(()=>ui.state.doc.parts.length===3&&!ui.state.placementPending);
+    assert.ok(Math.abs(ui.state.doc.parts.find(p=>p.id==='tee').pose.rotation_deg[2]-15)<.01);
+    assert.equal(ui.state.undo.length,2);
+    key('d',{altKey:true,repeat:true});await pause(50);
+    assert.equal(ui.state.doc.parts.length,3);
+    ui.document.querySelector('#part-search').focus();key('d',{altKey:true});await pause(50);
+    assert.equal(ui.state.doc.parts.length,3);
+    ui.document.querySelector('#part-search').blur();ui.select('tee');key('D',{altKey:true,shiftKey:true});
+    await ui.wait(()=>ui.state.doc.parts.length===4&&!ui.state.placementPending);
+  }finally{await ui.close();}
 });
 
 test('rotation corrects a small pointing error to exactly 90 degrees',async()=>{
@@ -498,6 +1622,8 @@ test('human inspector edits selective posture controls and preserves undo',async
   const ui=await editor(doc);try{
     ui.select('person/pelvis');assert.equal(ui.document.querySelector('#object-hold').value,'upper_body');
     assert.equal(ui.document.querySelector('#object-pose').value,'pull-up');assert.equal(ui.document.querySelector('#object-grip').value,'42.4');
+    assert.equal(ui.document.querySelector('#object-pose').options.length,42);
+    assert.match(ui.document.querySelector('#object-pose-description').textContent,/overhead bar/);
     const set=async(mode,count)=>{
       const select=ui.document.querySelector('#object-hold');select.value=mode;select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
       await ui.wait(()=>ui.state.scene.joints.filter(j=>j.motor).length===count);
@@ -517,7 +1643,14 @@ test('human inspector edits selective posture controls and preserves undo',async
 
 test('add human dialog creates a pull-up pose with gripping hands and free legs',async()=>{
   const ui=await editor(blankDesign('Human creation'));try{
-    ui.document.querySelector('#human-button').click();ui.document.querySelector('#human-pose').value='pull-up';
+    ui.document.querySelector('#human-button').click();
+    const poses=ui.document.querySelector('#human-pose');
+    assert.equal(poses.options.length,42);
+    assert.ok([...poses.options].some(option=>option.value==='snow-angel'&&option.textContent==='Snow angel'));
+    assert.equal(poses.querySelectorAll('optgroup').length,5);
+    poses.value='snow-angel';poses.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.match(ui.document.querySelector('#human-pose-description').textContent,/Face upward/);
+    poses.value='pull-up';
     ui.document.querySelector('#human-hold').value='upper_body';ui.document.querySelector('#human-strength').value='6';ui.document.querySelector('#human-grip').value='42.4';
     modalAction(ui,'Add human');await ui.wait(()=>ui.state.scene.parts.length===19);
     const parameters=ui.state.doc.objects[0].parameters;
@@ -915,16 +2048,16 @@ test('cancelling a pending Force resize preserves cut lengths, screws and Undo h
 function changeInput(ui,selector,value){const input=ui.document.querySelector(selector);input.value=String(value);input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));}
 function selectChain(ui,end='end'){ui.document.querySelector('[data-object-select="chain"]').click();ui.document.querySelector('#chain-select-'+end).click();}
 
-test('Add chain creates a length-controlled object with a compact tree and one-step undo',async()=>{
+test('Add flexible line creates a length-controlled object with a compact tree and one-step undo',async()=>{
   const ui=await editor(blankDesign('New chain'));try{
-    ui.document.querySelector('#chain-button').click();assert.equal(ui.document.querySelector('#modal-title').textContent,'Add a chain');
+    ui.document.querySelector('#chain-button').click();assert.equal(ui.document.querySelector('#modal-title').textContent,'Add a flexible line');
     modalAction(ui,'Cancel');assert.equal(ui.state.undo.length,0);
-    ui.document.querySelector('#chain-button').click();changeInput(ui,'#new-chain-length',503);modalAction(ui,'Add chain');
+    ui.document.querySelector('#chain-button').click();changeInput(ui,'#new-chain-length',503);modalAction(ui,'Add line');
     await ui.wait(()=>ui.state.scene.parts.length===26&&!ui.document.querySelector('#modal').open);
     assert.equal(ui.state.doc.objects.length,1);assert.equal(ui.state.doc.objects[0].template,'chain');assert.equal(ui.state.doc.parts.length,0);assert.equal(ui.state.doc.joints.length,0);
     assert.equal(ui.state.scene.joints.length,25);assert.equal(ui.state.scene.groups.length,1);assert.equal(ui.state.undo.length,1);
     assert.equal(ui.document.querySelectorAll('[data-object-select]').length,1);assert.equal(ui.document.querySelectorAll('#outline-list [data-select]').length,0);
-    assert.match(ui.document.querySelector('#chain-length-summary').textContent,/26 links.*520 mm/);
+    assert.match(ui.document.querySelector('#chain-length-summary').textContent,/26 segments.*520 mm/);
     ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.scene.parts.length===0);
     ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.scene.parts.length===26);
   }finally{await ui.close();}
@@ -1057,10 +2190,20 @@ test('Duplicate N copies validates the count, supports scope selection and undoe
       assert.equal(ui.state.undo.length,0);assert.equal(count.checkValidity(),false);assert.equal(ui.document.querySelector('#duplicate-summary').textContent,'');
     }
     count.value='3';scope.value='subassembly';scope.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    for(const [axis,value] of [0,150,30].entries()){
+      const input=ui.document.querySelector('#duplicate-offset-'+axis);
+      input.value=String(value);input.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    }
     assert.match(ui.document.querySelector('#duplicate-summary').textContent,/3 new copies × 3 parts = 9 new parts/);
+    assert.equal(ui.snapGhost.children.length,9);
+    assert.ok(ui.snapGhost.children.some(ghost=>ghost.userData.part==='c'&&ghost.position.y===150&&ghost.position.z===40));
+    assert.equal(ui.state.doc.parts.length,5,'preview must not commit copies');
     ui.document.querySelector('#duplicate-form').dispatchEvent(new ui.window.Event('submit',{bubbles:true,cancelable:true}));
     await ui.wait(()=>ui.state.selected==='c-copy-3'&&!ui.state.placementPending&&!ui.document.querySelector('#modal').open);
     assert.equal(ui.state.doc.parts.length,14);assert.equal(ui.state.doc.joints.length,10);assert.equal(ui.state.undo.length,1);
+    assert.deepEqual(ui.state.doc.parts.filter(p=>p.id.startsWith('c-copy')).map(p=>p.pose.position_mm),
+      [[40,150,40],[40,300,70],[40,450,100]]);
+    assert.equal(ui.snapGhost.children.length,0);
     const copied=structuredClone(ui.state.doc);
     ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.scene.parts.length===5);assert.deepEqual(ui.state.doc.parts,original.parts);assert.deepEqual(ui.state.doc.joints,original.joints);
     ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.scene.parts.length===14);assert.deepEqual(ui.state.doc.parts,copied.parts);assert.deepEqual(ui.state.doc.joints,copied.joints);
@@ -1075,11 +2218,14 @@ test('cancelling a Duplicate count popup discards a pending result and leaves th
   try{
     ui.select('pipe');const original=structuredClone(ui.state.doc);
     ui.document.querySelector('#duplicate-menu-toggle').click();ui.document.querySelector('[data-duplicate="count"]').click();
+    assert.equal(ui.snapGhost.children.length,2);
     ui.document.querySelector('#modal-actions button').click();assert.deepEqual(ui.state.doc,original);assert.equal(ui.state.undo.length,0);
+    assert.equal(ui.snapGhost.children.length,0);
     ui.document.querySelector('#duplicate-menu-toggle').click();ui.document.querySelector('[data-duplicate="count"]').click();
     ui.document.querySelector('#modal-actions .primary').click();await ui.wait(()=>started);
     assert.equal(ui.document.querySelector('#duplicate-selected').disabled,true);assert.equal(ui.document.querySelector('#duplicate-count').disabled,true);
     ui.document.querySelector('#modal-close').click();release();await ui.wait(()=>!ui.state.placementPending);
+    assert.equal(ui.snapGhost.children.length,0);
     assert.deepEqual(ui.state.doc,original);assert.equal(ui.state.selected,'pipe');assert.equal(ui.state.undo.length,0);
     assert.equal(ui.document.querySelector('#duplicate-selected').disabled,false);
   }finally{release();await ui.close();}
@@ -1407,6 +2553,115 @@ test('Tree actions delete an attached grouped chain in one Undo and Redo',async(
     assert.equal(ui.state.undo.length,1);assert.equal(ui.document.querySelector('[data-object-select="sling"]'),null);
     ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.scene.parts.length===6);assert.deepEqual(ui.state.doc,{...before,results:{}});
     ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.scene.parts.length===1);
+  }finally{await ui.close();}
+});
+
+test('a flexible link can be attached to a selected human body surface',async()=>{
+  const doc=blankDesign('Body surface line');
+  doc.objects=[{id:'person',template:'human',parameters:{mass_kg:90}},
+    {id:'line',template:'chain',parameters:{length_mm:300,link_catalog:'generic.rope-jute-6'}}];
+  const ui=await editor(doc);try{
+    ui.select('person/thorax');
+    ui.document.querySelector('#human-attach-flexible').click();
+    await ui.wait(()=>ui.document.querySelector('#attachment-surface-x'));
+    assert.equal(ui.document.querySelector('#attachment-target').value,'person/thorax');
+    ui.document.querySelector('#attachment-limb').value='line/link-3';
+    ui.document.querySelector('#attachment-limb').dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    const side=ui.document.querySelector('#attachment-surface-side');side.value='y+';
+    side.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.document.querySelector('#modal-actions .primary')?.disabled===false);
+    assert.equal(ui.state.doc.joints.length,0);
+    modalAction(ui,'Connect');
+    await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    const joint=ui.state.doc.joints[0];
+    assert.equal(joint.a.part,'person/thorax');
+    assert.equal(joint.b.part,'line/link-3');
+    assert.ok(joint.a.frame.position_mm.every(Number.isFinite));
+    assert.ok(joint.a.frame.position_mm[1]>0);
+    assert.equal(joint.type,'spherical');
+    ui.select('person/thorax');
+    ui.document.querySelector(`[data-attachment-detach="${joint.id}"]`).click();
+    await ui.wait(()=>ui.state.doc.joints.length===0);
+    assert.equal(ui.state.doc.metadata.detached_attachments[0].object,'line');
+    ui.document.querySelector(`[data-attachment-reconnect="${joint.id}"]`).click();
+    await ui.wait(()=>ui.document.querySelector('#modal-actions .primary')?.disabled===false);
+    modalAction(ui,'Connect');
+    await ui.wait(()=>ui.state.doc.joints.length===1);
+    assert.equal(ui.state.doc.joints[0].id,joint.id);
+  }finally{await ui.close();}
+});
+
+test('human inspector fixes the centerline to a draft mirror and mirrors limb posing',async()=>{
+  const doc=blankDesign('Mirror-line human');
+  doc.objects=[{id:'person',template:'human',parameters:{pose:'standing'},pose:{position_mm:[300,120,0]}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[0,0,1100]}],mirrors:[{id:'middle',axis:'x',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.select('person/pelvis');
+    const selector=ui.document.querySelector('#human-mirror-line');
+    assert.ok(selector);assert.equal(selector.options.length,2);
+    selector.value='0';selector.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.objects[0].symmetry&&!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc.objects[0].pose.position_mm,[0,120,0]);
+    assert.equal(ui.document.querySelector('[data-pose="position_mm"][data-axis="0"]').disabled,true);
+    assert.equal(ui.document.querySelector('[data-pose="position_mm"][data-axis="2"]').disabled,false);
+    assert.equal(ui.document.querySelector('[data-pose="rotation_deg"][data-axis="2"]').disabled,true);
+    ui.document.querySelector('[data-object-mode="limb"]').click();ui.select('person/left_hand');
+    const field=ui.document.querySelector('[data-part-pose="position_mm"][data-axis="1"]');
+    const before=ui.state.scene.parts.find(p=>p.id==='person/right_hand').pose.position_mm[1];
+    field.value=String(Number(field.value)+80);field.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.placementPending&&
+      ui.state.scene.parts.find(p=>p.id==='person/right_hand').pose.position_mm[1]>before+60);
+    const left=ui.state.scene.parts.find(p=>p.id==='person/left_hand').pose.position_mm;
+    const right=ui.state.scene.parts.find(p=>p.id==='person/right_hand').pose.position_mm;
+    assert.ok(Math.abs(left[0]+right[0])<.01);
+    assert.ok(Math.abs(left[1]-right[1])<.01);
+    ui.select('person/pelvis');const free=ui.document.querySelector('#human-mirror-line');
+    free.value='';free.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.doc.objects[0].symmetry&&!ui.state.placementPending);
+    assert.equal(ui.document.querySelector('[data-pose="position_mm"][data-axis="0"]').disabled,false);
+  }finally{await ui.close();}
+});
+
+test('rope and webbing profiles are selectable and retain their material when resized',async()=>{
+  const ui=await editor(blankDesign('Flexible profiles'));try{
+    ui.document.querySelector('#chain-button').click();
+    assert.ok(ui.document.querySelector('#chain-catalog option[value="generic.rope-jute-6"]'));
+    assert.ok(ui.document.querySelector('#chain-catalog option[value="generic.strap-seatbelt-65"]'));
+    changeInput(ui,'#chain-catalog','generic.strap-seatbelt-65');
+    changeInput(ui,'#new-chain-length',100);modalAction(ui,'Add line');
+    await ui.wait(()=>ui.state.scene.parts.length===4&&!ui.document.querySelector('#modal').open);
+    assert.equal(ui.state.doc.objects[0].parameters.link_catalog,'generic.strap-seatbelt-65');
+    assert.match(ui.document.querySelector('#chain-profile').value,/strap-seatbelt-65/);
+    changeInput(ui,'#chain-length',150);
+    await ui.wait(()=>ui.state.scene.parts.length===6&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.objects[0].parameters.link_catalog,'generic.strap-seatbelt-65');
+  }finally{await ui.close();}
+});
+
+test('Tree Body action returns its exact pipes to draft without changing another subassembly',async()=>{
+  const doc=draftFixture();
+  doc.parts.push({id:'pipe',catalog:'tubeclamp.tube-C',parameters:{length_mm:1040},
+    pose:{position_mm:[500,0,100],rotation_deg:[0,90,0]}});
+  doc.parts.push({id:'other-pipe',catalog:'tubeclamp.tube-C',parameters:{length_mm:400},
+    pose:{position_mm:[0,500,300]}});
+  doc.joints=[
+    {id:'left-pipe',type:'socket',a:{part:'left',port:'socket'},b:{part:'pipe',end:'start'},insertion_mm:20,locked:true},
+    {id:'right-pipe',type:'socket',a:{part:'right',port:'socket'},b:{part:'pipe',end:'end'},insertion_mm:20,locked:true}
+  ];
+  const ui=await editor(doc);try{
+    const toggle=ui.document.querySelector('[data-select="pipe"]').closest('details').querySelector('summary [data-tree-actions]');
+    toggle.click();assert.match(ui.document.querySelector('#tree-actions-menu').textContent,/Return pipes to draft/);
+    ui.document.querySelector('[data-tree-command="reopen"]').click();
+    await ui.wait(()=>!ui.state.placementPending&&!!ui.state.doc.draft_subassemblies?.length);
+    assert.equal(ui.state.doc.parts.some(p=>p.id==='pipe'),false);
+    assert.equal(ui.state.doc.parts.some(p=>p.id==='other-pipe'),true);
+    assert.equal(ui.state.doc.joints.length,0);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].id,'pipe');
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='pipe').draft,true);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.parts.some(p=>p.id==='pipe'));
+    assert.equal(ui.state.doc.joints.length,2);
   }finally{await ui.close();}
 });
 

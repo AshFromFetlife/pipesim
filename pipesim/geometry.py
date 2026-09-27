@@ -129,6 +129,7 @@ def collision_primitives(part):
     return result
 
 def export_mesh(assembly,path):
+    assembly.require_finished('mesh export')
     scene=trimesh.Scene()
     for p in assembly.parts.values(): scene.add_geometry(mesh_for_part(p),node_name=p.id,geom_name=p.id,transform=p.matrix)
     path=Path(path)

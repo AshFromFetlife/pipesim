@@ -1,9 +1,11 @@
 export const DEFAULT_SNAP_SETTINGS=Object.freeze({
   gridEnabled:true,translationMm:10,rotationDeg:90,
-  connectionsEnabled:true,connectionPixels:30,alignEnabled:true,alignmentDeg:6
+  connectionsEnabled:true,connectionPixels:30,alignEnabled:true,alignmentDeg:6,
+  keyboardMoveMm:100,keyboardRotateDeg:15
 });
 const key='pipesim.snap-defaults.v1';
-const ranges={translationMm:[.1,10000],rotationDeg:[.1,180],connectionPixels:[4,100],alignmentDeg:[.1,20]};
+const ranges={translationMm:[.1,10000],rotationDeg:[.1,180],connectionPixels:[4,100],alignmentDeg:[.1,20],
+  keyboardMoveMm:[.1,10000],keyboardRotateDeg:[.1,180]};
 
 export function validateSnapSettings(settings){
   const result={...DEFAULT_SNAP_SETTINGS};
@@ -12,7 +14,7 @@ export function validateSnapSettings(settings){
     result[name]=settings[name];
   }
   for(const [name,[min,max]] of Object.entries(ranges)){
-    const value=Number(settings[name]);
+    const value=Number(settings[name]??DEFAULT_SNAP_SETTINGS[name]);
     if(!Number.isFinite(value)||value<min||value>max)throw new Error(`${name} must be between ${min} and ${max}`);
     result[name]=value;
   }

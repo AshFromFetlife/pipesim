@@ -39,6 +39,8 @@ def _editable(assembly, affected):
 
 class Mechanism:
     def __init__(self, assembly, selected):
+        from .human_symmetry import CENTRAL_JOINTS, owner
+        self.symmetry_owner=owner(assembly,selected)
         self.assembly=assembly;self.groups=assembly.editor_groups()
         self.group_of={p:i for i,g in enumerate(self.groups) for p in g};self.selected=self.group_of[selected]
         edges={i:[] for i in range(len(self.groups))}
@@ -91,6 +93,10 @@ class Mechanism:
                 lo,hi=j.get('limits',{}).get('angle_deg',[-179.99,179.99]);variable('angle_deg',max(lo,-179.99),min(hi,179.99),180/np.pi)
             if kind=='spherical':
                 for i,(lo,hi) in enumerate(j.get('limits',{}).get('rotation_deg',[[-179,179],[-89.9,89.9],[-179,179]])):
+                    if (self.symmetry_owner and j['id'].startswith(self.symmetry_owner['id']+'/')
+                            and j['id'].split('/')[-1] in CENTRAL_JOINTS
+                            and i != 0):
+                        lo=hi=0
                     variable('rotation_deg',lo,hi,180/np.pi,i)
             self.variables[j['id']]=entries
         self.lower=np.array(self.lower);self.upper=np.array(self.upper)
@@ -190,8 +196,12 @@ def transform_part(assembly, selected, target, mode='translate', seed=None, *, p
         from .chain import pose_chain
         result=pose_chain(assembly,instance,selected,transform(target),mode,preview=preview)
         if result is not None: return result
+    from .human_symmetry import mirror_limb_poses, owner, project_pelvis_target, validate_human_symmetry
+    symmetry_owner=owner(assembly,selected)
     desired=transform(target);mechanism=prepared.mechanism(selected) if prepared else Mechanism(assembly,selected)
     original=assembly.parts[selected].matrix
+    if symmetry_owner and selected==symmetry_owner['id']+'/pelvis':
+        desired=transform(project_pelvis_target(target,original))
     if mechanism.selected==mechanism.root:
         delta=np.eye(4) if mechanism.anchored else desired@np.linalg.inv(original)
         q=np.zeros(len(mechanism.lower));deltas=mechanism.forward(q,delta)
@@ -221,10 +231,14 @@ def transform_part(assembly, selected, target, mode='translate', seed=None, *, p
         q=full(solved.x);deltas=mechanism.forward(q)
     posed=copy.copy(assembly);posed.parts={p:copy.copy(v) for p,v in assembly.parts.items()}
     for p in mechanism.parts: posed.parts[p].matrix=deltas[mechanism.group_of[p]]@assembly.parts[p].matrix
+    if symmetry_owner:
+        mirror_limb_poses(posed,symmetry_owner,selected)
     # A difficult or impossible loop must leave the authored assembly intact.
     # The user gets a stopped handle, not a partially disconnected mechanism.
     blocked=None
-    try: _movement_coordinates(assembly,posed)
+    try:
+        if symmetry_owner: validate_human_symmetry(posed)
+        _movement_coordinates(assembly,posed)
     except DocumentError as exc:
         blocked=str(exc);posed=assembly;q=np.zeros(len(mechanism.lower))
     poses={p:pose_of(v.matrix) for p,v in posed.parts.items() if not np.allclose(v.matrix,assembly.parts[p].matrix,atol=1e-7,rtol=0)}

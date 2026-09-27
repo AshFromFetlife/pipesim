@@ -28,6 +28,7 @@ def _directions(assembly,pid,remaining):
     return unique
 
 def plan_build(assembly,search_limit=None):
+    assembly.require_finished('build planning')
     options=assembly.doc.get('build',{})
     limit=search_limit or options.get('search_limit',3000)
     remaining=frozenset(assembly.parts)

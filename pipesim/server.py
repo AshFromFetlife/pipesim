@@ -17,7 +17,7 @@ from .document import Assembly,Library,DocumentError,read,write,parse,plain,DATA
 WEB=Path(__file__).parent/'web'
 BUNDLED_MESHES=(DATA/'libraries'/'meshes').resolve()
 DESIGN_SUFFIXES={'.yaml','.yml','.json'}
-EDITOR_API_VERSION=13
+EDITOR_API_VERSION=23
 
 def bundled_mesh(relative):
     path=(BUNDLED_MESHES/relative).resolve()
@@ -33,8 +33,11 @@ class EditorServer(ThreadingHTTPServer):
         self.previews=PreviewCache()
         from .simulation_jobs import SimulationJobs
         self.simulations=SimulationJobs()
+        self.draft_jobs={}; self.draft_jobs_lock=threading.Lock()
         super().__init__(('127.0.0.1',port),Handler)
     def server_close(self):
+        with self.draft_jobs_lock:
+            for event in self.draft_jobs.values(): event.set()
         self.simulations.close()
         super().server_close()
     def path(self,relative):
@@ -87,10 +90,16 @@ class Handler(BaseHTTPRequestHandler):
         result['groups']=assembly.editor_groups()
         result['chains']=[summary(o,assembly.library) for o in assembly.doc.get('objects',[]) if o['template']=='chain']
         result['regroupable_objects']=regroup_candidates(assembly)
+        from .drafting import preview, runs
+        drafts=preview(assembly)
+        result['parts'].extend(drafts)
+        result['groups'].extend([[p['id']] for p in drafts])
+        result['draft_attachments']=[a for run in runs(assembly.doc) for a in run.get('attachments',[])]
         for part in result['parts']:
             for shape in part['geometry']:
                 if shape['type']=='mesh':
-                    path=(assembly.parts[part['id']].base/shape['file']).resolve()
+                    base=assembly.parts[part['id']].base if part['id'] in assembly.parts else assembly.library.paths.get(part['catalog'],assembly.base)
+                    path=(base/shape['file']).resolve()
                     if path.is_relative_to(self.server.root): shape['url']='/asset?path='+urllib.parse.quote(path.relative_to(self.server.root).as_posix())
                     elif path.is_relative_to(BUNDLED_MESHES): shape['url']='/builtin-mesh?path='+urllib.parse.quote(path.relative_to(BUNDLED_MESHES).as_posix())
         self.server.previews.remember(assembly)
@@ -150,6 +159,51 @@ class Handler(BaseHTTPRequestHandler):
             if route in ('/api/simulation-status','/api/simulation-cancel','/api/simulation-result'):
                 result=self.server.simulations.get(data['job_id'],cancel=route=='/api/simulation-cancel',
                                                    include_result=route=='/api/simulation-result')
+            elif route in ('/api/draft-finalize-cancel','/api/draft-repair-cancel'):
+                with self.server.draft_jobs_lock:
+                    event=self.server.draft_jobs.get(data['job_id'])
+                    if event: event.set()
+                result={'cancelled':bool(event)}
+            elif route in ('/api/draft-finalize','/api/draft-repair',
+                           '/api/draft-finalize-selected','/api/draft-repair-selected'):
+                from .drafting import finalize, repair, _check_cancelled
+                job_id=data.get('job_id')
+                event=threading.Event()
+                if job_id:
+                    if not re.fullmatch(r'[A-Za-z0-9_-]{8,80}',job_id): raise DocumentError('Invalid draft job id')
+                    with self.server.draft_jobs_lock:
+                        if job_id in self.server.draft_jobs: raise DocumentError('Draft job id already running')
+                        self.server.draft_jobs[job_id]=event
+                try:
+                    assembly=self.assembly(data['document'],base)
+                    _check_cancelled(event.is_set)
+                    operation=repair if route.startswith('/api/draft-repair') else finalize
+                    selected=route.endswith('-selected')
+                    run_id=data.get('run')
+                    if selected and not run_id: raise DocumentError('Choose a draft run to finalize or repair')
+                    if not selected and data.get('subassembly') is not None:
+                        raise DocumentError('This editor tab is out of date. Save your work and refresh before finalizing a selected draft structure')
+                    include_run_ids=()
+                    if operation is finalize and any(g.get('mirrors') for g in assembly.doc.get('draft_subassemblies', [])):
+                        from .symmetry import materialize_all
+                        owner=next((g['id'] for g in assembly.doc['draft_subassemblies'] if any(r['id']==run_id for r in g['runs'])),None) if selected else None
+                        if selected:
+                            from .drafting import _scope, runs
+                            selected_before={r['id'] for g in _scope(assembly,run_id=run_id) for r in g['runs']}
+                            existing={r['id'] for r in runs(assembly.doc)}
+                        document=materialize_all(assembly,{owner} if selected else None)
+                        if selected:
+                            include_run_ids=tuple(r['id'] for r in runs(document) if r['id'] not in existing and
+                                any(r['id'].startswith(source+'-mirror-') for source in selected_before))
+                        assembly=self.assembly(document,base)
+                    result=operation(assembly,data.get('subassembly'),cancelled=event.is_set,
+                                     run_id=run_id if selected else None,
+                                     **({'include_run_ids':include_run_ids} if operation is finalize else {}))
+                    if result['status'] in ('finalized','repaired'):
+                        result['scene']=self.scene(self.assembly(result['document'],base))
+                finally:
+                    if job_id:
+                        with self.server.draft_jobs_lock: self.server.draft_jobs.pop(job_id,None)
             elif route=='/api/parse':
                 doc=parse(data['text']); assembly=self.assembly(doc,base)
                 result={'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts}
@@ -195,6 +249,29 @@ class Handler(BaseHTTPRequestHandler):
                     assembly=prepared.assembly
                 else: assembly=self.assembly(doc,base)
                 if route=='/api/resolve': result=self.scene(assembly)
+                elif route=='/api/draft-connect':
+                    from .drafting import connect
+                    document=connect(assembly,data['run'],data['connector'],data['port'],data.get('end','start'),data.get('insertion_mm'),data.get('at_mm'))
+                    result={'document':document,'scene':self.scene(self.assembly(document,base))}
+                elif route=='/api/draft-reopen':
+                    from .drafting import reopen
+                    result=reopen(assembly,data.get('members'))
+                    result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/draft-mirror-bake':
+                    from .symmetry import materialize_mirror
+                    document=materialize_mirror(assembly,data['group'],data['plane'])
+                    result={'document':document,'scene':self.scene(self.assembly(document,base))}
+                elif route=='/api/draft-update':
+                    from .drafting import runs
+                    document=copy.deepcopy(doc)
+                    run=next((r for r in runs(document) if r['id']==data['run']),None)
+                    if run is None: raise DocumentError('Unknown draft run')
+                    for key in ('start_mm','end_mm','locked_length_mm'):
+                        if key in data:
+                            if key=='locked_length_mm' and data[key] is None: run.pop(key,None)
+                            else: run[key]=data[key]
+                    document.pop('results',None); document.pop('build_plan',None)
+                    result={'document':document,'scene':self.scene(self.assembly(document,base))}
                 elif route=='/api/rename':
                     from .naming import rename
                     result=rename(assembly,data['name'],object_id=data.get('object'),part_id=data.get('part'),members=data.get('members'))
@@ -204,8 +281,14 @@ class Handler(BaseHTTPRequestHandler):
                     result=delete_parts(assembly,data.get('members'),data.get('object'))
                     result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/duplicate':
-                    from .duplication import duplicate
-                    result=duplicate(assembly,data['selected'],data.get('scope','part'),data.get('count',1),data.get('grid_mm',1))
+                    from .duplication import duplicate, duplicate_draft
+                    from .drafting import runs
+                    if any(run['id']==data['selected'] for run in runs(doc)):
+                        if data.get('scope','part')!='subassembly':
+                            raise DocumentError('Choose the connected draft structure to duplicate')
+                        result=duplicate_draft(assembly,data['selected'],data.get('count',1),data.get('grid_mm',1),data.get('offset_mm'))
+                    else:
+                        result=duplicate(assembly,data['selected'],data.get('scope','part'),data.get('count',1),data.get('grid_mm',1),data.get('offset_mm'))
                     result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/move':
                     if data.get('selected'):
@@ -245,6 +328,10 @@ class Handler(BaseHTTPRequestHandler):
                     from .grouping import update_object_parameters
                     document=update_object_parameters(assembly,data['object'],data['parameters'])
                     result={'document':document,'scene':self.scene(self.assembly(document,base))}
+                elif route=='/api/human-symmetry':
+                    from .human_symmetry import set_human_symmetry
+                    document=set_human_symmetry(assembly,data['object'],data.get('group'),data.get('plane'))
+                    result={'document':document,'scene':self.scene(self.assembly(document,base))}
                 elif route=='/api/object-layout':
                     from .grouping import set_object_layout
                     document=set_object_layout(assembly,data['object'],data['mode'])
@@ -267,20 +354,25 @@ class Handler(BaseHTTPRequestHandler):
                         data.get('end','start'),data.get('insertion_mm'),data.get('at_mm'),data.get('locked',True),
                         data.get('poses'),data.get('replace_joint'),data.get('force',False),data.get('tolerance_mm',2.),data.get('force_options'))
                 elif route=='/api/validate':
+                    if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before validation')
                     from .validation import validate
                     result=validate(assembly,build=data.get('build',False))
                 elif route=='/api/analyse':
+                    if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before analysis')
                     from .fea import analyse
                     result=analyse(assembly)
                 elif route=='/api/simulate':
+                    if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before simulation')
                     duration=float(data.get('duration',3))
                     if duration>30: raise DocumentError('Editor simulations are limited to 30 seconds; use the CLI for longer runs')
                     result=self.server.simulations.start(assembly,duration=duration,fps=30,
                         chain_links_per_body=data.get('chain_links_per_body',1))
                 elif route=='/api/plan':
+                    if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before build planning')
                     from .planning import plan_build
                     result=plan_build(assembly)
                 elif route=='/api/fit':
+                    assembly.require_finished('fit tests')
                     from .human import reach,seat_fit,run_fit_tests
                     if data.get('target'): result=reach(assembly,data['human'],data['target'],data.get('hand','right'))
                     elif data.get('seat'): result=seat_fit(assembly,data['human'],data['seat'])
@@ -293,11 +385,13 @@ class Handler(BaseHTTPRequestHandler):
                     from .editing import expand_objects
                     result=expand_objects(assembly,data.get('object'))
                 elif route=='/api/snapshot':
+                    assembly.require_finished('capturing a simulation frame')
                     from .editing import snapshot_design
                     result=snapshot_design(assembly,data['frame'])
                     from .grouping import restore_objects
                     result=restore_objects({'objects':[o for o in assembly.doc.get('objects',[]) if o['template']=='chain']},result,assembly.base,assembly.library)
                 elif route in ('/api/export','/api/render'):
+                    if route=='/api/export' and doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before exporting a build book')
                     directory=self.server.root/'output'/('export-'+secrets.token_hex(4)); directory.mkdir(parents=True)
                     if route=='/api/export':
                         from .exporting import build_export

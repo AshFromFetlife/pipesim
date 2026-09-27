@@ -6,15 +6,24 @@ import {STLLoader} from 'three/addons/loaders/STLLoader.js';
 import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
 import {connectionCandidates,clearConnectionIntent,alignmentDelta,socketOccupied,rotationAlignment} from './snapping.js';
 import {DEFAULT_SNAP_SETTINGS,loadSnapDefaults,saveSnapDefaults,validateSnapSettings} from './snap-settings.js';
+import {draftRuns,draftRun,draftPreview} from './drafting.js';
+import {HUMAN_POSES} from './human-poses.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const clone=x=>structuredClone(x), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let snapDefaults={...DEFAULT_SNAP_SETTINGS};try{snapDefaults=loadSnapDefaults(window.localStorage);}catch{}
+const LIBRARY_HOTKEYS_KEY='pipesim.library-hotkeys.v1';
+const libraryHotkeys=Object.create(null);
+try{const saved=JSON.parse(window.localStorage.getItem(LIBRARY_HOTKEYS_KEY)||'{}');
+  if(saved&&typeof saved==='object'&&!Array.isArray(saved))for(const [catalog,hotkey] of Object.entries(saved))
+    if(typeof catalog==='string'&&typeof hotkey==='string'&&/^(?:Shift\+)?[0-9]$|^Alt\+Shift\+[A-CE-Z]$/.test(hotkey)&&
+       !Object.values(libraryHotkeys).includes(hotkey))libraryHotkeys[catalog]=hotkey;
+}catch{}
 const state={doc:null,path:'',library:{},scene:null,selected:null,connectionSource:null,mode:'design',tool:'select',undo:[],redo:[],dirty:false,revision:0,recording:null,playing:false,frame:0,checks:null,analysis:null,plan:null,step:0,busy:false,simulation:null,simulationError:null,simulationOptions:null,ports:false,snap:snapDefaults.gridEnabled,connectionSnap:snapDefaults.connectionsEnabled,snapSettings:snapDefaults,placementPending:false,moveBody:true};
-let token='',toastTimer,renderer,orbit,gizmo,sceneGeneration=0,dragStart=null,pointerDrag=null;
+let token='',toastTimer,renderer,orbit,gizmo,sceneGeneration=0,dragStart=null,pointerDrag=null,localRotationHeld=false;
 const viewport=$('#viewport'), scene=new THREE.Scene(), objects=new THREE.Group(), ports=new THREE.Group(), overlays=new THREE.Group();
-const snapGhost=new THREE.Group();let reviewCleanup=null,reviewVersion=0;
-scene.add(objects,ports,overlays,snapGhost);scene.background=new THREE.Color('#eef3f5');
+const snapGhost=new THREE.Group(),mirrorGhost=new THREE.Group();let reviewCleanup=null,reviewVersion=0;
+scene.add(objects,ports,overlays,snapGhost,mirrorGhost);scene.background=new THREE.Color('#eef3f5');
 const camera=new THREE.PerspectiveCamera(38,1,1,100000);camera.up.set(0,0,1);camera.position.set(2100,-2600,1800);
 const ambient=new THREE.HemisphereLight('#fbfeff','#aabac0',2.2);ambient.position.set(0,0,2000);scene.add(ambient);
 const key=new THREE.DirectionalLight('#fff6e4',3.2);key.position.set(-1400,-2500,4000);key.castShadow=true;key.shadow.mapSize.set(2048,2048);key.shadow.camera.left=-3000;key.shadow.camera.right=3000;key.shadow.camera.top=3000;key.shadow.camera.bottom=-3000;key.shadow.camera.near=1;key.shadow.camera.far=12000;key.shadow.bias=-.0002;key.shadow.normalBias=1;scene.add(key);
@@ -34,6 +43,8 @@ colorPreference.addEventListener('change',applyViewportTheme);
 applyViewportTheme();
 const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2(), groundPlane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
 const partObjects=new Map();
+let hoveredDraftConnection=null;
+const mirrorCopies=new Map(),mirrorPlanes=new Map();
 const rotationHandle=new THREE.Object3D(),wholeObjectHandle=new THREE.Object3D();scene.add(rotationHandle,wholeObjectHandle);
 const objectModes=new Map(),openObjects=new Set();
 const selectedObject=()=>state.doc?.objects?.find(o=>state.selected?.startsWith(o.id+'/'));
@@ -49,6 +60,12 @@ try{
   });
   gizmo.addEventListener('objectChange',()=>{
     if(!dragStart)return;const selected=partObjects.get(dragStart.id);selected.updateMatrix();
+    if(state.tool==='translate'){
+      const handle=gizmo.object,origin=new THREE.Vector3().setFromMatrixPosition(dragStart.gizmoMatrix);
+      const delta=handle.position.clone().sub(origin);
+      const bounded=boundedPlacementDelta(dragStart,delta);
+      handle.position.copy(origin).add(bounded);handle.updateMatrix();
+    }
     let delta;
     if(gizmo.object===wholeObjectHandle){
       wholeObjectHandle.updateMatrix();delta=wholeObjectHandle.matrix.clone().multiply(dragStart.handleMatrix.clone().invert());
@@ -77,7 +94,7 @@ function setPose(object,pose={}){object.position.fromArray(pose.position_mm||[0,
 function getPose(object){const e=new THREE.Euler().setFromQuaternion(object.quaternion,'ZYX');return {position_mm:object.position.toArray().map(v=>+v.toFixed(5)),rotation_deg:[e.x,e.y,e.z].map(v=>+THREE.MathUtils.radToDeg(v).toFixed(5))};}
 function status(text){$('#status-text').textContent=text;}
 function toast(text,error=false){clearTimeout(toastTimer);const el=$('#toast');el.textContent=text;el.className=error?'error':'';toastTimer=setTimeout(()=>el.classList.add('hidden'),error?9000:4500);}
-const EDITOR_API_VERSION=13;
+const EDITOR_API_VERSION=23;
 const SERVER_UPDATE_MESSAGE='The running editor server is out of date. Save your work, restart the PipeSim server, then refresh the page.';
 async function api(route,extra={}){
   const body=JSON.stringify({document:state.doc,path:state.path,...extra});
@@ -96,10 +113,215 @@ async function api(route,extra={}){
   }
 }
 function checkpoint(){if(!state.doc)return;state.undo.push(clone(state.doc));if(state.undo.length>80)state.undo.shift();state.redo=[];}
-function changed(){state.simulationError=null;state.doc.results={};delete state.doc.build_plan;state.dirty=true;state.revision++;state.recording=null;state.playing=false;state.checks=null;state.analysis=null;state.plan=null;state.frame=0;updateHeader();}
+function autoMirrorModes(scene=state.scene,{placed=true}={}){
+  const sceneParts=new Map((scene?.parts||[]).map(part=>[part.id,part]));
+  const documentParts=new Map((state.doc?.parts||[]).map(part=>[part.id,part]));
+  let added=0;
+  for(const group of state.doc?.draft_subassemblies||[])for(const plane of group.mirrors||[]){
+    const axis={x:0,y:1,z:2}[plane.axis];
+    for(const run of group.runs){
+      if(Object.hasOwn(plane.run_modes||{},run.id))continue;
+      let start=new THREE.Vector3(...run.start_mm),end=new THREE.Vector3(...run.end_mm);
+      const attached=!!run.attachments?.length;
+      if(attached){
+        const current=run.attachments.every(a=>{
+          const spec=documentParts.get(a.connector),part=sceneParts.get(a.connector);
+          if(!spec||!part)return false;
+          const pose=spec.pose||{},shown=part.pose||{};
+          return ['position_mm','rotation_deg'].every(field=>(pose[field]||[0,0,0]).every((value,i)=>Math.abs(value-(shown[field]||[0,0,0])[i])<1e-6));
+        });
+        const preview=sceneParts.get(run.id);if(!current||!preview)continue;
+        const object=new THREE.Object3D();setPose(object,preview.pose);
+        start=new THREE.Vector3(0,0,-preview.length_mm/2).applyMatrix4(object.matrix);
+        end=new THREE.Vector3(0,0,preview.length_mm/2).applyMatrix4(object.matrix);
+      }
+      const length=start.distanceTo(end),tolerance=(attached||!placed)?0.05:2;
+      if(length<=1e-6)continue;
+      const first=start.getComponent(axis)-plane.offset_mm,last=end.getComponent(axis)-plane.offset_mm;
+      const mode=Math.abs((first+last)/2)<=tolerance&&Math.abs(Math.abs(last-first)-length)<=tolerance?'centered':
+        Math.abs(first)<=tolerance&&Math.abs(last)<=tolerance?'in_plane':null;
+      if(mode){plane.run_modes||={};plane.run_modes[run.id]=mode;added++;}
+    }
+  }
+  return added;
+}
+function adoptLoadedMirrorModes(scene){if(autoMirrorModes(scene,{placed:false})){state.dirty=true;state.revision++;}}
+function constrainDraftMirrors(){
+  for(const group of state.doc?.draft_subassemblies||[])for(const plane of group.mirrors||[])for(const [id,mode] of Object.entries(plane.run_modes||{})){
+    if(mode==='free')continue;
+    const run=group.runs.find(item=>item.id===id);if(!run)continue;
+    const axis={x:0,y:1,z:2}[plane.axis],start=new THREE.Vector3(...run.start_mm),end=new THREE.Vector3(...run.end_mm);
+    const bound=(run.attachments||[]).filter(attachment=>attachment.end);
+    if(bound.length){
+      if(mode==='centered'&&bound.length===1&&run.locked_length_mm==null){
+        const attachment=bound[0],spec=state.doc.parts.find(part=>part.id===attachment.connector);
+        const socket=state.scene?.parts.find(part=>part.id===attachment.connector)?.ports?.[attachment.port];
+        if(spec&&socket){
+          const pose=spec.pose||{},rotation=new THREE.Quaternion().setFromEuler(new THREE.Euler(...(pose.rotation_deg||[0,0,0]).map(THREE.MathUtils.degToRad),'ZYX'));
+          const direction=new THREE.Vector3(...(socket.axis||[0,0,1])).applyQuaternion(rotation).normalize();
+          const sign=Math.sign(end.getComponent(axis)-start.getComponent(axis));
+          const expected=attachment.end==='start'?sign:-sign;
+          if(sign&&Math.abs(direction.getComponent(axis)-expected)<1e-5){
+            const point=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyQuaternion(rotation)
+              .add(new THREE.Vector3(...(pose.position_mm||[0,0,0])))
+              .addScaledVector(direction,-(attachment.insertion_mm??Math.min(30,socket.engagement_mm*.8)));
+            const length=2*Math.abs(point.getComponent(axis)-plane.offset_mm);
+            if(length>1e-6){const center=point.clone().setComponent(axis,plane.offset_mm);
+              run.start_mm=center.clone().setComponent(axis,plane.offset_mm-sign*length/2).toArray();
+              run.end_mm=center.setComponent(axis,plane.offset_mm+sign*length/2).toArray();}
+          }
+        }
+      }
+      continue;
+    }
+    if(mode==='in_plane'){start.setComponent(axis,plane.offset_mm);end.setComponent(axis,plane.offset_mm);}
+    else{const center=start.clone().add(end).multiplyScalar(.5),length=start.distanceTo(end),sign=end.getComponent(axis)>=start.getComponent(axis)?1:-1;
+      center.setComponent(axis,plane.offset_mm);start.copy(center).addScaledVector(new THREE.Vector3().setComponent(axis,1),-sign*length/2);
+      end.copy(center).addScaledVector(new THREE.Vector3().setComponent(axis,1),sign*length/2);}
+    if(start.distanceTo(end)>1e-6){run.start_mm=start.toArray();run.end_mm=end.toArray();}
+  }
+}
+function mirrorConstrainedDelta(ids,delta){
+  const result=delta.clone(),members=new Set(ids);
+  for(const group of state.doc?.draft_subassemblies||[])for(const plane of group.mirrors||[])
+    if(Object.entries(plane.run_modes||{}).some(([id,mode])=>mode!=='free'&&members.has(id)))result.setComponent({x:0,y:1,z:2}[plane.axis],0);
+  return result;
+}
+function changed({inferMirrors=true}={}){if(inferMirrors)autoMirrorModes();constrainDraftMirrors();state.simulationError=null;state.doc.results={};delete state.doc.build_plan;state.dirty=true;state.revision++;state.recording=null;state.playing=false;state.checks=null;state.analysis=null;state.plan=null;state.frame=0;updateHeader();}
+function refreshDraft(id,{structure=false}={}){
+  const run=draftRun(state.doc,id),previous=partObjects.get(id);
+  if(previous){objects.remove(previous);dispose(previous);partObjects.delete(id);state.scene.parts=state.scene.parts.filter(p=>p.id!==id);state.scene.groups=state.scene.groups.filter(g=>!g.includes(id));}
+  if(run){const part=draftPreview(run,state.scene,state.library),group=new THREE.Group();group.name=id;group.userData.part=id;
+    for(const shape of part.geometry)group.add(meshShape(shape,part.color,part.kind));setPose(group,part.pose);objects.add(group);partObjects.set(id,group);
+    state.scene.parts.push(part);state.scene.groups.push([id]);}
+  state.scene.draft_attachments=draftRuns(state.doc).flatMap(r=>r.attachments||[]);
+  if(structure){renderOutline();updateHeader();}
+  if(structure||state.selected===id)highlightSelection();
+  if(structure||state.selected===id){renderInspector();attachGizmo();}
+}
+function mirrorSourceIds(group,exactIds){
+  const ids=new Set([...group.runs.map(run=>run.id),...(group.mirror_parts||[])]);
+  for(const run of group.runs)for(const attachment of run.attachments||[])ids.add(attachment.connector);
+  for(const rigid of state.scene?.groups||[])if(rigid.some(id=>ids.has(id)))for(const id of rigid)if(exactIds.has(id))ids.add(id);
+  return ids;
+}
+function mirrorMatrix(axis,offset){
+  const matrix=new THREE.Matrix4().identity(),index={x:0,y:1,z:2}[axis];
+  matrix.elements[index*4+index]=-1;matrix.elements[12+index]=2*offset;return matrix;
+}
+function removeMirrorCopy(record){
+  mirrorGhost.remove(record.clone);
+  record.clone.traverse(node=>{if(node.isMesh)for(const material of [node.material].flat())material.dispose();});
+}
+function syncMirrorPreviews(){
+  const groups=(state.doc?.draft_subassemblies||[]).filter(group=>group.mirrors?.length);
+  if(!groups.length&&!mirrorCopies.size&&!mirrorPlanes.size)return;
+  const wantedCopies=new Set(),wantedPlanes=new Set();
+  const sceneParts=new Map((state.scene?.parts||[]).map(part=>[part.id,part]));
+  const exactIds=new Set((state.doc?.parts||[]).map(part=>part.id));
+  const pointKey=point=>point.toArray().map(value=>Math.round(value*20)).join(',');
+  for(const group of groups){
+    for(const plane of group.mirrors){
+      const key=group.id+'/'+plane.id;wantedPlanes.add(key);
+      if(!mirrorPlanes.has(key)){
+        const normal=new THREE.Vector3(...({x:[1,0,0],y:[0,1,0],z:[0,0,1]})[plane.axis]);
+        const mesh=new THREE.Mesh(new THREE.PlaneGeometry(12000,12000),
+          new THREE.MeshBasicMaterial({color:'#48c6a0',transparent:true,opacity:.09,depthWrite:false,side:THREE.DoubleSide}));
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),normal);
+        mesh.position.setComponent({x:0,y:1,z:2}[plane.axis],plane.offset_mm);
+        mesh.renderOrder=1;mirrorGhost.add(mesh);mirrorPlanes.set(key,mesh);
+      }
+    }
+    const planes=group.mirrors,ids=mirrorSourceIds(group,exactIds),sources=new Map(),seen=new Map();
+    for(const id of ids){
+      const source=partObjects.get(id),part=sceneParts.get(id);if(!source||!part)continue;
+      source.updateMatrix();
+      let signature=0;source.traverse(()=>signature++);
+      const a=part.draft?new THREE.Vector3(0,0,-part.length_mm/2).applyMatrix4(source.matrix):null;
+      const b=part.draft?new THREE.Vector3(0,0,part.length_mm/2).applyMatrix4(source.matrix):null;
+      sources.set(id,{source,part,signature,a,b});
+      const original=a?[pointKey(a),pointKey(b)].sort().join('|'):pointKey(new THREE.Vector3().setFromMatrixPosition(source.matrix));
+      seen.set(id,new Set([original]));
+    }
+    for(let mask=1;mask<1<<planes.length;mask++){
+      const transform=new THREE.Matrix4().identity();
+      for(let bit=0;bit<planes.length;bit++)if(mask&(1<<bit))transform.premultiply(mirrorMatrix(planes[bit].axis,planes[bit].offset_mm));
+      for(const [id,{source,part,signature,a,b}] of sources){
+        const reflected=part.draft?[pointKey(a.clone().applyMatrix4(transform)),pointKey(b.clone().applyMatrix4(transform))].sort().join('|'):
+          pointKey(new THREE.Vector3().setFromMatrixPosition(source.matrix).applyMatrix4(transform));
+        if(seen.get(id).has(reflected))continue;
+        seen.get(id).add(reflected);
+        const key=group.id+'/'+mask+'/'+id;wantedCopies.add(key);
+        let record=mirrorCopies.get(key);
+        if(!record||record.source!==source||record.signature!==signature){
+          if(record)removeMirrorCopy(record);
+          const clone=source.clone(true);clone.matrixAutoUpdate=false;
+          clone.traverse(node=>{node.userData={};if(node.isMesh){
+            const fade=material=>{const copy=material.clone();copy.transparent=true;copy.opacity=.4;copy.depthWrite=false;return copy;};
+            node.material=Array.isArray(node.material)?node.material.map(fade):fade(node.material);
+          }});mirrorGhost.add(clone);
+          record={clone,source,signature};mirrorCopies.set(key,record);
+        }
+        record.clone.matrix.copy(transform).multiply(source.matrix);record.clone.matrixWorldNeedsUpdate=true;
+      }
+    }
+  }
+  for(const [key,record] of mirrorCopies)if(!wantedCopies.has(key)){removeMirrorCopy(record);mirrorCopies.delete(key);}
+  for(const [key,mesh] of mirrorPlanes)if(!wantedPlanes.has(key)){mirrorGhost.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();mirrorPlanes.delete(key);}
+}
+async function finalizeDrafts(subassembly=null,run_id=null){
+  if(state.placementPending)return;
+  if(!draftRuns(state.doc).length){toast('There are no draft pipes to finalize.');return;}
+  const job_id=Date.now().toString(36)+Math.random().toString(36).slice(2),revision=state.revision;
+  let cancelRequested=false;
+  state.placementPending=true;gizmo?.detach();status('Checking draft connections and cut lengths…');
+  modal('Finalizing draft','<p>Solving connector poses and cut lengths, then checking the physical assembly once.</p><p id="draft-finalize-status" role="status">Working…</p>',[
+    {label:'Cancel finalization',action:async()=>{cancelRequested=true;status('Cancelling draft finalization…');$('#draft-finalize-status').textContent='Cancelling…';await api('draft-finalize-cancel',{job_id});}}
+  ]);
+  try{const result=await api(run_id?'draft-finalize-selected':'draft-finalize',
+    {job_id,...(run_id?{run:run_id}:subassembly?{subassembly}:{})});
+    if(cancelRequested||revision!==state.revision)return;
+    closeModal();
+    if(result.status==='conflict'){
+      const rows=result.conflicts.map(c=>`<div class="joint-card"><strong>${esc(c.run||c.parts?.join(' / ')||c.code)}</strong><p>${esc(c.message)}${c.residual_mm!=null?' · '+esc(c.residual_mm)+' mm':''}${c.residual_deg!=null?' · '+esc(c.residual_deg)+'°':''}</p></div>`).join('');
+      modal('Draft needs adjustment',`<p>The draft is still editable. Resolve these connections or move the fittings, then finalize again.</p>${rows}`,[{label:'Close',action:closeModal}]);status('Draft has unresolved connections');return;
+    }
+    await acceptPlacement(result,revision);
+    const recovered=result.inferred_through_connections||0;
+    toast((run_id?'Selected draft structure finalized. Other draft structures remain editable.':'Draft finalized with exact cut lengths.')+
+      (recovered?` Connected ${recovered} aligned through ${recovered===1?'socket':'sockets'} found along the draft pipes.`:''));
+    status(run_id?'Selected draft structure finalized':'Draft finalized');
+  }catch(e){if(!cancelRequested){toast(e.message,true);status('Finalization failed');}else status('Draft finalization cancelled');}
+  finally{if($('#modal').open&&$('#modal-title').textContent==='Finalizing draft')closeModal();state.placementPending=false;attachGizmo();}
+}
+async function repairDrafts(subassembly=null,run_id=null){
+  if(state.placementPending)return;
+  const job_id=Date.now().toString(36)+Math.random().toString(36).slice(2),revision=state.revision;
+  let cancelRequested=false;state.placementPending=true;gizmo?.detach();status('Repairing draft alignment…');
+  modal('Repairing draft','<p>Aligning movable connectors while keeping every pipe in draft mode.</p><p id="draft-repair-status" role="status">Working…</p>',[
+    {label:'Cancel repair',action:async()=>{cancelRequested=true;status('Cancelling draft repair…');$('#draft-repair-status').textContent='Cancelling…';await api('draft-repair-cancel',{job_id});}}
+  ]);
+  try{
+    const result=await api(run_id?'draft-repair-selected':'draft-repair',
+      {job_id,...(run_id?{run:run_id}:subassembly?{subassembly}:{})});
+    if(cancelRequested||revision!==state.revision)return;
+    closeModal();
+    if(result.status==='conflict'){
+      const rows=result.conflicts.map(c=>`<div class="joint-card"><strong>${esc(c.run||c.code)}</strong><p>${esc(c.message)}${c.residual_mm!=null?' · '+esc(c.residual_mm)+' mm':''}</p></div>`).join('');
+      modal('Draft still needs adjustment',`<p>The draft is unchanged. Move an anchored fitting or detach a conflicting connection, then try again.</p>${rows}`,[{label:'Close',action:closeModal}]);
+      status('Draft repair could not close every fit');return;
+    }
+    if(result.status==='aligned'){status('Draft connections are already aligned');toast('Draft connections are already aligned.');return;}
+    await acceptPlacement(result,revision);
+    const recovered=result.inferred_through_connections||0;
+    toast(`Draft alignment repaired${recovered?`; connected ${recovered} through ${recovered===1?'socket':'sockets'}`:''}. The pipes remain editable drafts.`);
+    status('Draft alignment repaired');
+  }catch(e){if(!cancelRequested){toast(e.message,true);status('Draft repair failed');}else status('Draft repair cancelled');}
+  finally{if($('#modal').open&&$('#modal-title').textContent==='Repairing draft')closeModal();state.placementPending=false;attachGizmo();}
+}
 async function mutate(fn){checkpoint();try{fn();changed();await resolve();}catch(e){state.doc=state.undo.pop()||state.doc;toast(e.message,true);await resolve();throw e;}}
 async function resolve(){const revision=state.revision;try{const data=await api('resolve');if(revision!==state.revision)return;buildScene(data);renderInspector();renderOutline();updateHeader();}catch(e){toast(e.message,true);status('Resolve error: '+e.message);throw e;}}
-function updateHeader(){if(!state.doc)return;$('#rename').textContent=state.doc.name||'Untitled creation';$('#file-path').textContent=state.path;$('#dirty').classList.toggle('changed',state.dirty);$('#tree-count').textContent=state.scene?.parts.length||0;$('#part-stat').textContent=(state.scene?.parts.length||0)+' parts';$('#body-stat').textContent=(state.scene?.groups.length||0)+((state.scene?.groups.length||0)===1?' rigid body':' rigid bodies');$('#mass-stat').textContent=(state.scene?.parts.reduce((sum,p)=>sum+p.mass_kg,0)||0).toFixed(1)+' kg';$('#undo').disabled=!state.undo.length;$('#redo').disabled=!state.redo.length;}
+function updateHeader(){if(!state.doc)return;const drafts=draftRuns(state.doc).length,exact=state.scene?.parts.filter(p=>!p.draft)||[],exactIds=new Set(exact.map(p=>p.id)),bodies=(state.scene?.groups||[]).filter(group=>group.some(id=>exactIds.has(id))).length;$('#rename').textContent=state.doc.name||'Untitled creation';$('#file-path').textContent=state.path;$('#dirty').classList.toggle('changed',state.dirty);$('#tree-count').textContent=state.scene?.parts.length||0;$('#part-stat').textContent=exact.length+' parts'+(drafts?' · '+drafts+' draft':'');$('#body-stat').textContent=bodies+(bodies===1?' rigid body':' rigid bodies');$('#mass-stat').textContent=exact.reduce((sum,p)=>sum+p.mass_kg,0).toFixed(1)+' kg';$('#undo').disabled=!state.undo.length;$('#redo').disabled=!state.redo.length;$('#finalize-draft').disabled=!drafts;}
 
 function solid(shape){
   const type=shape.type,radius=shape.radius_mm??shape.diameter_mm/2,length=shape.length_mm;
@@ -142,10 +364,10 @@ function buildScene(data){
   for(const anchor of data.anchors){const part=partObjects.get(anchor.part);if(!part)continue;const loc=part.position.clone();const marker=new THREE.Mesh(new THREE.RingGeometry(70,73,48),new THREE.MeshBasicMaterial({color:'#74a28c',transparent:true,opacity:.55,side:THREE.DoubleSide}));marker.position.copy(loc);marker.position.z+=1;marker.quaternion.copy(part.quaternion);overlays.add(marker);}
   updatePorts();updateConnectionHint();highlightSelection();updateHeader();if(state.tool==='translate'||state.tool==='rotate')attachGizmo();
 }
-function updatePorts(){dispose(ports);if(!state.scene)return;const show=state.ports||state.tool==='connect';for(const p of state.scene.parts){if(!show&&p.id!==state.selected)continue;for(const [name,port] of Object.entries(p.ports)){const chain=state.scene.chains?.find(c=>p.id.startsWith(c.id+'/'));if(chain&&!((p.id===chain.start_part&&name===chain.start_port)||(p.id===chain.end_part&&name===chain.end_port)||(chain.layout_mode==='posable'&&p.id===state.selected)))continue;if(port.type!=='socket'&&!show)continue;const radius=port.type==='socket'?7:4;const sphere=new THREE.Mesh(new THREE.SphereGeometry(radius,12,8),new THREE.MeshBasicMaterial({color:port.type==='socket'?'#3c9c85':'#779eba',depthTest:false,transparent:true,opacity:.8}));const local=new THREE.Vector3(...(port.position_mm||[0,0,0]));const obj=partObjects.get(p.id);sphere.position.copy(local.applyMatrix4(obj.matrix));sphere.renderOrder=100;sphere.userData={port:name,part:p.id,portType:port.type};ports.add(sphere);const axis=new THREE.Vector3(...(port.axis||[0,0,1])).transformDirection(obj.matrix);const arrow=new THREE.ArrowHelper(axis,sphere.position,38,'#64a294',8,4);arrow.visible=show;ports.add(arrow);}}}
+function updatePorts(){dispose(ports);if(!state.scene)return;const show=state.ports||state.tool==='connect';for(const p of state.scene.parts){if(!show&&p.id!==state.selected&&p.id!==hoveredDraftConnection?.connector)continue;for(const [name,port] of Object.entries(p.ports)){const focused=p.id===hoveredDraftConnection?.connector&&name===hoveredDraftConnection?.port;if(!show&&p.id===hoveredDraftConnection?.connector&&!focused)continue;const chain=state.scene.chains?.find(c=>p.id.startsWith(c.id+'/'));if(chain&&!((p.id===chain.start_part&&name===chain.start_port)||(p.id===chain.end_part&&name===chain.end_port)||(chain.layout_mode==='posable'&&p.id===state.selected)))continue;if(port.type!=='socket'&&!show)continue;const radius=focused?12:port.type==='socket'?7:4;const sphere=new THREE.Mesh(new THREE.SphereGeometry(radius,12,8),new THREE.MeshBasicMaterial({color:focused?'#f3ba62':port.type==='socket'?'#3c9c85':'#779eba',depthTest:false,transparent:true,opacity:focused?1:.8}));const local=new THREE.Vector3(...(port.position_mm||[0,0,0]));const obj=partObjects.get(p.id);sphere.position.copy(local.applyMatrix4(obj.matrix));sphere.renderOrder=100;sphere.userData={port:name,part:p.id,portType:port.type};ports.add(sphere);const axis=new THREE.Vector3(...(port.axis||[0,0,1])).transformDirection(obj.matrix);const arrow=new THREE.ArrowHelper(axis,sphere.position,38,focused?'#f3ba62':'#64a294',8,4);arrow.visible=show||focused;ports.add(arrow);}}}
 function highlightSelection(){
   const object=wholeObject();
-  for(const [id,group] of partObjects){const active=object?id.startsWith(object.id+'/'):id===state.selected;group.traverse(o=>{if(o.isMesh&&o.material?.emissive){o.material.emissive.set(active?'#438f79':'#000000');o.material.emissiveIntensity=active?.12:0;}});}
+  for(const [id,group] of partObjects){const active=object?id.startsWith(object.id+'/'):id===state.selected,hovered=id===hoveredDraftConnection?.connector;group.traverse(o=>{if(o.isMesh&&o.material?.emissive){o.material.emissive.set(hovered?'#f3ba62':active?'#438f79':'#000000');o.material.emissiveIntensity=hovered?.45:active?.12:0;}});}
   const part=state.scene?.parts.find(p=>p.id===state.selected);$('#selection-summary').textContent=part?part.id+' · '+part.kind:'Nothing selected';$('#selection-label').textContent=part?.id||'';$('#selection-label').classList.toggle('hidden',!part);
 }
 function select(id){
@@ -162,7 +384,7 @@ function select(id){
   state.selected=id;updateConnectionHint();highlightSelection();updatePorts();renderInspector();renderOutline();attachGizmo();
 }
 function attachGizmo(){
-  if(!gizmo)return;gizmo.detach();gizmo.showX=gizmo.showY=gizmo.showZ=true;gizmo.setSpace?.('world');
+  if(!gizmo)return;gizmo.detach();gizmo.showX=gizmo.showY=gizmo.showZ=true;gizmo.setSpace?.(state.tool==='rotate'&&localRotationHeld?'local':'world');
   if(state.placementPending||state.mode!=='design'||!['translate','rotate'].includes(state.tool)||!state.selected)return;
   const selected=partObjects.get(state.selected);if(!selected)return;
   const instance=wholeObject();
@@ -200,7 +422,7 @@ function setTool(tool){
   $$('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
   updateConnectionHint();updatePorts();attachGizmo();
 }
-function fitView(){if(!objects.children.length||!orbit)return;const box=new THREE.Box3().setFromObject(objects),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());const halfAngle=Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*Math.min(1,camera.aspect));const distance=Math.max(size.length()/2,150)/Math.sin(halfAngle)*1.16;const direction=camera.position.clone().sub(orbit.target).normalize();orbit.target.copy(center);camera.position.copy(center).addScaledVector(direction,distance);orbit.update();}
+function fitView(){if(!objects.children.length||!orbit)return;syncMirrorPreviews();const box=new THREE.Box3().setFromObject(objects);for(const {clone} of mirrorCopies.values())box.expandByObject(clone);const center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());const halfAngle=Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*Math.min(1,camera.aspect));const distance=Math.max(size.length()/2,150)/Math.sin(halfAngle)*1.16;const direction=camera.position.clone().sub(orbit.target).normalize();orbit.target.copy(center);camera.position.copy(center).addScaledVector(direction,distance);orbit.update();}
 function icon(part){const base='<svg viewBox="0 0 48 48" fill="none" stroke="#8eaaaF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">';let p='<path d="M13 34V14h22v20H13Z"/>';
   const name=part.name||'';if(part.kind==='member')p='<path d="M13 37L35 11"/><path d="M18 39L40 13" stroke="#bbccd2" stroke-width="2"/>';
   else if(/Flange|flange/.test(name))p='<ellipse cx="24" cy="33" rx="17" ry="7" fill="#d7e1e5" stroke-width="2"/><path d="M24 31V12" stroke-width="13"/><ellipse cx="24" cy="12" rx="6" ry="3" fill="#718891" stroke-width="1"/>';
@@ -212,15 +434,79 @@ function icon(part){const base='<svg viewBox="0 0 48 48" fill="none" stroke="#8e
   else if(/Elbow|elbow/.test(name))p='<path d="M12 36V14H35"/>';
   else if(/Ring|Eye|Pin/.test(name))p='<circle cx="24" cy="24" r="13" stroke-width="7"/><path d="M34 33L39 38" stroke-width="4"/>';
   else if(/Swivel/.test(name))p='<path d="M12 12L21 21M28 28L36 36" stroke-width="11"/><circle cx="24" cy="24" r="5" stroke-width="3"/>';
+  else if(part.kind==='panel'&&part.panel_layers)p='<path d="M5 24L27 13L43 24L21 37Z" fill="#647d89" stroke="#405866" stroke-width="2"/><path d="M5 19L27 8L43 19L21 32Z" fill="#8fa7b1" stroke="#405866" stroke-width="2"/>';
   else if(part.kind==='panel')p='<path d="M5 21L27 10L43 21L21 34Z" fill="#d4b991" stroke="#b59b78" stroke-width="2"/><path d="M5 21V27L21 40L43 27V21" stroke="#b59b78" stroke-width="2"/>';
   return base+p+'</svg>';
 }
-function renderLibrary(){const query=$('#part-search').value.toLowerCase(),category=$('#category').value,size=$('#size-filter').value;const entries=Object.entries(state.library).filter(([id,p])=>{
+function libraryHotkeyFromEvent(event){
+  const digit=/^Digit([0-9])$/.exec(event.code||'')?.[1]||(/^[0-9]$/.test(event.key)?event.key:null);
+  if(digit&&!event.altKey&&!event.ctrlKey&&!event.metaKey)return (event.shiftKey?'Shift+':'')+digit;
+  const letter=/^Key([A-Z])$/.exec(event.code||'')?.[1]||(/^[a-z]$/i.test(event.key)?event.key.toUpperCase():null);
+  if(letter&&letter!=='D'&&event.altKey&&event.shiftKey&&!event.ctrlKey&&!event.metaKey)return 'Alt+Shift+'+letter;
+  return null;
+}
+function showDraftConnection(connector,port){hoveredDraftConnection=connector?{connector,port}:null;highlightSelection();updatePorts();}
+function addLibraryCatalog(catalog){
+  if(!state.library[catalog]||state.busy||state.placementPending||dragStart)return;
+  if(state.library[catalog].kind==='chain')chainDialog(catalog);else addPart(catalog);
+}
+function saveLibraryHotkeys(){try{window.localStorage.setItem(LIBRARY_HOTKEYS_KEY,JSON.stringify(libraryHotkeys));return true;}catch{return false;}}
+let libraryMenuOwner=null;
+function closeLibraryMenu(focus=false){
+  $('#library-actions-menu')?.remove();const owner=libraryMenuOwner;libraryMenuOwner=null;
+  owner?.setAttribute('aria-expanded','false');if(focus)owner?.focus();
+}
+function setLibraryHotkey(catalog){
+  const old=libraryHotkeys[catalog];let chosen=old||null;
+  modal('Set part hotkey',`<p>Press 0–9, Shift+0–9, or Alt+Shift+A–Z (except D). The shortcut adds this part from anywhere in the editor. It is saved in this browser.</p><div class="single-field"><label for="hotkey-capture">HOTKEY FOR ${esc(catalog)}</label><input id="hotkey-capture" readonly placeholder="Press a shortcut" value="${esc(old||'')}"></div><p id="hotkey-message" role="status"></p>`,[
+    {label:'Cancel',action:closeModal},
+    {label:'Save hotkey',primary:true,action:()=>{
+      if(!chosen){$('#hotkey-message').textContent='Press a supported shortcut first.';return;}
+      const previous=Object.keys(libraryHotkeys).find(id=>id!==catalog&&libraryHotkeys[id]===chosen);
+      if(previous)delete libraryHotkeys[previous];libraryHotkeys[catalog]=chosen;
+      const saved=saveLibraryHotkeys();closeModal();capture.blur();renderLibrary();
+      toast(`${chosen} adds ${catalog}.${previous?' Reassigned from '+previous+'.':''}${saved?'':' Browser storage is unavailable; this assignment lasts only for this tab.'}`);
+    }}
+  ]);
+  const capture=$('#hotkey-capture');capture.onkeydown=e=>{
+    if(e.key==='Escape'||e.key==='Tab')return;
+    e.preventDefault();e.stopPropagation();
+    const hotkey=libraryHotkeyFromEvent(e);
+    if(!hotkey){$('#hotkey-message').textContent='Use a number key, Shift+number, or Alt+Shift+letter (except D).';return;}
+    chosen=hotkey;capture.value=hotkey;
+    const previous=Object.keys(libraryHotkeys).find(id=>id!==catalog&&libraryHotkeys[id]===hotkey);
+    $('#hotkey-message').textContent=previous?`Currently assigned to ${previous}; saving will reassign it.`:'Ready to save.';
+  };capture.focus();
+}
+function openLibraryMenu(button,catalog){
+  if(libraryMenuOwner===button){closeLibraryMenu(true);return;}
+  closeLibraryMenu();libraryMenuOwner=button;button.setAttribute('aria-expanded','true');
+  const menu=document.createElement('div');menu.id='library-actions-menu';menu.className='library-actions-menu';
+  menu.setAttribute('role','menu');menu.setAttribute('aria-label',`Actions for ${catalog}`);
+  menu.innerHTML=`<div class="tree-menu-title">${esc(catalog)}</div><button role="menuitem" data-library-command="set">Set hotkey…${libraryHotkeys[catalog]?' · '+esc(libraryHotkeys[catalog]):''}</button>${libraryHotkeys[catalog]?'<button role="menuitem" data-library-command="remove">Remove hotkey</button>':''}`;
+  document.body.appendChild(menu);const rect=button.getBoundingClientRect();
+  menu.style.left=Math.max(8,Math.min(rect.right-190,window.innerWidth-198))+'px';
+  menu.style.top=Math.max(8,Math.min(rect.bottom+4,window.innerHeight-menu.offsetHeight-8))+'px';
+  const items=[...menu.querySelectorAll('button')];for(const item of items){item.disabled=state.busy||state.placementPending;
+    item.onclick=()=>{closeLibraryMenu();if(item.dataset.libraryCommand==='set')setLibraryHotkey(catalog);
+      else{delete libraryHotkeys[catalog];const saved=saveLibraryHotkeys();renderLibrary();toast(saved?'Hotkey removed.':'Hotkey removed for this tab; browser storage is unavailable.');}};
+  }
+  menu.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeLibraryMenu(true);return;}
+    if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();const i=items.indexOf(document.activeElement);
+      items[e.key==='Home'?0:e.key==='End'?items.length-1:(i+(e.key==='ArrowDown'?1:-1)+items.length)%items.length].focus();}
+    if(e.key!=='Tab')e.stopPropagation();
+  };items.find(item=>!item.disabled)?.focus();
+}
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('#library-actions-menu, [data-library-actions]'))closeLibraryMenu();});
+document.addEventListener('focusin',e=>{if(!e.target.closest('#library-actions-menu, [data-library-actions]'))closeLibraryMenu();});
+function renderLibrary(){closeLibraryMenu();const query=$('#part-search').value.toLowerCase(),category=$('#category').value,size=$('#size-filter').value;const entries=Object.entries(state.library).filter(([id,p])=>{
   if(!(id+' '+p.name).toLowerCase().includes(query))return false;
   if(category==='motion'){if(['member','panel','load'].includes(p.kind))return false;if(id.startsWith('tubeclamp.')&&!/173|138|140|148|179/.test(id))return false;}else if(category!=='all'&&p.kind!==category)return false;
   if(size!=='all'&&id.startsWith('tubeclamp.')&&!id.endsWith(size))return false;return true;
-});$('#library-count').textContent=entries.length+' COMPONENTS';$('#part-list').innerHTML=entries.map(([id,p])=>`<button class="part-card" draggable="true" data-catalog="${esc(id)}" title="Add ${esc(p.name)}"><span class="part-thumb">${icon(p)}</span><span class="part-card-text"><div class="part-code">${esc(id.split('.').slice(1).join('.'))}</div><div class="part-name">${esc((p.name||id).replace(/^\d+[MF]?\s*-\s*/,'').split(' · ')[0].replace(/\s*\([^)]*\)/g,''))}</div><div class="part-vendor">${esc(p.source?.supplier||'CUSTOMISABLE')}</div></span><span class="part-plus">+</span></button>`).join('')||'<div class="empty-library">No matching parts.<br>Try another size or category.</div>';
-  $$('.part-card').forEach(b=>{b.addEventListener('click',()=>state.library[b.dataset.catalog].kind==='chain'?chainDialog(b.dataset.catalog):addPart(b.dataset.catalog));b.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/pipesim-part',b.dataset.catalog);e.dataTransfer.effectAllowed='copy';});});
+});$('#library-count').textContent=entries.length+' COMPONENTS';$('#part-list').innerHTML=entries.map(([id,p])=>`<div class="part-card-row"><button class="part-card" draggable="true" data-catalog="${esc(id)}" title="Add ${esc(p.name||id)}"><span class="part-thumb">${icon(p)}</span><span class="part-card-text"><div class="part-code">${esc(id.split('.').slice(1).join('.'))}${libraryHotkeys[id]?` <span class="part-hotkey">${esc(libraryHotkeys[id])}</span>`:''}</div><div class="part-name">${esc((p.name||id).replace(/^\d+[MF]?\s*-\s*/,'').split(' · ')[0].replace(/\s*\([^)]*\)/g,''))}</div><div class="part-vendor">${esc(p.source?.supplier||'CUSTOMISABLE')}</div></span><span class="part-plus">+</span></button><button class="library-actions-toggle" data-library-actions="${esc(id)}" aria-label="Actions for ${esc(p.name||id)}" aria-haspopup="menu" aria-expanded="false" title="Part options">⋯</button></div>`).join('')||'<div class="empty-library">No matching parts.<br>Try another size or category.</div>';
+  $$('.part-card').forEach(b=>{b.addEventListener('click',()=>addLibraryCatalog(b.dataset.catalog));b.addEventListener('dragstart',e=>{e.dataTransfer.setData('application/pipesim-part',b.dataset.catalog);e.dataTransfer.effectAllowed='copy';});});
+  $$('[data-library-actions]').forEach(b=>{b.onclick=e=>{e.preventDefault();e.stopPropagation();openLibraryMenu(b,b.dataset.libraryActions);};
+    b.onkeydown=e=>{if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();openLibraryMenu(b,b.dataset.libraryActions);}};});
 }
 let treeMenuOwner=null;
 function treeActionsButton(index,label){return `<button class="tree-actions-toggle" data-tree-actions="${index}" aria-label="Actions for ${esc(label)}" aria-haspopup="menu" aria-expanded="false" title="Actions for ${esc(label)}">⋯</button>`;}
@@ -231,10 +517,10 @@ function closeTreeMenu(focus=false){
 function openTreeMenu(button,target){
   if(treeMenuOwner===button){closeTreeMenu(true);return;}closeTreeMenu();treeMenuOwner=button;button.setAttribute('aria-expanded','true');
   const menu=document.createElement('div');menu.id='tree-actions-menu';menu.className='tree-actions-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label',`Actions for ${target.label}`);
-  menu.innerHTML=`<div class="tree-menu-title">${esc(target.label)} · ${target.members.length} parts</div><button role="menuitem" data-tree-command="properties">Show properties</button><button role="menuitem" data-tree-command="rename">Rename…</button>${target.duplicate?`<button role="menuitem" data-tree-command="duplicate">Duplicate ${target.part?'part':'subassembly'}</button>`:''}<button role="menuitem" class="tree-delete" data-tree-command="delete">Delete ${target.part?'part':'subassembly'}</button>`;
+  menu.innerHTML=`<div class="tree-menu-title">${esc(target.label)} · ${target.members.length} parts</div><button role="menuitem" data-tree-command="properties">Show properties</button><button role="menuitem" data-tree-command="rename">Rename…</button>${target.duplicate?`<button role="menuitem" data-tree-command="duplicate">Duplicate ${target.part?'part':'subassembly'}</button>`:''}${target.reopen?`<button role="menuitem" data-tree-command="reopen">Return ${target.part?'pipe':'pipes'} to draft</button>`:''}<button role="menuitem" class="tree-delete" data-tree-command="delete">Delete ${target.part?'part':'subassembly'}</button>`;
   document.body.appendChild(menu);const rect=button.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(rect.right-210,window.innerWidth-218))+'px';menu.style.top=Math.max(8,Math.min(rect.bottom+4,window.innerHeight-menu.offsetHeight-8))+'px';
   const items=[...menu.querySelectorAll('button')];items.forEach(item=>{item.disabled=state.busy||state.placementPending;item.onclick=()=>{
-    closeTreeMenu();if(item.dataset.treeCommand==='rename'){renameTreeTarget(target);return;}if(item.dataset.treeCommand==='delete'){deleteTreeTarget(target);return;}
+    closeTreeMenu();if(item.dataset.treeCommand==='rename'){renameTreeTarget(target);return;}if(item.dataset.treeCommand==='delete'){deleteTreeTarget(target);return;}if(item.dataset.treeCommand==='reopen'){reopenTreeTarget(target);return;}
     if(target.object)objectModes.set(target.object,'whole');setMode('design');select(target.members[0]);
     if(item.dataset.treeCommand==='duplicate')duplicateSelected(target.part?'part':'subassembly');
   };});
@@ -277,10 +563,23 @@ async function deleteTreeTarget(target){
   }catch(error){toast(error.message,true);status('Deletion failed · design unchanged');}
   finally{state.placementPending=false;attachGizmo();}
 }
+async function reopenTreeTarget(target){
+  if(state.busy||state.placementPending||dragStart)return;
+  const revision=state.revision;state.placementPending=true;gizmo?.detach();status('Returning '+target.label+' to draft…');
+  try{
+    const result=await api('draft-reopen',{members:target.members});
+    if(revision!==state.revision)return;
+    state.selected=result.converted_parts[0];
+    await acceptPlacement(result,revision);
+    toast(`${result.converted_parts.length} ${result.converted_parts.length===1?'pipe':'pipes'} returned to draft. Undo restores the exact assembly.`);
+    status('Subassembly is editable in draft mode');
+  }catch(error){toast(error.message,true);status('Return to draft failed · design unchanged');}
+  finally{state.placementPending=false;attachGizmo();}
+}
 function renderOutline(){
   closeTreeMenu();if(!state.scene)return;
   const targets=[];const actions=target=>{targets.push(target);return treeActionsButton(targets.length-1,target.label);};
-  const instances=state.doc.objects||[],direct=new Set(state.doc.parts.map(p=>p.id)),owned=new Set(),partButton=id=>{const label=state.scene.parts.find(p=>p.id===id)?.label||id;return `<div class="outline-heading"><button class="outline-part ${state.selected===id?'active':''}" data-select="${esc(id)}" title="${esc(id)}"><span>◇</span>${esc(label)}</button>${actions({label,part:id,members:[id],duplicate:true})}</div>`;};
+  const instances=state.doc.objects||[],direct=new Set(state.doc.parts.map(p=>p.id)),owned=new Set(),reopenable=id=>{const part=state.doc.parts.find(p=>p.id===id),definition=part&&state.library[part.catalog];return !!(part&&definition?.kind==='member'&&JSON.stringify(definition.geometry||[]).includes('$length_mm'));},partButton=id=>{const label=state.scene.parts.find(p=>p.id===id)?.label||id;return `<div class="outline-heading"><button class="outline-part ${state.selected===id?'active':''}" data-select="${esc(id)}" title="${esc(id)}"><span>◇</span>${esc(label)}</button>${actions({label,part:id,members:[id],duplicate:true,reopen:reopenable(id)})}</div>`;};
   const grouped=instances.map(instance=>{
     const members=state.scene.parts.filter(p=>!direct.has(p.id)&&p.id.startsWith(instance.id+'/')).map(p=>p.id);members.forEach(id=>owned.add(id));
     if(instance.template==='chain'){
@@ -291,8 +590,10 @@ function renderOutline(){
     const action=actions({label:instance.label||instance.id,object:instance.id,members,duplicate:true});
       return `<div class="object-outline"><div class="outline-heading"><button class="outline-part ${selectedObject()?.id===instance.id?'active':''}" data-object-select="${esc(instance.id)}"><span>♙</span>${esc(instance.label||instance.id)} <span class="subtle">${members.length} parts</span></button>${action}</div><details class="outline-group" data-object-tree="${esc(instance.id)}" ${openObjects.has(instance.id)?'open':''}><summary>Individual parts</summary>${members.map(partButton).join('')}</details></div>`;
   }).join('');
-  const bodies=state.scene.groups.map(g=>g.filter(id=>!owned.has(id))).filter(g=>g.length);
-  $('#outline-list').innerHTML=grouped+bodies.map((group,i)=>{const label=state.doc.metadata?.body_labels?.find(r=>r.parts.length===group.length&&r.parts.every(p=>group.includes(p)))?.label||'Body '+String(i+1).padStart(2,'0');const target={label,members:group,duplicate:state.scene.groups.find(g=>g.includes(group[0])).length===group.length};return `<details class="outline-group" open><summary data-tree-group="${targets.length}">⌄ ${esc(label)} <span class="subtle"> · ${group.length} parts</span>${actions(target)}</summary>${group.map(partButton).join('')}</details>`;}).join('');
+  const draftIds=new Set(draftRuns(state.doc).map(r=>r.id));
+  const drafts=(state.doc.draft_subassemblies||[]).map(group=>`<details class="outline-group" open><summary>Draft · ${esc(group.id)} <span class="subtle">· ${group.runs.length} runs</span></summary>${group.runs.map(run=>`<div class="outline-heading"><button class="outline-part ${state.selected===run.id?'active':''}" data-select="${esc(run.id)}"><span>◇</span>${esc(run.id)}</button></div>`).join('')}</details>`).join('');
+  const bodies=state.scene.groups.map(g=>g.filter(id=>!owned.has(id)&&!draftIds.has(id))).filter(g=>g.length);
+  $('#outline-list').innerHTML=grouped+drafts+bodies.map((group,i)=>{const label=state.doc.metadata?.body_labels?.find(r=>r.parts.length===group.length&&r.parts.every(p=>group.includes(p)))?.label||'Body '+String(i+1).padStart(2,'0');const target={label,members:group,duplicate:state.scene.groups.find(g=>g.includes(group[0])).length===group.length,reopen:group.some(reopenable)};return `<details class="outline-group" open><summary data-tree-group="${targets.length}">⌄ ${esc(label)} <span class="subtle"> · ${group.length} parts</span>${actions(target)}</summary>${group.map(partButton).join('')}</details>`;}).join('');
   $$('#outline-list [data-tree-actions]').forEach(button=>{
     const target=targets[+button.dataset.treeActions];button.onclick=e=>{e.preventDefault();e.stopPropagation();openTreeMenu(button,target);};
     button.onkeydown=e=>{if(e.key==='Delete'){e.preventDefault();e.stopPropagation();deleteTreeTarget(target);}else if(['ArrowDown','ArrowUp'].includes(e.key)){e.preventDefault();e.stopPropagation();openTreeMenu(button,target);}};
@@ -306,7 +607,218 @@ function renderOutline(){
     select(state.scene.parts.find(p=>p.id===id+'/pelvis')?.id||state.scene.parts.find(p=>p.id.startsWith(id+'/'))?.id);
   });
 }
-async function addPart(catalog,position=null,{origin=false,quiet=false}={}){const definition=state.library[catalog];if(!definition)return;const short=catalog.split('.').pop().toLowerCase().replace(/[^a-z0-9-]/g,'-');let n=1;while(state.doc.parts.some(p=>p.id===short+'-'+n))n++;const id=short+'-'+n;const params=clone(definition.parameters||{});const z=definition.kind==='member'?(params.length_mm||1000)/2:definition.kind==='panel'?(params.thickness_mm||30)/2:params.height_mm?params.height_mm/2:50;await mutate(()=>{state.doc.parts.push({id,catalog,parameters:params,pose:{position_mm:position?[position[0],position[1],position[2]+(origin?0:z)]:[0,-600,z],rotation_deg:[0,0,0]}});state.selected=id;});setMode('design');setTool('translate');if(!quiet)toast('Added '+id+'. Drag it onto a pipe or socket to connect.');return id;}
+async function addPart(catalog,position=null,{origin=false,quiet=false}={}){const definition=state.library[catalog];if(!definition)return;const short=catalog.split('.').pop().toLowerCase().replace(/[^a-z0-9-]/g,'-');let n=1;while(state.doc.parts.some(p=>p.id===short+'-'+n)||draftRun(state.doc,short+'-'+n))n++;const id=short+'-'+n;const params=clone(definition.parameters||{});const z=definition.kind==='member'?(params.length_mm||1000)/2:definition.kind==='panel'?(params.thickness_mm||30)/2:params.height_mm?params.height_mm/2:50;
+  if(definition.kind==='member'&&JSON.stringify(definition.geometry||[]).includes('$length_mm')){
+    const start=position?[position[0],position[1],position[2]]:[0,-600,0],length=params.length_mm||1000;
+    delete params.length_mm;checkpoint();state.doc.draft_subassemblies||=[{id:'draft-1',runs:[]}];
+    state.doc.draft_subassemblies[0].runs.push({id,catalog,parameters:params,start_mm:start,end_mm:[start[0],start[1],start[2]+length],attachments:[]});
+    state.selected=id;changed();refreshDraft(id,{structure:true});setMode('design');setTool('translate');if(!quiet)toast('Added '+id+' as a draft run. Connect its ends, then finalize the subassembly.');return id;
+  }
+  await mutate(()=>{state.doc.parts.push({id,catalog,parameters:params,pose:{position_mm:position?[position[0],position[1],position[2]+(origin?0:z)]:[0,-600,z],rotation_deg:[0,0,0]}});
+    const mirrored=(state.doc.draft_subassemblies||[]).filter(group=>group.mirrors?.length);
+    if(mirrored.length===1){
+      const existing=new Set(state.doc.parts.map(part=>part.id));
+      mirrored[0].mirror_parts=[...new Set((mirrored[0].mirror_parts||[]).filter(part=>existing.has(part)))];
+      if(!mirrored[0].mirror_parts.includes(id))mirrored[0].mirror_parts.push(id);
+    }
+    state.selected=id;});setMode('design');setTool('translate');if(!quiet)toast('Added '+id+'. Drag it onto a pipe or socket to connect.');return id;}
+
+async function deleteDraft(id){
+  if(state.busy||state.placementPending||!draftRun(state.doc,id))return;
+  const revision=state.revision;state.placementPending=true;gizmo?.detach();status('Deleting draft run…');
+  try{
+    const result=await api('delete',{members:[id]});
+    if(revision!==state.revision)return;
+    state.selected=null;
+    await acceptPlacement(result,revision);
+    toast('Draft run deleted. Undo restores it.');status('Draft run deleted');
+  }catch(error){toast(error.message,true);status('Deletion failed · design unchanged');}
+  finally{state.placementPending=false;attachGizmo();}
+}
+
+function addDraftMirrorDialog(group,run){
+  if((group.mirrors||[]).length>=3){toast('A draft subassembly can use one mirror plane per axis.',true);return;}
+  modal('Add draft mirror',`<p>Mirror this draft subassembly while editing. Generated parts are previews until you keep the mirror or finalize.</p>
+    <div class="single-field"><label for="mirror-axis">PLANE NORMAL</label><select id="mirror-axis">${['x','y','z'].filter(axis=>!(group.mirrors||[]).some(plane=>plane.axis===axis)).map(axis=>`<option value="${axis}">${axis.toUpperCase()} = offset</option>`).join('')}</select></div>
+    <div class="single-field"><label for="mirror-offset">OFFSET · mm</label><input id="mirror-offset" type="number" step="any" required value="0"></div>
+    <p>Common planes are X = 0, Y = 0, and Z at the height you choose.</p>`,[
+    {label:'Cancel',action:closeModal},
+    {label:'Add mirror',primary:true,action:async()=>{
+      const input=$('#mirror-offset');if(!input.reportValidity())return;
+      const axis=$('#mirror-axis').value,offset=Number(input.value);if(!Number.isFinite(offset))return;
+      const used=new Set((group.mirrors||[]).map(plane=>plane.id));let index=1;while(used.has('mirror-'+index))index++;
+      closeModal();await mutate(()=>{group.mirrors||=[];group.mirrors.push({id:'mirror-'+index,axis,offset_mm:offset,run_modes:{}});});
+      syncMirrorPreviews();fitView();
+    }}]);
+  let edited=false;
+  $('#mirror-axis').onchange=()=>{if(!edited)$('#mirror-offset').value=$('#mirror-axis').value==='z'?Number(state.scene.parts.find(p=>p.id===run.id).pose.position_mm[2].toFixed(2)):0;};
+  $('#mirror-offset').oninput=()=>{edited=true;};
+}
+function removeDraftMirrorDialog(group,plane){
+  modal('Turn off mirror',`<p>Turn off ${esc(plane.axis.toUpperCase())} = ${esc(plane.offset_mm)} mm for ${esc(group.id)}.</p><p>Keep copies makes the reflected pipes and connectors independently editable. Discard copies removes only the generated previews.</p>`,[
+    {label:'Cancel',action:closeModal},
+    {label:'Discard copies',action:async()=>{closeModal();await mutate(()=>{group.mirrors=group.mirrors.filter(item=>item.id!==plane.id);if(!group.mirrors.length){delete group.mirrors;delete group.mirror_parts;}});syncMirrorPreviews();}},
+    {label:'Keep copies',primary:true,action:async()=>{
+      if(state.placementPending)return;const revision=state.revision;state.placementPending=true;gizmo?.detach();
+      closeModal();status('Keeping mirrored draft geometry…');
+      try{const result=await api('draft-mirror-bake',{group:group.id,plane:plane.id});if(revision!==state.revision)return;
+        await acceptPlacement(result,revision);syncMirrorPreviews();toast('Mirror copies are now independent draft geometry.');}
+      catch(error){toast(error.message,true);}finally{state.placementPending=false;attachGizmo();}
+    }}]);
+}
+
+function attachAlignedThroughSockets(run){
+  const preview=draftPreview(run,state.scene,state.library),object=new THREE.Object3D();setPose(object,preview.pose);
+  const start=new THREE.Vector3(0,0,-preview.length_mm/2).applyMatrix4(object.matrix);
+  const direction=new THREE.Vector3(0,0,1).transformDirection(object.matrix);
+  const section=preview.section,profile=['tube','round','circle'].includes(section.type)?'round':section.profile||section.type;
+  let added=0;
+  for(const fitting of state.scene.parts){
+    const matrix=partObjects.get(fitting.id)?.matrix;if(!matrix)continue;
+    for(const [name,socket] of Object.entries(fitting.ports||{})){
+      if(socket.type!=='socket'||!socket.through||socketOccupied(state.scene,fitting.id,name))continue;
+      if(profile!==(socket.profile||'round')||Math.abs((section.diameter_mm||0)-(socket.diameter_mm||0))>.6)continue;
+      if((run.attachments||[]).some(a=>a.connector===fitting.id&&
+        (a.port===name||socket.excludes?.includes(a.port)||fitting.ports[a.port]?.excludes?.includes(name))))continue;
+      const mouth=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyMatrix4(matrix);
+      const axis=new THREE.Vector3(...(socket.axis||[0,0,1])).transformDirection(matrix);
+      const station=mouth.clone().sub(start).dot(direction);
+      const gap=mouth.distanceTo(start.clone().addScaledVector(direction,station));
+      if(gap>Math.min(10,(socket.diameter_mm||0)/4)||Math.abs(axis.dot(direction))<Math.cos(5*Math.PI/180)||
+        station<0||station>preview.length_mm)continue;
+      run.attachments.push({connector:fitting.id,port:name});added++;
+    }
+  }
+  return added;
+}
+function draftConnect(match,recordUndo=true){
+  const run=draftRun(state.doc,match.member),fitting=state.scene.parts.find(p=>p.id===match.connector),socket=fitting?.ports?.[match.port];
+  if(!run||!socket||socket.type!=='socket')throw new Error('Choose a draft run and a socket');
+  if(socketOccupied(state.scene,match.connector,match.port))throw new Error('This socket or its shared bore is occupied');
+  const section=state.scene.parts.find(p=>p.id===run.id).section,profile=['tube','round','circle'].includes(section.type)?'round':section.profile||section.type;
+  if(profile!==(socket.profile||'round')||Math.abs((section.diameter_mm||0)-(socket.diameter_mm||0))>.6)throw new Error('The pipe size or profile does not match this socket');
+  const attachment={connector:match.connector,port:match.port};
+  if(!socket.through){attachment.end=match.end||(['start','end'].find(e=>!(run.attachments||[]).some(a=>a.end===e)));
+    if(!attachment.end)throw new Error('Both pipe ends are already connected');
+    if((run.attachments||[]).some(a=>a.end===attachment.end))throw new Error('That pipe end is already connected');
+    attachment.insertion_mm=match.insertion_mm??Math.min(30,socket.engagement_mm*.8);
+    if(attachment.insertion_mm<(socket.min_engagement_mm||0)||attachment.insertion_mm>socket.engagement_mm)throw new Error('Insertion is outside the socket engagement range');
+  }
+  if(recordUndo)checkpoint();run.attachments||=[];run.attachments.push(attachment);
+  const owner=state.doc.draft_subassemblies.find(group=>group.runs.includes(run));
+  const ends=Object.fromEntries(run.attachments.filter(item=>item.end).map(item=>[item.end,item]));
+  if(attachment.end&&ends.start&&ends.end)for(const plane of owner.mirrors||[]){
+    if(plane.run_modes?.[run.id]!=='centered')continue;
+    const axis={x:0,y:1,z:2}[plane.axis],frames={};
+    for(const [name,item] of Object.entries(ends)){
+      const part=state.doc.parts.find(p=>p.id===item.connector),shown=state.scene.parts.find(p=>p.id===item.connector);
+      const socket=shown?.ports?.[item.port],pose=part?.pose||{};
+      if(!part||!socket)continue;
+      const rotation=new THREE.Quaternion().setFromEuler(new THREE.Euler(...(pose.rotation_deg||[0,0,0]).map(THREE.MathUtils.degToRad),'ZYX'));
+      const direction=new THREE.Vector3(...(socket.axis||[0,0,1])).applyQuaternion(rotation).normalize();
+      const point=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyQuaternion(rotation)
+        .add(new THREE.Vector3(...(pose.position_mm||[0,0,0])))
+        .addScaledVector(direction,-item.insertion_mm);
+      frames[name]={socket,direction,point};
+    }
+    if(!frames.start||!frames.end)continue;
+    const current=frames[attachment.end];
+    const component=current.direction.getComponent(axis);
+    if(Math.abs(component)<.99999)continue;
+    const midpoint=(frames.start.point.getComponent(axis)+frames.end.point.getComponent(axis))/2;
+    const depth=attachment.insertion_mm+2*(midpoint-plane.offset_mm)/component;
+    if(depth<(current.socket.min_engagement_mm||0)||depth>current.socket.engagement_mm)continue;
+    current.point.addScaledVector(current.direction,-(depth-attachment.insertion_mm));
+    attachment.insertion_mm=depth;
+    run.start_mm=frames.start.point.toArray();run.end_mm=frames.end.point.toArray();
+  }
+  const additional=attachAlignedThroughSockets(run);changed();refreshDraft(run.id);
+  toast(`${additional+1} draft ${additional?'connections':'connection'} added. Finalize when the subassembly is ready.`);status('Draft graph updated');
+}
+
+function positionDraftRun(run,matrix){
+  const length=state.scene.parts.find(p=>p.id===run.id).length_mm;
+  run.start_mm=new THREE.Vector3(0,0,-length/2).applyMatrix4(matrix).toArray();
+  run.end_mm=new THREE.Vector3(0,0,length/2).applyMatrix4(matrix).toArray();
+  const direction=new THREE.Vector3().subVectors(new THREE.Vector3(...run.end_mm),new THREE.Vector3(...run.start_mm)).normalize();
+  const reference=Math.abs(direction.y)<.95?new THREE.Vector3(0,1,0):new THREE.Vector3(1,0,0);
+  const x=reference.clone().cross(direction).normalize(),y=direction.clone().cross(x);
+  const basis=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,direction));
+  const actual=new THREE.Quaternion().setFromRotationMatrix(matrix);
+  const relative=basis.invert().multiply(actual);
+  run.roll_deg=THREE.MathUtils.radToDeg(2*Math.atan2(relative.z,relative.w));
+}
+function draftMoveMembers(id){
+  const members=new Set([id]);let changed=true;
+  while(changed){
+    changed=false;
+    for(const run of draftRuns(state.doc))if(members.has(run.id)||(run.attachments||[]).some(a=>members.has(a.connector))){
+      for(const part of [run.id,...(run.attachments||[]).map(a=>a.connector)])if(!members.has(part)){members.add(part);changed=true;}
+    }
+    for(const joint of state.scene.joints)if(joint.type==='fixed'||joint.locked){
+      if(members.has(joint.a.part)||members.has(joint.b.part))for(const part of [joint.a.part,joint.b.part])if(!members.has(part)){members.add(part);changed=true;}
+    }
+  }
+  return [...members];
+}
+function draftTranslationGroup(id){
+  const members=draftMoveMembers(id),inside=new Set(members);
+  if(members.some(part=>state.scene.anchors.some(anchor=>anchor.part===part))){toast('This draft structure is fixed to the world. Remove its anchor to move it.');return null;}
+  if(members.some(part=>!draftRun(state.doc,part)&&!state.doc.parts.some(item=>item.id===part))){toast('Move the attached object directly to reposition this draft structure.');return null;}
+  if(state.scene.joints.some(j=>inside.has(j.a.part)!==inside.has(j.b.part))){toast('A joint connects this draft structure to another part. Move its connector instead.');return null;}
+  return members;
+}
+function translateDraftMembers(members,delta){
+  delta=mirrorConstrainedDelta(members,delta);
+  if(delta.lengthSq()<1e-12)return false;
+  checkpoint();
+  for(const id of members){
+    const part=state.doc.parts.find(item=>item.id===id);
+    if(part){part.pose||={};part.pose.position_mm=new THREE.Vector3(...(part.pose.position_mm||[0,0,0])).add(delta).toArray();
+      const scenePart=state.scene.parts.find(item=>item.id===id);scenePart.pose.position_mm=[...part.pose.position_mm];
+      setPose(partObjects.get(id),scenePart.pose);}
+    else{const run=draftRun(state.doc,id);run.start_mm=new THREE.Vector3(...run.start_mm).add(delta).toArray();run.end_mm=new THREE.Vector3(...run.end_mm).add(delta).toArray();}
+  }
+  changed();for(const id of members)if(draftRun(state.doc,id))refreshDraft(id);
+  updatePorts();renderInspector();attachGizmo();return true;
+}
+function resizeDraftSpan(run,preview,value,owner){
+  if(!Number.isFinite(value)||value<=0||Math.abs(value-preview.length_mm)<1e-6)return;
+  const endAttachments=(run.attachments||[]).filter(a=>a.end),centered=(owner.mirrors||[]).find(plane=>plane.run_modes?.[run.id]==='centered');
+  let members=[run.id],delta=new THREE.Vector3();
+  if(centered&&endAttachments.length===1){
+    members=draftTranslationGroup(run.id);if(!members){renderInspector();return;}
+    const axis={x:0,y:1,z:2}[centered.axis],object=new THREE.Object3D();setPose(object,preview.pose);
+    const start=new THREE.Vector3(0,0,-preview.length_mm/2).applyMatrix4(object.matrix);
+    const end=new THREE.Vector3(0,0,preview.length_mm/2).applyMatrix4(object.matrix);
+    const sign=Math.sign(end.getComponent(axis)-start.getComponent(axis));
+    delta.setComponent(axis,sign*(value-preview.length_mm)/2*(endAttachments[0].end==='start'?-1:1));
+    for(const group of state.doc.draft_subassemblies||[])for(const plane of group.mirrors||[])
+      for(const [id,mode] of Object.entries(plane.run_modes||{})){
+        if(mode==='free'||!members.includes(id)||id===run.id&&plane===centered)continue;
+        if(Math.abs(delta.getComponent({x:0,y:1,z:2}[plane.axis]))>1e-6){
+          toast('Another mirror constraint holds this connected structure in place. Detach or move its fitting first.',true);renderInspector();return;
+        }
+      }
+  }
+  checkpoint();
+  if(delta.lengthSq()>0)for(const id of members){
+    const part=state.doc.parts.find(item=>item.id===id);
+    if(part){part.pose||={};part.pose.position_mm=new THREE.Vector3(...(part.pose.position_mm||[0,0,0])).add(delta).toArray();
+      const shown=state.scene.parts.find(item=>item.id===id);shown.pose.position_mm=[...part.pose.position_mm];setPose(partObjects.get(id),shown.pose);}
+    else{const member=draftRun(state.doc,id);member.start_mm=new THREE.Vector3(...member.start_mm).add(delta).toArray();member.end_mm=new THREE.Vector3(...member.end_mm).add(delta).toArray();}
+  }
+  const start=new THREE.Vector3(...run.start_mm),direction=new THREE.Vector3(...run.end_mm).sub(start).normalize();
+  run.end_mm=start.addScaledVector(direction,value).toArray();
+  if(run.locked_length_mm!=null)run.locked_length_mm=value;
+  changed({inferMirrors:!centered});
+  for(const id of members)if(draftRun(state.doc,id))refreshDraft(id);
+  updatePorts();renderInspector();attachGizmo();
+}
+function snappedDraftMatrix(match){
+  const matrix=partObjects.get(match.member).matrix.clone();
+  return alignmentDelta(state.scene,currentMatrices(),match,'member').multiply(matrix);
+}
 
 function currentMatrices(){return new Map([...partObjects].map(([id,o])=>{o.updateMatrix();return [id,o.matrix.clone()];}));}
 function currentSnapSettings(){return {...state.snapSettings,gridEnabled:state.snap,connectionsEnabled:state.connectionSnap};}
@@ -324,6 +836,8 @@ function snapRotation(selected){
   const settings=currentSnapSettings();dragStart.alignment=null;
   if(!settings.alignEnabled)return;
   const axis=({X:new THREE.Vector3(1,0,0),Y:new THREE.Vector3(0,1,0),Z:new THREE.Vector3(0,0,1)})[gizmo.axis]||gizmo.rotationAxis?.clone();
+  if(axis&&dragStart.rotationSpace==='local'&&['X','Y','Z'].includes(gizmo.axis))
+    axis.applyQuaternion(new THREE.Quaternion().setFromRotationMatrix(dragStart.gizmoMatrix));
   const match=rotationAlignment(state.scene,currentMatrices(),dragStart.group,dragStart.id,settings.alignmentDeg,axis);
   if(match){selected.quaternion.premultiply(match.correction);dragStart.alignment='Aligned with '+match.label;}
   else if(settings.gridEnabled&&axis?.lengthSq()>0){
@@ -344,14 +858,19 @@ function snapSettingsDialog(){
     {label:'Apply',action:()=>apply(false)},
     {label:'Save as defaults',primary:true,action:()=>apply(true)}
   ]);
+  const shortcuts=document.createElement('div');
+  shortcuts.innerHTML=`<h3>KEYBOARD NUDGES</h3><div class="fields snap-settings-fields"><div class="field"><label for="settings-keyboard-move">MOVE · mm</label><input id="settings-keyboard-move" type="number" min="0.1" max="10000" step="any"></div><div class="field"><label for="settings-keyboard-rotate">ROTATE · °</label><input id="settings-keyboard-rotate" type="number" min="0.1" max="180" step="any"></div></div><p>W/A/S/D move in the XY plane; F/V move up/down. Z/X/C rotate around world X/Y/Z. Shift uses one tenth of the keyboard step; Alt reverses rotation. With the R rotation gizmo, hold Shift to use the part’s local axes instead of world axes. Alt+Shift+D duplicates the selected part; Alt+D also works when the browser does not reserve it. G/R keep the move and rotate gizmos. Home frames the design. Keyboard steps are separate from snap increments.</p>`;
+  $('#settings-capture').closest('.single-field').after(shortcuts);
   $('#settings-grid').checked=settings.gridEnabled;$('#settings-position').value=settings.translationMm;$('#settings-angle').value=settings.rotationDeg;
   $('#settings-align').checked=settings.alignEnabled;$('#settings-alignment').value=settings.alignmentDeg;
   $('#settings-connections').checked=settings.connectionsEnabled;$('#settings-capture').value=settings.connectionPixels;
+  $('#settings-keyboard-move').value=settings.keyboardMoveMm;$('#settings-keyboard-rotate').value=settings.keyboardRotateDeg;
   $$('[data-snap-preset]').forEach(button=>button.onclick=()=>{$('#settings-angle').value=button.dataset.snapPreset;$('#settings-grid').checked=true;});
   function apply(persist){
     for(const input of $$('#modal-content input[type="number"]'))if(!input.reportValidity())return;
     let next=validateSnapSettings({gridEnabled:$('#settings-grid').checked,translationMm:$('#settings-position').value,rotationDeg:$('#settings-angle').value,
-      alignEnabled:$('#settings-align').checked,alignmentDeg:$('#settings-alignment').value,connectionsEnabled:$('#settings-connections').checked,connectionPixels:$('#settings-capture').value});
+      alignEnabled:$('#settings-align').checked,alignmentDeg:$('#settings-alignment').value,connectionsEnabled:$('#settings-connections').checked,connectionPixels:$('#settings-capture').value,
+      keyboardMoveMm:$('#settings-keyboard-move').value,keyboardRotateDeg:$('#settings-keyboard-rotate').value});
     if(persist)next=saveSnapDefaults(window.localStorage,next);
     state.snapSettings=next;state.snap=next.gridEnabled;state.connectionSnap=next.connectionsEnabled;updateSnapControls();renderInspector();clearSnapPreview();closeModal();
     toast(persist?'Snap defaults saved in this browser.':'Snap settings applied.');
@@ -381,12 +900,19 @@ function showDragSnap(){
 }
 function beginPlacement(kind){
   if(state.placementPending||!state.selected)return false;
-  const instance=wholeObject(),group=instance?state.scene.parts.filter(p=>p.id.startsWith(instance.id+'/')).map(p=>p.id):state.scene.groups.find(g=>g.includes(state.selected))||[state.selected];
+  const draft=draftRun(state.doc,state.selected);
+  if(draft?.attachments?.length&&state.tool==='rotate'){toast('Rotate a connector to change an attached draft run’s direction.');return false;}
+  const draftGroup=draft?.attachments?.length?draftTranslationGroup(draft.id):null;
+  if(draft?.attachments?.length&&!draftGroup)return false;
+  const instance=wholeObject(),group=draftGroup|| (instance?state.scene.parts.filter(p=>p.id.startsWith(instance.id+'/')).map(p=>p.id):state.scene.groups.find(g=>g.includes(state.selected))||[state.selected]);
   if(state.scene.anchors.some(a=>group.includes(a.part))){toast('This body is fixed to the world. Remove its anchor to move it.');return false;}
-  const constrained=state.scene.joints.some(j=>group.includes(j.a.part)!==group.includes(j.b.part))||group.some(id=>!state.doc.parts.some(p=>p.id===id))||!!state.doc.state?.joints;
-  dragStart={kind,id:state.selected,group,constrained,mode:state.tool==='rotate'?'rotate':'translate',revision:state.revision,
+  const constrained=!draft&&(state.scene.joints.some(j=>group.includes(j.a.part)!==group.includes(j.b.part))||group.some(id=>!state.doc.parts.some(p=>p.id===id))||!!state.doc.state?.joints);
+  dragStart={kind,id:state.selected,group,connectedDraft:!!draftGroup,constrained,mode:state.tool==='rotate'?'rotate':'translate',rotationSpace:gizmo.space,revision:state.revision,
     objectId:instance?.id,objectPose:clone(instance?.pose||{}),
-    handleMatrix:(instance?wholeObjectHandle:rotationHandle).matrix.clone(),matrices:new Map(group.map(id=>[id,partObjects.get(id).matrix.clone()]))};return true;
+    handleMatrix:(instance?wholeObjectHandle:rotationHandle).matrix.clone(),gizmoMatrix:(gizmo.object||partObjects.get(state.selected)).matrix.clone(),
+    matrices:new Map(group.map(id=>[id,partObjects.get(id).matrix.clone()]))};
+  if(kind==='pointer'||state.tool==='translate')dragStart.placement=placementContext(group);
+  return true;
 }
 function drawMovement(drag){
   for(const part of state.scene.parts){const object=partObjects.get(part.id);if(object)setPose(object,drag.result?.poses[part.id]||part.pose);}
@@ -394,7 +920,7 @@ function drawMovement(drag){
 }
 function previewMovement(){
   const drag=dragStart;if(!drag)return;
-  if(!drag.constrained){updatePorts();showDragSnap();return;}
+  if(!drag.constrained){updatePorts();if(!drag.connectedDraft)showDragSnap();return;}
   drag.target=getPose(partObjects.get(drag.id));
   if(drag.objectId){
     const root=new THREE.Object3D();setPose(root,drag.objectPose);
@@ -421,8 +947,8 @@ async function acceptPlacement(result,revision,recordUndo=true){
   if(revision!==state.revision){restorePlacement();return;}
   state.placementPending=true;gizmo?.detach();
   if(recordUndo)checkpoint();state.doc=result.document;changed();clearSnapPreview();
-  try{if(result.scene){buildScene(result.scene);renderOutline();renderInspector();}else await resolve();}
-  finally{state.placementPending=false;attachGizmo();}
+  try{if(result.scene){buildScene(result.scene);renderOutline();}else await resolve();}
+  finally{state.placementPending=false;renderInspector();attachGizmo();}
 }
 async function placeWithoutConnection(poses,revision,recordUndo=true){
   try{const result=await api('move',{poses});await acceptPlacement(result,revision,recordUndo);status('Placement updated');}
@@ -430,6 +956,23 @@ async function placeWithoutConnection(poses,revision,recordUndo=true){
 }
 async function finishPlacement(){
   const drag=dragStart;if(!drag)return;
+  if(drag.connectedDraft){
+    const delta=new THREE.Vector3().setFromMatrixPosition(partObjects.get(drag.id).matrix)
+      .sub(new THREE.Vector3().setFromMatrixPosition(drag.matrices.get(drag.id)));
+    dragStart=null;clearSnapPreview();
+    if(drag.revision!==state.revision){restorePlacement();return;}
+    if(!translateDraftMembers(drag.group,delta))restorePlacement();
+    else status('Connected draft structure moved');
+    return;
+  }
+  if(draftRun(state.doc,drag.id)){
+    const run=draftRun(state.doc,drag.id),matches=dragCandidates([drag.id]);
+    const matrix=matches.length?snappedDraftMatrix(matches[0]):partObjects.get(drag.id).matrix;
+    dragStart=null;clearSnapPreview();checkpoint();positionDraftRun(run,matrix);changed();refreshDraft(run.id);
+    if(matches.length){try{draftConnect(matches[0],false);}catch(e){toast(e.message,true);}}
+    else{const added=attachAlignedThroughSockets(run);if(added){changed();refreshDraft(run.id);toast(`${added} draft ${added===1?'connection':'connections'} added.`);}else status('Draft run moved');}
+    state.placementPending=false;attachGizmo();return;
+  }
   if(drag.constrained){
     state.placementPending=true;gizmo?.detach();await drag.job;
     if(dragStart!==drag)return;
@@ -456,7 +999,32 @@ async function finishPlacement(){
   if(!matches.length){await placeWithoutConnection(poses,drag.revision);return;}
   await offerConnection(matches,poses,drag.revision);
 }
-async function offerConnection(matches,poses={},revision=state.revision,recordUndo=true){
+async function offerConnection(matches,poses={},revision=state.revision,recordUndo=true,movingId=null){
+  if(draftRun(state.doc,matches[0]?.member)){
+    try{
+      if(Object.keys(poses).length){
+        const delta=alignmentDelta(state.scene,currentMatrices(),matches[0],'connector');
+        poses=Object.fromEntries(Object.entries(poses).map(([id,pose])=>{
+          const object=new THREE.Object3D();setPose(object,pose);
+          delta.clone().multiply(object.matrix).decompose(object.position,object.quaternion,object.scale);
+          return [id,getPose(object)];
+        }));
+        const moved=await api('move',{poses});await acceptPlacement(moved,revision,recordUndo);recordUndo=false;
+      }
+      else{
+        if(recordUndo)checkpoint();
+        if(movingId===matches[0].connector){
+          const id=matches[0].connector,object=partObjects.get(id),target=new THREE.Object3D();
+          alignmentDelta(state.scene,currentMatrices(),matches[0],'connector').multiply(object.matrix).decompose(target.position,target.quaternion,target.scale);
+          const pose=getPose(target);state.doc.parts.find(p=>p.id===id).pose=pose;
+          state.scene.parts.find(p=>p.id===id).pose=pose;setPose(object,pose);
+        }else positionDraftRun(draftRun(state.doc,matches[0].member),snappedDraftMatrix(matches[0]));
+        changed();refreshDraft(matches[0].member);recordUndo=false;
+      }
+      draftConnect(matches[0],recordUndo);
+    }catch(e){toast(e.message,true);}finally{clearSnapPreview();state.placementPending=false;attachGizmo();}
+    return;
+  }
   state.placementPending=true;gizmo?.detach();status('Checking connection and movement…');
   try{
     const data=await api('snap-options',{...matches[0],poses});
@@ -582,6 +1150,54 @@ async function moveTarget(selected,target,mode,objectId=null){
     status(result.message);
   }catch(e){restorePlacement();renderInspector();toast(e.message,true);}
 }
+const keyboardAxes={a:[0,-1],d:[0,1],s:[1,-1],w:[1,1],v:[2,-1],f:[2,1]};
+const keyboardRotations={z:0,x:1,c:2};
+const keyboardQueue=[];let keyboardNudging=false;
+async function applyKeyboardNudge(command){
+  const part=state.scene.parts.find(p=>p.id===command.selected);if(!part)return;
+  const axis=new THREE.Vector3().setComponent(command.axis,1),rotation=command.mode==='rotate';
+  const draft=draftRun(state.doc,command.selected);
+  if(draft){
+    if(draft.attachments?.length){
+      if(rotation){toast('Rotate a connector to change an attached draft run’s direction.');return;}
+      const group=draftTranslationGroup(draft.id);if(!group)return;
+      translateDraftMembers(group,axis.multiplyScalar(command.amount));status('Connected draft structure nudged');return;
+    }
+    const matrix=partObjects.get(draft.id).matrix.clone(),delta=new THREE.Matrix4();
+    if(rotation){const center=new THREE.Vector3(...part.pose.position_mm);
+      delta.makeTranslation(...center.toArray()).multiply(new THREE.Matrix4().makeRotationAxis(axis,THREE.MathUtils.degToRad(command.amount)))
+        .multiply(new THREE.Matrix4().makeTranslation(...center.clone().negate().toArray()));
+    }else delta.makeTranslation(...axis.multiplyScalar(command.amount).toArray());
+    checkpoint();positionDraftRun(draft,delta.multiply(matrix));changed();refreshDraft(draft.id);status('Draft run nudged');return;
+  }
+  const instance=wholeObject(),pose=clone(instance?.pose||part.pose||{});
+  pose.position_mm=[...(pose.position_mm||[0,0,0])];pose.rotation_deg=[...(pose.rotation_deg||[0,0,0])];
+  if(rotation){const object=new THREE.Object3D();setPose(object,pose);
+    object.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axis,THREE.MathUtils.degToRad(command.amount)));
+    pose.rotation_deg=getPose(object).rotation_deg;
+  }else pose.position_mm[command.axis]=+(pose.position_mm[command.axis]+command.amount).toFixed(5);
+  await moveTarget(command.selected,pose,command.mode,instance?.id||null);
+}
+async function flushKeyboardNudges(){
+  if(keyboardNudging)return;keyboardNudging=true;
+  try{while(keyboardQueue.length){const command=keyboardQueue.shift();
+    if(state.selected!==command.selected||state.mode!=='design'||state.busy||$('#modal').open)continue;
+    if(command.action==='duplicate')await duplicateSelected();else await applyKeyboardNudge(command);
+  }}finally{keyboardNudging=false;}
+}
+function queueKeyboardNudge(event){
+  if(event.ctrlKey||event.metaKey||!state.selected||state.mode!=='design'||state.busy||dragStart||state.placementPending&&!keyboardNudging)return false;
+  const key=event.key.toLowerCase(),move=keyboardAxes[key],rotate=keyboardRotations[key];
+  if(!move&&rotate===undefined)return false;
+  if(move&&event.altKey)return false;
+  const mode=move?'translate':'rotate',axis=move?move[0]:rotate;
+  const step=mode==='translate'?state.snapSettings.keyboardMoveMm:state.snapSettings.keyboardRotateDeg;
+  const amount=step*(event.shiftKey?0.1:1)*(move?move[1]:event.altKey?-1:1);
+  const last=keyboardQueue.at(-1);
+  if(last&&last.selected===state.selected&&last.mode===mode&&last.axis===axis&&Math.sign(last.amount)===Math.sign(amount))last.amount+=amount;
+  else keyboardQueue.push({selected:state.selected,mode,axis,amount});
+  flushKeyboardNudges();return true;
+}
 async function objectEdit(route,extra){
   if(state.busy||state.placementPending)return;const revision=state.revision;state.placementPending=true;gizmo?.detach();
   try{const result=await api(route,extra);await acceptPlacement(result,revision);}
@@ -594,13 +1210,18 @@ async function regroupObject(id){
 function bindDuplicateButton(){
   const split=document.createElement('div');split.className='duplicate-control';
   split.innerHTML=`<div class="duplicate-buttons">
-    <button id="duplicate-selected" class="inspect-action secondary" title="Make one copy of just the selected part">Duplicate</button>
+    <button id="duplicate-selected" class="inspect-action secondary" title="Make one copy of just the selected part · Alt+Shift+D">Duplicate</button>
     <button id="duplicate-menu-toggle" class="inspect-action secondary" aria-label="Duplicate options" aria-haspopup="menu" aria-controls="duplicate-menu" aria-expanded="false" title="More duplicate options">▾</button></div>
     <div id="duplicate-menu" class="duplicate-menu" role="menu" aria-label="Duplicate options" hidden>
       <button role="menuitem" data-duplicate="count" tabindex="-1">Duplicate N copies…<small>Choose a count and what to include</small></button>
       <button role="menuitem" data-duplicate="touching" tabindex="-1">Duplicate directly touching parts<small>Selected part and its immediate connections</small></button>
       <button role="menuitem" data-duplicate="subassembly" tabindex="-1">Duplicate entire subassembly<small>Locked connections, or the whole grouped object</small></button>
     </div>`;
+  if(draftRun(state.doc,state.selected)){
+    split.querySelector('[data-duplicate="touching"]').remove();
+    const whole=split.querySelector('[data-duplicate="subassembly"]');
+    whole.innerHTML='Duplicate entire subassembly<small>Connected draft pipes, fittings, and internal joints</small>';
+  }
   $('#inspector .inspect-section').appendChild(split);
   split.querySelectorAll('button').forEach(b=>b.disabled=state.busy||state.placementPending);
   $('#duplicate-selected').onclick=()=>duplicateSelected();
@@ -623,9 +1244,23 @@ function closeDuplicateMenu(focus=false){
 }
 document.addEventListener('pointerdown',e=>{if(!e.target.closest('.duplicate-control'))closeDuplicateMenu();});
 document.addEventListener('focusin',e=>{if(!e.target.closest('.duplicate-control'))closeDuplicateMenu();});
+function draftDuplicateMembers(selected){
+  const adjacent=new Map(),link=(a,b)=>{if(!adjacent.has(a))adjacent.set(a,new Set());adjacent.get(a).add(b);};
+  for(const run of draftRuns(state.doc))for(const attachment of run.attachments||[]){link(run.id,attachment.connector);link(attachment.connector,run.id);}
+  for(const joint of state.scene.joints)if(joint.locked??joint.type==='fixed'){
+    link(joint.a.part,joint.b.part);link(joint.b.part,joint.a.part);
+  }
+  const members=new Set([selected]),pending=[selected];
+  while(pending.length)for(const neighbor of adjacent.get(pending.pop())||[])if(!members.has(neighbor)){
+    members.add(neighbor);pending.push(neighbor);
+  }
+  return [...members];
+}
 function duplicateScopeInfo(scope){
   const selected=state.selected;
   if(scope==='part')return {count:1,description:'Just '+selected+'.'};
+  if(draftRun(state.doc,selected)&&scope==='subassembly')return {count:draftDuplicateMembers(selected).length,
+    description:'Connected draft pipes and fittings, including fixed joints. World fixings and outside connections stay with the original.'};
   if(scope==='touching'){
     const members=new Set([selected]);for(const joint of state.scene.joints)if([joint.a.part,joint.b.part].includes(selected)){members.add(joint.a.part);members.add(joint.b.part);}
     return {count:members.size,description:'The selected part and every part connected directly to it, including loose joints. Neighbours of those parts are excluded.'};
@@ -634,25 +1269,82 @@ function duplicateScopeInfo(scope){
   if(instance)return {count:state.scene.parts.filter(p=>p.id.startsWith(instance.id+'/')&&!state.doc.parts.some(s=>s.id===p.id)).length,description:'The whole '+instance.id+' object, including its articulated joints.'};
   return {count:(state.scene.groups.find(g=>g.includes(selected))||[selected]).length,description:'Parts joined by locked connections. Loose and articulated joints mark the boundary.'};
 }
+function duplicatePreviewMembers(scope){
+  const selected=state.selected;
+  if(scope==='part')return [selected];
+  if(draftRun(state.doc,selected))return draftDuplicateMembers(selected);
+  if(scope==='touching'){
+    const members=new Set([selected]);
+    for(const joint of state.scene.joints)if([joint.a.part,joint.b.part].includes(selected)){
+      members.add(joint.a.part);members.add(joint.b.part);
+    }
+    return [...members];
+  }
+  const instance=!state.doc.parts.some(p=>p.id===selected)&&selectedObject();
+  if(instance)return state.scene.parts.filter(p=>p.id.startsWith(instance.id+'/')&&!state.doc.parts.some(s=>s.id===p.id)).map(p=>p.id);
+  return state.scene.groups.find(g=>g.includes(selected))||[selected];
+}
+function duplicatePreviewBounds(members){
+  const bounds=new THREE.Box3();
+  for(const id of members){const object=partObjects.get(id);if(object)bounds.union(new THREE.Box3().setFromObject(object));}
+  return bounds;
+}
+function defaultDuplicateStep(scope){
+  const bounds=duplicatePreviewBounds(duplicatePreviewMembers(scope));
+  const grid=state.snap?state.snapSettings.translationMm:1;
+  return Math.ceil(Math.max(100,bounds.max.x-bounds.min.x+50)/grid)*grid;
+}
+function drawDuplicatePreview(members,count,step){
+  clearSnapPreview();
+  const total=members.length*count;
+  if(total<=60){
+    for(let copyIndex=1;copyIndex<=count;copyIndex++)for(const id of members){
+      const ghost=previewCopy(id,null,true);if(!ghost)continue;
+      ghost.position.addScaledVector(step,copyIndex);ghost.updateMatrix();snapGhost.add(ghost);
+    }
+  }else{
+    const bounds=duplicatePreviewBounds(members);
+    for(let copyIndex=1;copyIndex<=count;copyIndex++){
+      const shift=step.clone().multiplyScalar(copyIndex);
+      snapGhost.add(new THREE.Box3Helper(bounds.clone().translate(shift),0x48c6a0));
+    }
+  }
+  $('#duplicate-preview-note').textContent=total<=60?`Previewing ${count} ${count===1?'copy':'copies'} in the scene.`:
+    `Previewing ${count} copy bounds in the scene (${total} parts).`;
+}
 function duplicateCountDialog(){
   if(state.busy||state.placementPending)return;
-  let cancelled=false;
+  const draft=!!draftRun(state.doc,state.selected);
+  let cancelled=false,offsetEdited=false;
   modal('Duplicate N copies',`<form id="duplicate-form">
     <div class="single-field"><label for="duplicate-count">Number of new copies</label><input id="duplicate-count" type="number" min="1" max="100" step="1" value="2" required aria-describedby="duplicate-count-help"></div>
     <p id="duplicate-count-help">Enter a whole number from 1 to 100.</p>
     <div class="single-field"><label for="duplicate-scope">Include in each copy</label><select id="duplicate-scope"><option value="part">Selected part only</option><option value="touching">Part and directly touching parts</option><option value="subassembly">Entire subassembly</option></select></div>
+    <div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label for="duplicate-offset-${i}">STEP ${axis} · mm</label><input id="duplicate-offset-${i}" type="number" step="any" required value="${i===0?defaultDuplicateStep('part'):0}"></div>`).join('')}</div>
+    <p>Each copy moves by this X/Y/Z step from the preceding one. Negative values reverse an axis; zero leaves it unchanged.</p>
     <p id="duplicate-scope-help"></p><p id="duplicate-summary" role="status"></p>
-    <p>Copies keep their internal connections and are placed beside the original. World fixings and connections to other parts stay with the original.</p>
+    <p id="duplicate-preview-note" role="status"></p>
+    <p>${draft?'Individual draft pipes start without socket connections. Draft subassembly copies keep their internal connections.':'Copies keep their internal connections. World fixings and connections to other parts stay with the original.'}</p>
     </form>`,[{label:'Cancel',action:closeModal},{label:'Duplicate',primary:true,action:async()=>{
-      if(!$('#duplicate-count').reportValidity())return;
-      if(await duplicateSelected($('#duplicate-scope').value,Number($('#duplicate-count').value),()=>cancelled))closeModal();
+      const inputs=['#duplicate-count','#duplicate-offset-0','#duplicate-offset-1','#duplicate-offset-2'].map(selector=>$(selector));
+      if(inputs.some(input=>!input.reportValidity()))return;
+      const step=[0,1,2].map(axis=>Number($('#duplicate-offset-'+axis).value));
+      if(!step.some(value=>value!==0)){toast('Choose a nonzero X, Y or Z offset.',true);return;}
+      if(await duplicateSelected($('#duplicate-scope').value,Number($('#duplicate-count').value),()=>cancelled,step))closeModal();
     }}]);
-  reviewCleanup=()=>{cancelled=true;};
-  const update=()=>{const info=duplicateScopeInfo($('#duplicate-scope').value),input=$('#duplicate-count');
+  reviewCleanup=()=>{cancelled=true;clearSnapPreview();};
+  if(draft)$('#duplicate-scope option[value="touching"]').remove();
+  const update=()=>{const scope=$('#duplicate-scope').value,info=duplicateScopeInfo(scope),input=$('#duplicate-count');
     $('#duplicate-scope-help').textContent=info.description;
-    $('#duplicate-summary').textContent=input.checkValidity()?`${input.value} new ${Number(input.value)===1?'copy':'copies'} × ${info.count} ${info.count===1?'part':'parts'} = ${Number(input.value)*info.count} new parts. One Undo removes them all.`:'';
+    const fields=[0,1,2].map(axis=>$('#duplicate-offset-'+axis)),step=fields.map(field=>Number(field.value));
+    const valid=input.checkValidity()&&fields.every(field=>field.checkValidity())&&step.some(value=>value!==0);
+    $('#duplicate-summary').textContent=valid?`${input.value} new ${Number(input.value)===1?'copy':'copies'} × ${info.count} ${info.count===1?'part':'parts'} = ${Number(input.value)*info.count} new parts. One Undo removes them all.`:'';
+    if(valid)drawDuplicatePreview(duplicatePreviewMembers(scope),Number(input.value),new THREE.Vector3(...step));
+    else{clearSnapPreview();$('#duplicate-preview-note').textContent='Enter a count and a nonzero offset to preview the copies.';}
   };
-  $('#duplicate-count').oninput=update;$('#duplicate-scope').onchange=update;
+  $('#duplicate-count').oninput=update;
+  $('#duplicate-scope').onchange=()=>{if(!offsetEdited)$('#duplicate-offset-0').value=defaultDuplicateStep($('#duplicate-scope').value);update();};
+  for(const axis of [0,1,2])$('#duplicate-offset-'+axis).oninput=()=>{offsetEdited=true;update();};
   $('#duplicate-form').onsubmit=e=>{e.preventDefault();$('#modal-actions .primary').click();};update();$('#duplicate-count').focus();$('#duplicate-count').select();
 }
 async function resizePipe(member,length,releases=[]){
@@ -685,28 +1377,118 @@ async function resizePipe(member,length,releases=[]){
   }catch(error){toast(error.message,true);status('Length unchanged');}
   finally{state.placementPending=false;if(!$('#modal').open)renderInspector();attachGizmo();}
 }
-async function duplicateSelected(scope='part',count=1,cancelled=()=>false){
+async function duplicateSelected(scope='part',count=1,cancelled=()=>false,offsetMm=null){
   if(state.busy||state.placementPending||!state.selected)return false;
   closeDuplicateMenu();const selected=state.selected,revision=state.revision;
+  if(draftRun(state.doc,selected)&&scope==='part')return duplicateDraft(selected,scope,count,cancelled,offsetMm);
   state.placementPending=true;gizmo?.detach();$$('.duplicate-control button, #duplicate-form input, #duplicate-form select').forEach(b=>b.disabled=true);
   try{
-    const result=await api('duplicate',{selected,scope,count,grid_mm:state.snap?state.snapSettings.translationMm:1});
+    const result=await api('duplicate',{selected,scope,count,grid_mm:state.snap?state.snapSettings.translationMm:1,
+      ...(offsetMm?{offset_mm:offsetMm}:{})});
     if(cancelled()||revision!==state.revision)return false;
     state.selected=result.selected;await acceptPlacement(result,revision);
     setTool('translate');fitView();toast(`Created ${count} ${count===1?'copy':'copies'} · ${result.parts_per_copy*count} new ${result.parts_per_copy*count===1?'part':'parts'}.`);return true;
   }catch(error){if(!cancelled()&&revision===state.revision){state.selected=selected;toast(error.message,true);}return false;}
   finally{state.placementPending=false;select(state.selected);$$('#duplicate-form input, #duplicate-form select').forEach(b=>b.disabled=false);}
 }
+function duplicateDraft(selected,scope,count,cancelled,offsetMm=null){
+  if(scope!=='part'){toast('Duplicate a draft pipe by itself; socket connections stay with the original.',true);return false;}
+  if(!Number.isInteger(count)||count<1||count>100){toast('Number of copies must be a whole number from 1 to 100.',true);return false;}
+  if(offsetMm&&(!Array.isArray(offsetMm)||offsetMm.length!==3||offsetMm.some(v=>!Number.isFinite(v))||!offsetMm.some(Boolean))){
+    toast('Choose a finite, nonzero X, Y or Z offset.',true);return false;
+  }
+  if(cancelled())return false;
+  const source=draftRun(state.doc,selected),group=state.doc.draft_subassemblies.find(g=>g.runs.includes(source));
+  const part=state.scene.parts.find(p=>p.id===selected),matrix=partObjects.get(selected).matrix;
+  const start=new THREE.Vector3(0,0,-part.length_mm/2).applyMatrix4(matrix),end=new THREE.Vector3(0,0,part.length_mm/2).applyMatrix4(matrix);
+  const width=new THREE.Box3().setFromObject(partObjects.get(selected)).getSize(new THREE.Vector3()).x;
+  const grid=state.snap?state.snapSettings.translationMm:1,spacing=Math.ceil(Math.max(100,width+50)/grid)*grid;
+  const step=new THREE.Vector3(...(offsetMm||[spacing,0,0]));
+  const used=new Set([...state.scene.parts.map(p=>p.id),...(state.doc.objects||[]).map(o=>o.id),...state.doc.draft_subassemblies.map(g=>g.id)]);
+  const stem=selected.replace(/-copy(?:-\d+)?$/,'')+'-copy';let next=1;
+  const coordinate=v=>{const rounded=+v.toFixed(5);return rounded===0?0:rounded;};
+  const copies=[];checkpoint();
+  for(let i=0;i<count;i++){
+    let id=stem;if(used.has(id))do{id=stem+'-'+(++next);}while(used.has(id));
+    used.add(id);const offset=step.clone().multiplyScalar(i+1),copy=clone(source);
+    copy.id=id;copy.start_mm=start.clone().add(offset).toArray().map(coordinate);
+    copy.end_mm=end.clone().add(offset).toArray().map(coordinate);copy.attachments=[];
+    group.runs.push(copy);copies.push(id);
+  }
+  changed();for(const id of copies)refreshDraft(id);
+  setTool('translate');select(copies.at(-1));updateHeader();fitView();
+  toast(`Created ${count} draft ${count===1?'copy':'copies'}. Socket connections stay with the original.`);
+  return true;
+}
 function renderInspector(){
   if(!state.doc)return;$('#inspector-title').textContent=({design:'PROPERTIES',check:'DESIGN CHECKS',simulate:'PHYSICS & MOTION',build:'ASSEMBLY PROCESS'})[state.mode];
+  if(hoveredDraftConnection)showDraftConnection(null);
   if(state.mode==='check')return renderChecks();if(state.mode==='simulate')return renderSimulation();if(state.mode==='build')return renderBuild();
   const p=state.scene?.parts.find(p=>p.id===state.selected);if(!p){$('#inspector').innerHTML='<div class="empty-state"><div class="empty-symbol">◇</div><h2>Make something useful.</h2><p>Pick a part to inspect its dimensions, position and connections.</p><p>Add components from the library,<br>or start with an example design.</p></div>';return;}
+  if(p.draft){
+    const run=draftRun(state.doc,p.id),ends=(run.attachments||[]).filter(a=>a.end),fixed=ends.length===2;
+    const owner=state.doc.draft_subassemblies.find(group=>group.runs.includes(run));
+    const centeredAttachment=ends.length>0&&(owner.mirrors||[]).some(plane=>plane.run_modes?.[run.id]==='centered');
+    const mirrorPanel=`<div class="inspect-section"><h3>SYMMETRY</h3><p>Mirrors preview the other side while this structure stays in draft.</p>
+      ${(owner.mirrors||[]).map(plane=>`<div class="joint-card"><div class="joint-card-top"><strong>${esc(plane.axis.toUpperCase())} = ${esc(plane.offset_mm)} mm</strong><button class="subtle" data-mirror-remove="${esc(plane.id)}">Turn off…</button></div>
+        <div class="single-field"><label for="mirror-mode-${esc(plane.id)}">THIS PIPE ON PLANE</label><select id="mirror-mode-${esc(plane.id)}" data-mirror-mode="${esc(plane.id)}"><option value="free" ${!plane.run_modes?.[run.id]||plane.run_modes?.[run.id]==='free'?'selected':''}>Free</option><option value="centered" ${plane.run_modes?.[run.id]==='centered'?'selected':''}>Centered, perpendicular</option><option value="in_plane" ${plane.run_modes?.[run.id]==='in_plane'?'selected':''}>Centreline in plane</option></select></div></div>`).join('')}
+      <button class="inspect-action secondary" id="draft-mirror-add" ${(owner.mirrors||[]).length>=3?'disabled':''}>Add mirror plane</button></div>`;
+    $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog)}</div><h2>${esc(p.id)}</h2><span class="chip">DRAFT RUN</span><p>Length follows the connector graph. The blue tube is a provisional preview; orange means a connection needs adjustment.</p></div>
+      <div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<p>${run.attachments?.length?'Position moves the connected draft structure together.':'Move the tube by dragging it, using the gizmo, or entering its centre position.'}</p></div>
+      <div class="inspect-section"><h3>WORKING SPAN</h3><div class="single-field"><label>Preview length · mm</label><input id="draft-length" type="number" min="1" step="any" value="${p.length_mm.toFixed(2)}" ${fixed?'disabled':''}></div><label class="check-label"><input id="draft-lock" type="checkbox" ${run.locked_length_mm!=null?'checked':''}>Lock cut length at ${p.length_mm.toFixed(1)} mm</label><p>${fixed?'Both ends are connected; move a fitting to change the span.':centeredAttachment?'Changing the span moves the connected fitting equally away from or toward the mirror plane.':'Drag the run or enter a rough working length. Exact cut length is calculated when you finalize.'}</p><button class="inspect-action" id="draft-connect">Connect to a socket</button></div>
+      ${mirrorPanel}
+      <div class="inspect-section"><h3>CONNECTIONS · ${(run.attachments||[]).length}</h3>${(run.attachments||[]).map((a,i)=>`<div class="joint-card"><strong>${esc(a.connector)} / ${esc(a.port)}</strong><p>${esc(a.end||'through station')}</p><button class="subtle" data-draft-detach="${i}">Detach</button></div>`).join('')||'<p>No sockets yet. Choose Connect, then a connector.</p>'}
+      ${p.conflicts.map(c=>`<div class="joint-card"><strong>${esc(c.code)}</strong><p>${esc(c.message)}</p></div>`).join('')}<button class="inspect-action secondary" id="draft-repair-selected">Repair alignment · stay in draft</button><button class="inspect-action" id="draft-finalize-selected">Finalize subassembly</button><p>Only draft pipes connected to this run will be finalized; separate structures stay in draft.</p><button class="inspect-action secondary" id="draft-delete">Delete draft run</button></div>`;
+    $('#inspector [data-drop-floor]').remove();
+    $('#draft-mirror-add').onclick=()=>addDraftMirrorDialog(owner,run);
+    $$('[data-mirror-remove]').forEach(button=>button.onclick=()=>removeDraftMirrorDialog(owner,owner.mirrors.find(plane=>plane.id===button.dataset.mirrorRemove)));
+    $$('[data-mirror-mode]').forEach(select=>select.onchange=async()=>{
+      const plane=owner.mirrors.find(item=>item.id===select.dataset.mirrorMode),mode=select.value;
+      try{await mutate(()=>{plane.run_modes||={};plane.run_modes[run.id]=mode;});}
+      catch{toast('Move the pipe and its fittings onto the chosen plane before pinning it.',true);}
+    });
+    $$('[data-pose="position_mm"]').forEach(input=>input.onchange=()=>{
+      const target=Number(input.value),axis=+input.dataset.axis;if(!Number.isFinite(target)){renderInspector();return;}
+      const group=draftTranslationGroup(run.id);if(!group){renderInspector();return;}
+      const delta=new THREE.Vector3().setComponent(axis,target-p.pose.position_mm[axis]);
+      if(translateDraftMembers(group,delta))status('Draft structure moved');else renderInspector();
+    });
+    $('#draft-length').onchange=e=>resizeDraftSpan(run,p,+e.target.value,owner);
+    $('#draft-lock').onchange=e=>{checkpoint();if(e.target.checked)run.locked_length_mm=p.length_mm;else delete run.locked_length_mm;changed();refreshDraft(run.id);};
+    $$('[data-draft-detach]').forEach(button=>{
+      const attachment=run.attachments[+button.dataset.draftDetach],card=button.parentElement;
+      card.classList.add('draft-connection-card');card.tabIndex=0;
+      card.setAttribute('aria-label',`Highlight ${attachment.connector} ${attachment.port}`);
+      const show=()=>showDraftConnection(attachment.connector,attachment.port),clear=()=>showDraftConnection(null);
+      card.addEventListener('mouseenter',show);card.addEventListener('mouseleave',clear);
+      card.addEventListener('focusin',show);
+      card.addEventListener('focusout',event=>{if(!card.contains(event.relatedTarget))clear();});
+      button.onclick=()=>{checkpoint();run.attachments.splice(+button.dataset.draftDetach,1);changed();refreshDraft(run.id);};
+    });
+    $('#draft-connect').onclick=()=>setTool('connect');
+    $('#draft-repair-selected').onclick=()=>repairDrafts(null,run.id);
+    $('#draft-finalize-selected').onclick=()=>finalizeDrafts(null,run.id);
+    $('#draft-delete').onclick=()=>deleteDraft(run.id);bindDuplicateButton();return;
+  }
   const instance=(state.doc.objects||[]).find(o=>p.id.startsWith(o.id+'/'));
   if(instance&&!state.doc.parts.some(s=>s.id===p.id))return renderObjectInspector(instance,p);
   const spec=state.doc.parts.find(x=>x.id===p.id),definition=state.doc.definitions?.[p.catalog]||state.library[p.catalog]||spec?.body||{};
   const params={...definition.parameters,...spec?.parameters};const connections=state.scene.joints.filter(j=>[j.a.part,j.b.part].includes(p.id));const group=state.scene.groups.find(g=>g.includes(p.id))||[];const anchor=(state.doc.anchors||[]).find(a=>a.part===p.id);
-  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog||p.id)}</div><h2>${esc((p.label!==p.id&&p.label)||spec?.label||definition.name||p.id)}</h2><span class="chip">${esc(p.kind.toUpperCase())}</span><span class="chip gray">${p.mass_kg.toFixed(2)} kg</span></div><div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<div style="height:17px"></div>${propertyFields('ROTATION',p.pose.rotation_deg,'rotation_deg')}<label class="check-label"><input type="checkbox" id="move-body" ${state.moveBody?'checked':''}>Move the connected rigid body (${group.length})</label>${!spec?'<button class="inspect-action" id="expand-selected">Expand object to edit its parts</button>':''}</div><div class="inspect-section"><h3>DIMENSIONS & MATERIAL</h3>${Object.entries(params).filter(([,v])=>typeof v==='number').map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-param="${esc(k)}" value="${v}" step="1" min="0.01"></div>`).join('')}<div class="property-row"><span>Material</span><strong>${esc(definition.material||'Custom body')}</strong></div><div class="property-row"><span>Mass</span><strong>${p.mass_kg.toFixed(3)} kg</strong></div>${p.kind==='member'?'<button class="inspect-action" id="connect-selected">Connect to a socket ⌘</button>':''}</div><div class="inspect-section"><button class="inspect-action secondary" id="new-joint">Add joint or attachment</button><h3>CONNECTIONS <span style="float:right">${connections.length}</span></h3>${connections.map(j=>`<div class="joint-card"><div class="joint-card-top"><span>${esc(j.a.part===p.id?j.b.part:j.a.part)}</span><label><input type="checkbox" data-lock="${esc(j.id)}" ${j.locked||j.type==='fixed'?'checked':''}>Locked</label></div><p>${esc(j.a.port||j.type)} → ${esc(j.b.at_mm!=null?Number(j.b.at_mm).toFixed(1)+' mm from pipe start':j.b.end||j.b.port||j.type)} ${j.insertion_mm?' · '+Number(j.insertion_mm).toFixed(1)+' mm insertion':''}</p><button class="subtle" data-joint-edit="${esc(j.id)}" style="padding:3px 9px 3px 0">Edit joint</button><button class="subtle" data-detach="${esc(j.id)}" style="padding:3px 0">Detach</button></div>`).join('')||'<p>No connections. This part moves independently.</p>'}<label class="check-label"><input id="anchor-check" type="checkbox" ${anchor?'checked':''}>Fixed to the world</label>${anchor?`<div class="single-field"><label>MOUNTING SURFACE</label><select id="anchor-surface">${['floor','wall','ceiling','fixture'].map(s=>`<option ${anchor.surface===s?'selected':''}>${s}</option>`).join('')}</select></div>`:''}</div><div class="inspect-section"><h3>PART REFERENCE</h3><p>${esc(p.source?.geometry_status||'User defined geometry')}</p>${p.source?.assumptions?'<p>'+esc(p.source.assumptions.join('. '))+'</p>':''}${/^https?:\/\//.test(p.source?.url||'')?`<a class="results-link" target="_blank" rel="noreferrer" href="${esc(p.source.url)}">Supplier specifications ↗</a>`:''}<button class="inspect-action secondary" id="edit-part-definition">Edit part definition</button></div>`;
-  bindDuplicateButton();bindFloorButtons(p.id);$('#new-joint').onclick=()=>jointDialog();
+  const draftConnections=draftRuns(state.doc).flatMap(run=>(run.attachments||[]).map((attachment,index)=>({run,attachment,index}))).filter(({attachment})=>attachment.connector===p.id);
+  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog||p.id)}</div><h2>${esc((p.label!==p.id&&p.label)||spec?.label||definition.name||p.id)}</h2><span class="chip">${esc(p.kind.toUpperCase())}</span><span class="chip gray">${p.mass_kg.toFixed(2)} kg</span></div><div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<div style="height:17px"></div>${propertyFields('ROTATION',p.pose.rotation_deg,'rotation_deg')}<label class="check-label"><input type="checkbox" id="move-body" ${state.moveBody?'checked':''}>Move the connected rigid body (${group.length})</label>${!spec?'<button class="inspect-action" id="expand-selected">Expand object to edit its parts</button>':''}</div><div class="inspect-section"><h3>DIMENSIONS & MATERIAL</h3>${Object.entries(params).filter(([,v])=>typeof v==='number').map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-param="${esc(k)}" value="${v}" step="1" min="0.01"></div>`).join('')}<div class="property-row"><span>Material</span><strong>${esc(definition.material||'Custom body')}</strong></div><div class="property-row"><span>Mass</span><strong>${p.mass_kg.toFixed(3)} kg</strong></div>${p.kind==='member'?'<button class="inspect-action" id="connect-selected">Connect to a socket ⌘</button>':''}</div><div class="inspect-section">${p.kind==='panel'?'<button class="inspect-action" id="fasten-panel">Fasten board at bolt holes</button>':''}<button class="inspect-action secondary" id="new-joint">Add joint or attachment</button><h3>CONNECTIONS <span style="float:right">${connections.length}</span></h3>${connections.map(j=>`<div class="joint-card"><div class="joint-card-top"><span>${esc(j.a.part===p.id?j.b.part:j.a.part)}</span><label><input type="checkbox" data-lock="${esc(j.id)}" ${j.locked||j.type==='fixed'?'checked':''}>Locked</label></div><p>${esc(j.a.port||j.type)} → ${esc(j.b.at_mm!=null?Number(j.b.at_mm).toFixed(1)+' mm from pipe start':j.b.end||j.b.port||j.type)} ${j.insertion_mm?' · '+Number(j.insertion_mm).toFixed(1)+' mm insertion':''}</p><button class="subtle" data-joint-edit="${esc(j.id)}" style="padding:3px 9px 3px 0">Edit joint</button><button class="subtle" data-detach="${esc(j.id)}" style="padding:3px 0">Detach</button></div>`).join('')||'<p>No connections. This part moves independently.</p>'}<label class="check-label"><input id="anchor-check" type="checkbox" ${anchor?'checked':''}>Fixed to the world</label>${anchor?`<div class="single-field"><label>MOUNTING SURFACE</label><select id="anchor-surface">${['floor','wall','ceiling','fixture'].map(s=>`<option ${anchor.surface===s?'selected':''}>${s}</option>`).join('')}</select></div>`:''}</div><div class="inspect-section"><h3>PART REFERENCE</h3><p>${esc(p.source?.geometry_status||'User defined geometry')}</p>${p.source?.assumptions?'<p>'+esc(p.source.assumptions.join('. '))+'</p>':''}${/^https?:\/\//.test(p.source?.url||'')?`<a class="results-link" target="_blank" rel="noreferrer" href="${esc(p.source.url)}">Supplier specifications ↗</a>`:''}<button class="inspect-action secondary" id="edit-part-definition">Edit part definition</button></div>`;
+  if(draftConnections.length){
+    const section=$('#anchor-check').closest('.inspect-section');
+    section.querySelector('h3 span').textContent=connections.length+draftConnections.length;
+    if(!connections.length)section.querySelector('h3 + p')?.remove();
+    for(const {run,attachment,index} of draftConnections){
+      const card=document.createElement('div');card.className='joint-card';
+      card.innerHTML=`<div class="joint-card-top"><span>${esc(run.id)}</span><span>DRAFT</span></div><p>${esc(attachment.port)} · ${esc(attachment.end||'through station')}</p><button class="subtle" data-draft-connector-detach="${index}">Detach</button>`;
+      $('#anchor-check').parentElement.before(card);
+      card.querySelector('button').onclick=()=>{checkpoint();run.attachments.splice(index,1);changed();refreshDraft(run.id);renderInspector();};
+    }
+  }
+  if(p.kind==='panel'&&definition.panel_layers)$('#fasten-panel').textContent='Fasten padded panel at bolt holes';
+  bindDuplicateButton();bindFloorButtons(p.id);$('#new-joint').onclick=()=>jointDialog();if($('#fasten-panel'))$('#fasten-panel').onclick=()=>fastenPanelDialog(p);
   const candidate=state.scene.regroupable_objects?.find(o=>o.parts.includes(p.id));
   if(candidate){
     const section=document.createElement('div');section.className='inspect-section';
@@ -725,7 +1507,15 @@ function renderInspector(){
   $('#edit-part-definition').onclick=()=>libraryEditor(p.catalog,p.catalog?definition:spec.body);
 }
 
-const HUMAN_POSES=['standing','seated','crouching','pull-up'];
+function humanPoseOptions(selected='standing'){
+  let group='';
+  return HUMAN_POSES.map(p=>{
+    const start=p.group!==group?`${group?'</optgroup>':''}<optgroup label="${esc(p.group)}">`:'';
+    group=p.group;
+    return `${start}<option value="${esc(p.id)}" ${p.id===selected?'selected':''}>${esc(p.label)}</option>`;
+  }).join('')+'</optgroup>';
+}
+function humanPoseDescription(id){return HUMAN_POSES.find(p=>p.id===id)?.description||'';}
 const HUMAN_POSTURES=[['relaxed','Relaxed'],['upper_body','Hold upper body · free legs'],['arms','Hold arms'],['torso','Hold torso'],['legs','Hold legs'],['all','Hold whole body'],['custom','Choose individual joints']];
 function humanPosture(parameters){
   if(parameters.hold_pose)return 'all';
@@ -740,8 +1530,9 @@ function setHumanPosture(parameters,mode,joints=[]){
 function postureOptions(mode){return HUMAN_POSTURES.map(([id,label])=>`<option value="${id}" ${mode===id?'selected':''}>${label}</option>`).join('');}
 function renderObjectAttachments(instance,selectedPart){
   const chain=instance.template==='chain';
+  const flexibleLines=chain?[]:(state.doc.objects||[]).filter(o=>o.template==='chain');
   const inside=id=>id.startsWith(instance.id+'/'),connections=state.scene.joints.filter(j=>inside(j.a.part)!==inside(j.b.part));
-  const detached=(state.doc.metadata?.detached_attachments||[]).filter(r=>r.object===instance.id&&state.scene.parts.some(p=>p.id===r.joint.a.part)&&state.scene.parts.some(p=>p.id===r.joint.b.part));
+  const detached=(state.doc.metadata?.detached_attachments||[]).filter(r=>(r.object===instance.id||!chain&&[r.joint.a.part,r.joint.b.part].some(id=>inside(id)))&&state.scene.parts.some(p=>p.id===r.joint.a.part)&&state.scene.parts.some(p=>p.id===r.joint.b.part));
   const anchors=state.scene.anchors.filter(a=>inside(a.part));
   const section=document.createElement('div');section.className='inspect-section';
   section.innerHTML=`<h3>CONNECTIONS TO STRUCTURE</h3><p>Attachments stay connected while posing. Detach grips or mounts to reposition the whole ${chain?'chain':'person'}.</p>
@@ -749,29 +1540,43 @@ function renderObjectAttachments(instance,selectedPart){
     ${anchors.map(a=>`<div class="joint-card"><p>${esc(a.part)} · fixed to ${esc(a.surface||'world')}</p><button class="subtle" data-object-unanchor="${esc(a.part)}">Release world anchor</button></div>`).join('')}
     ${!connections.length&&!anchors.length?`<p>No external attachments. The whole ${chain?'chain':'person'} can move freely.</p>`:''}
     ${detached.map(r=>`<div class="joint-card"><p>${esc(r.joint.id)} · detached</p><button class="inspect-action secondary" data-attachment-reconnect="${esc(r.joint.id)}">Preview reconnect</button></div>`).join('')}
-    <button class="inspect-action secondary" id="object-attach-part">${chain?'Attach chain link to structure':'Attach body part to structure'}</button>`;
+    <button class="inspect-action secondary" id="object-attach-part">${chain?'Attach flexible link to a part':'Attach body part to structure'}</button>
+    ${flexibleLines.length?`<div class="single-field"><label for="human-flexible-line">FLEXIBLE LINE</label><select id="human-flexible-line">${flexibleLines.map(line=>`<option value="${esc(line.id)}">${esc(line.label||line.id)}</option>`).join('')}</select></div><button class="inspect-action secondary" id="human-attach-flexible">Attach line to this body surface</button>`:''}`;
   $('#object-expand').closest('.inspect-section').before(section);
   $$('[data-attachment-edit]').forEach(b=>b.onclick=()=>jointDialog(b.dataset.attachmentEdit));
-  $$('[data-attachment-detach]').forEach(b=>b.onclick=()=>objectEdit('detach-attachment',{object:instance.id,joint:b.dataset.attachmentDetach}));
-  $$('[data-attachment-reconnect]').forEach(b=>b.onclick=()=>attachmentDialog(instance,selectedPart,b.dataset.attachmentReconnect));
+  $$('[data-attachment-detach]').forEach(b=>b.onclick=()=>{
+    const joint=connections.find(j=>j.id===b.dataset.attachmentDetach);
+    const line=(state.doc.objects||[]).find(o=>o.template==='chain'&&[joint.a.part,joint.b.part].some(id=>id.startsWith(o.id+'/')));
+    objectEdit('detach-attachment',{object:line?.id||instance.id,joint:joint.id});
+  });
+  $$('[data-attachment-reconnect]').forEach(b=>b.onclick=()=>{
+    const saved=detached.find(r=>r.joint.id===b.dataset.attachmentReconnect);
+    const owner=(state.doc.objects||[]).find(o=>o.id===saved.object)||instance;
+    attachmentDialog(owner,selectedPart,b.dataset.attachmentReconnect);
+  });
   $$('[data-object-unanchor]').forEach(b=>b.onclick=()=>objectEdit('release-object-anchor',{object:instance.id,part:b.dataset.objectUnanchor}));
   $('#object-attach-part').onclick=()=>attachmentDialog(instance,selectedPart);
+  if(flexibleLines.length)$('#human-attach-flexible').onclick=()=>{
+    const line=flexibleLines.find(o=>o.id===$('#human-flexible-line').value);
+    const link=state.scene.parts.find(p=>p.id===line.id+'/link-1');
+    attachmentDialog(line,link,null,selectedPart.id);
+  };
 }
-function attachmentDialog(instance,selectedPart,reconnect=null){
+function attachmentDialog(instance,selectedPart,reconnect=null,preferredTarget=null){
   const chain=instance.template==='chain';
   if(state.busy||state.placementPending)return;
   const inside=p=>p.id.startsWith(instance.id+'/'),limbs=state.scene.parts.filter(inside),targets=state.scene.parts.filter(p=>!inside(p));
   if(!targets.length){toast('Add a bar or another structure part to attach to.');return;}
   let result=null,request=0;const revision=state.revision;
   state.placementPending=true;gizmo?.detach();
-  modal(reconnect?'Reconnect body attachment':chain?'Attach chain to structure':'Attach body part to structure',reconnect?`<p>${esc(reconnect)}</p><p>Preview reaching the saved attachment point.</p><p id="attachment-preview-status" role="status"></p>`:`
+  modal(reconnect?'Reconnect body attachment':chain?'Attach flexible line to a part':'Attach body part to structure',reconnect?`<p>${esc(reconnect)}</p><p>Preview reaching the saved attachment point.</p><p id="attachment-preview-status" role="status"></p>`:`
     <div class="single-field"><label for="attachment-limb">${chain?'CHAIN LINK':'BODY PART'}</label><select id="attachment-limb">${limbs.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(p.id)}</option>`).join('')}</select></div>
-    ${chain?`<div class="single-field"><label for="attachment-source-port">LINK EYE</label><select id="attachment-source-port"><option value="b">Start eye</option><option value="a">End eye</option></select></div>`:''}
+    ${chain?`<div class="single-field"><label for="attachment-source-port">POINT ON LINK</label><select id="attachment-source-port"><option value="b">B eye</option><option value="a">A eye</option></select></div>`:''}
     <div class="single-field"><label for="attachment-target">STRUCTURE PART</label><select id="attachment-target">${targets.map(p=>`<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('')}</select></div>
     <div id="attachment-location"></div><div class="single-field"><label for="attachment-kind">ATTACHMENT</label><select id="attachment-kind"><option value="revolute">Grip · pivots around the bar</option><option value="fixed">Fixed · holds position and orientation</option><option value="spherical">Ball joint · rotates freely</option></select></div>
-    <p>The preview poses the connected ${chain?'chain':'limb'} to meet the attachment. Other attachments and joint limits remain active.</p><p id="attachment-preview-status" role="status"></p>`,[
+    <p>The preview poses the connected ${chain?'line':'limb'} to meet the attachment. Other attachments and joint limits remain active.${chain?' Multiple links can attach along a body; each connection is an idealized no-slip point, not frictional wrapping.':''}</p><p id="attachment-preview-status" role="status"></p>`,[
     {label:'Cancel',action:closeModal},
-    {label:'Connect',primary:true,action:async()=>{if(!result||revision!==state.revision)return;const accepted=result;closeModal();await acceptPlacement(accepted,revision);toast(chain?'Chain attached.':'Body part attached.');}}
+    {label:'Connect',primary:true,action:async()=>{if(!result||revision!==state.revision)return;const accepted=result;closeModal();await acceptPlacement(accepted,revision);toast(chain?'Flexible line attached.':'Body part attached.');}}
   ]);
   $('#modal').classList.add('connection-modal','attachment-modal');
   reviewCleanup=()=>{request++;clearSnapPreview();$('#modal').classList.remove('connection-modal','attachment-modal');state.placementPending=false;attachGizmo();};
@@ -784,7 +1589,8 @@ function attachmentDialog(instance,selectedPart,reconnect=null){
       if($('#attachment-station')){
         if(!$('#attachment-station').reportValidity()){ $('#attachment-preview-status').textContent='Choose a point within the pipe length.';return; }
         target.at_mm=+$('#attachment-station').value;
-      }else if($('#attachment-port')?.value)target.port=$('#attachment-port').value;
+      }else if($('#attachment-surface-x'))target.surface_hint_mm=['x','y','z'].map(axis=>+$('#attachment-surface-'+axis).value);
+      else if($('#attachment-port')?.value)target.port=$('#attachment-port').value;
       else target.frame={position_mm:[0,0,0],axis:[0,0,1]};
       extra={...extra,part:$('#attachment-limb').value,target,type:$('#attachment-kind').value,...(chain?{part_port:$('#attachment-source-port').value}:{})};
     }
@@ -792,7 +1598,13 @@ function attachmentDialog(instance,selectedPart,reconnect=null){
       const data=await api('attach-part',extra);
       if(current!==request||revision!==state.revision)return;
       result=data;showPosePreview(data.poses);
-      $('#attachment-preview-status').textContent='Ready to connect. '+(data.moved.length?(chain?'The green preview shows the fitted chain.':'The green preview shows the new limb pose.'):'The attachment points already meet.');
+      const bodyEnd=[data.joint?.a,data.joint?.b].find(end=>end?.frame&&state.scene.parts.find(p=>p.id===end.part)?.kind==='human');
+      if(chain&&bodyEnd){
+        const marker=new THREE.Mesh(new THREE.SphereGeometry(9,12,8),new THREE.MeshBasicMaterial({color:'#48c6a0',depthTest:false}));
+        marker.position.fromArray(bodyEnd.frame.position_mm).applyMatrix4(partObjects.get(bodyEnd.part).matrix);
+        marker.renderOrder=150;snapGhost.add(marker);
+      }
+      $('#attachment-preview-status').textContent='Ready to connect. '+(data.moved.length?(chain?'The green preview shows the fitted line.':'The green preview shows the new limb pose.'):'The attachment points already meet.')+(extra.target?.surface_hint_mm?' The joint lands on the body surface.':'');
       $('#modal-actions .primary').disabled=false;
     }catch(e){if(current===request)$('#attachment-preview-status').textContent=e.message;}
   }
@@ -800,22 +1612,45 @@ function attachmentDialog(instance,selectedPart,reconnect=null){
     const target=state.scene.parts.find(p=>p.id===$('#attachment-target').value),limb=partObjects.get($('#attachment-limb').value);
     const options=Object.entries(target.ports||{}).filter(([,p])=>p.type!=='socket');
     const local=limb.position.clone().applyMatrix4(partObjects.get(target.id).matrix.clone().invert());
-    $('#attachment-location').innerHTML=target.kind==='member'?`<div class="single-field"><label for="attachment-station">POINT FROM PIPE START · mm</label><input id="attachment-station" type="number" min="0" max="${target.length_mm}" step="any" value="${Math.min(target.length_mm,Math.max(0,local.z+target.length_mm/2)).toFixed(2)}"></div>`:options.length?`<div class="single-field"><label for="attachment-port">ATTACHMENT POINT</label><select id="attachment-port">${options.map(([id,p])=>`<option value="${esc(id)}">${esc(p.label||id)}</option>`).join('')}</select></div>`:'<p>Attach at the target part’s origin.</p>';
-    $$('#attachment-location input, #attachment-location select').forEach(el=>el.onchange=preview);preview();
+    $('#attachment-location').innerHTML=chain&&target.kind==='human'?`<div class="single-field"><label>BODY SURFACE NEAR LOCAL XYZ · mm</label><div class="fields">${['x','y','z'].map((axis,i)=>`<div class="field"><label for="attachment-surface-${axis}">${axis.toUpperCase()}</label><input id="attachment-surface-${axis}" type="number" step="any" value="${local.getComponent(i).toFixed(1)}"></div>`).join('')}</div></div><p>The chosen point is projected onto this body part's surface. Adjust XYZ to use a different side.</p>`:target.kind==='member'?`<div class="single-field"><label for="attachment-station">POINT FROM PIPE START · mm</label><input id="attachment-station" type="number" min="0" max="${target.length_mm}" step="any" value="${Math.min(target.length_mm,Math.max(0,local.z+target.length_mm/2)).toFixed(2)}"></div>`:options.length?`<div class="single-field"><label for="attachment-port">ATTACHMENT POINT</label><select id="attachment-port">${options.map(([id,p])=>`<option value="${esc(id)}">${esc(p.label||id)}</option>`).join('')}</select></div>`:'<p>Attach at the target part’s origin.</p>';
+    if(chain&&target.kind==='human'){
+      const shape=target.geometry[0],radius=shape.radius_mm??((shape.diameter_mm||0)/2);
+      const half=shape.size_mm?.map(v=>v/2)||[radius,radius,(shape.length_mm||0)/2+radius];
+      const row=document.createElement('div');row.className='single-field';
+      row.innerHTML=`<label for="attachment-surface-side">BODY SIDE</label><select id="attachment-surface-side"><option value="">Nearest to line</option><option value="y+">Front (+Y)</option><option value="y-">Back (-Y)</option><option value="x-">Left (-X)</option><option value="x+">Right (+X)</option><option value="z+">Top (+Z)</option><option value="z-">Bottom (-Z)</option></select>`;
+      $('#attachment-location').prepend(row);
+      $('#attachment-surface-side').onchange=e=>{
+        if(!e.target.value)return;
+        const axis='xyz'.indexOf(e.target.value[0]),sign=e.target.value[1]==='+'?1:-1;
+        for(let i=0;i<3;i++)$('#attachment-surface-'+'xyz'[i]).value=(i===axis?sign*(half[i]+50):THREE.MathUtils.clamp(+$('#attachment-surface-'+'xyz'[i]).value,-half[i],half[i])).toFixed(1);
+        preview();
+      };
+    }
+    $$('#attachment-location input, #attachment-location select').forEach(el=>{if(el.id!=='attachment-surface-side')el.onchange=preview;});preview();
   }
   if(reconnect)preview();else{
     if(chain){$('#attachment-kind').value='spherical';$('#attachment-source-port').value=selectedPart.id===instance.id+'/link-1'?'b':'a';$('#attachment-source-port').onchange=preview;}
     $('#attachment-target').onchange=location;$('#attachment-limb').onchange=location;$('#attachment-kind').onchange=preview;
     const origin=partObjects.get(selectedPart.id).position;
-    $('#attachment-target').value=[...targets].sort((a,b)=>partObjects.get(a.id).position.distanceTo(origin)-partObjects.get(b.id).position.distanceTo(origin))[0].id;
+    $('#attachment-target').value=preferredTarget&&targets.some(p=>p.id===preferredTarget)?preferredTarget:[...targets].sort((a,b)=>partObjects.get(a.id).position.distanceTo(origin)-partObjects.get(b.id).position.distanceTo(origin))[0].id;
     location();
   }
 }
 function renderChainControls(instance,selectedPart){
   const info=state.scene.chains.find(c=>c.id===instance.id),section=document.createElement('div');section.className='inspect-section';
-  section.innerHTML=`<h3>CHAIN LENGTH</h3><div class="single-field"><label for="chain-length">Set chain length · mm</label><input id="chain-length" type="number" required min="0.001" max="${info.pitch_mm*1000}" step="any" value="${info.requested_length_mm}"></div><p id="chain-length-summary">${info.count} links × ${info.pitch_mm} mm pitch = ${info.length_mm} mm. Length rounds up to whole links. Add or remove links at the end; the retained links keep their pose.</p><p>Move the chain as one object, or choose Pose links to shape it. Simulation always lets the links flex.</p><div class="object-modes"><button id="chain-select-start">Select start</button><button id="chain-select-end">Select end</button></div><div class="single-field"><label for="chain-link-index">Select link</label><input id="chain-link-index" type="number" min="1" max="${info.count}" step="1" value="${Number(selectedPart.id.split('/link-').pop())||1}"></div><div class="object-modes"><button id="chain-attach-start">Attach start</button><button id="chain-attach-end">Attach end</button></div>`;
+  const profiles=Object.entries(state.library).filter(([,part])=>part.kind==='chain'&&part.ports?.a&&part.ports?.b);
+  section.innerHTML=`<h3>FLEXIBLE LINE</h3>
+    <div class="single-field"><label for="chain-length">Length · mm</label><input id="chain-length" type="number" required min="0.001" max="${info.pitch_mm*1000}" step="any" value="${info.requested_length_mm}"></div>
+    <p id="chain-length-summary">${info.count} segments × ${info.pitch_mm} mm pitch = ${info.length_mm} mm. Length rounds up to whole segments.</p>
+    <div class="single-field"><label for="chain-profile">Material and section</label><select id="chain-profile">${profiles.map(([id,part])=>`<option value="${esc(id)}" ${id===info.link_catalog?'selected':''}>${esc(part.name||id)}</option>`).join('')}</select></div>
+    <p>${esc(info.profile)} · ${info.break_force_n?`illustrative break threshold ${info.break_force_n} N${info.break_strain?` at about ${(100*info.break_strain).toFixed(1)}% tensile strain`:''}`:'no break threshold'}. Segment dimensions and mass follow the selected profile. Replace illustrative strengths with verified ratings for a real design.</p>
+    <p>Move the line as one object or choose Pose segments. Simulation always lets its joints flex.</p>
+    <div class="object-modes"><button id="chain-select-start">Select start</button><button id="chain-select-end">Select end</button></div>
+    <div class="single-field"><label for="chain-link-index">Select segment</label><input id="chain-link-index" type="number" min="1" max="${info.count}" step="1" value="${Number(selectedPart.id.split('/link-').pop())||1}"></div>
+    <div class="object-modes"><button id="chain-attach-start">Attach start</button><button id="chain-attach-end">Attach end</button></div>`;
   $('#object-expand').closest('.inspect-section').before(section);
   $('#chain-length').onchange=async e=>{if(!e.target.reportValidity())return;await objectEdit('object-parameters',{object:instance.id,parameters:{...instance.parameters,length_mm:+e.target.value}});};
+  $('#chain-profile').onchange=e=>objectEdit('object-parameters',{object:instance.id,parameters:{...instance.parameters,link_catalog:e.target.value}});
   const selectEnd=end=>select(end==='start'?info.start_part:info.end_part);
   $('#chain-select-start').onclick=()=>selectEnd('start');$('#chain-select-end').onclick=()=>selectEnd('end');
   $('#chain-link-index').onchange=e=>{if(e.target.reportValidity())select(instance.id+'/link-'+e.target.value);};
@@ -825,16 +1660,16 @@ function renderChainControls(instance,selectedPart){
 function chainDialog(catalog='generic.chain-link',position=null){
   if(state.busy||state.placementPending)return;
   const links=Object.entries(state.library).filter(([,p])=>p.kind==='chain'&&p.ports?.a&&p.ports?.b);
-  modal('Add a chain',`<div class="single-field"><label for="chain-catalog">LINK TYPE</label><select id="chain-catalog">${links.map(([id,p])=>`<option value="${esc(id)}" ${id===catalog?'selected':''}>${esc(p.name||id)}</option>`).join('')}</select></div><div class="single-field"><label for="new-chain-length">Chain length · mm</label><input id="new-chain-length" type="number" required min="0.001" step="any" value="1000"></div><p id="new-chain-summary" role="status"></p><p>The links and their joints are created together. Move the whole chain for layout, then choose Pose links to shape it.</p>`,[
-    {label:'Cancel',action:closeModal},{label:'Add chain',primary:true,action:async()=>{
+  modal('Add a flexible line',`<div class="single-field"><label for="chain-catalog">MATERIAL AND SECTION</label><select id="chain-catalog">${links.map(([id,p])=>`<option value="${esc(id)}" ${id===catalog?'selected':''}>${esc(p.name||id)}</option>`).join('')}</select></div><div class="single-field"><label for="new-chain-length">Length · mm</label><input id="new-chain-length" type="number" required min="0.001" step="any" value="1000"></div><p id="new-chain-summary" role="status"></p><p>Short segments flex at ball joints. Geometry, mass and collision size follow the selected profile; example break thresholds are illustrative.</p>`,[
+    {label:'Cancel',action:closeModal},{label:'Add line',primary:true,action:async()=>{
       const input=$('#new-chain-length');if(!input.reportValidity())return;
       const parameters={length_mm:+input.value,link_catalog:$('#chain-catalog').value};
       let n=1;while(state.scene.parts.some(p=>p.id==='chain-'+n||p.id.startsWith('chain-'+n+'/'))||(state.doc.objects||[]).some(o=>o.id==='chain-'+n))n++;
       const id='chain-'+n,pitch=chainPitch(parameters.link_catalog),length=Math.ceil(parameters.length_mm/pitch)*pitch;
       await mutate(()=>{state.doc.objects||=[];state.doc.objects.push({id,template:'chain',parameters,pose:{position_mm:position?[position[0],position[1],position[2]+length+20]:[0,-600,length+100]}});state.selected=id+'/link-1';});
-      closeModal();setMode('design');setTool('translate');fitView();toast('Added '+id+'. Set its length in Properties or choose Pose links.');
+      closeModal();setMode('design');setTool('translate');fitView();toast('Added '+id+'. Set its length in Properties or choose Pose segments.');
     }}]);
-  function refresh(){const pitch=chainPitch($('#chain-catalog').value),length=+$('#new-chain-length').value,count=Math.max(1,Math.ceil(length/pitch));$('#new-chain-length').max=pitch*1000;$('#new-chain-summary').textContent=`${count} links × ${pitch} mm pitch = ${count*pitch} mm. Rounded up to whole links.`;}
+  function refresh(){const profile=state.library[$('#chain-catalog').value],pitch=chainPitch($('#chain-catalog').value),length=+$('#new-chain-length').value,count=Math.max(1,Math.ceil(length/pitch));$('#new-chain-length').max=pitch*1000;$('#new-chain-summary').textContent=`${count} segments × ${pitch} mm pitch = ${count*pitch} mm. ${profile.break_force_n?`Illustrative break threshold: ${profile.break_force_n} N.`:'No break threshold specified.'}`;}
   $('#new-chain-length').oninput=refresh;$('#chain-catalog').onchange=refresh;refresh();
 }
 function chainPitch(catalog){const ports=state.library[catalog].ports;return Math.hypot(...ports.a.position_mm.map((v,i)=>v-ports.b.position_mm[i]));}
@@ -844,12 +1679,37 @@ function renderObjectInspector(instance,selectedPart){
   const parameters=human?{stature_mm:1750,mass_kg:75,strength_scale:1,joint_damping_nms_rad:.08,...instance.parameters}:instance.parameters||{};
   const posture=humanPosture(parameters);
   $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(instance.template)}</div><h2>${esc(instance.label||instance.id)}</h2><div class="object-modes" role="group" aria-label="Object manipulation"><button data-object-mode="whole" aria-pressed="${objectMode(instance)!=='limb'}">${human?'Move whole person':chain?'Move whole chain':'Move whole object'}</button><button data-object-mode="limb" aria-pressed="${objectMode(instance)==='limb'}">${human?'Pose limbs':chain?'Pose links':'Pose parts'}</button></div><p>${objectMode(instance)==='limb'?'Select a body part, then drag or rotate it. Connected joints follow within their limits.':'Drag or rotate any part to move the entire object and keep its pose.'}</p></div><div class="inspect-section">${propertyFields('OBJECT POSITION',pose.position_mm,'position_mm')}${propertyFields('OBJECT ROTATION',pose.rotation_deg,'rotation_deg')}</div><div class="inspect-section"><h3>${chain?'ADVANCED EDITING':'OBJECT PARAMETERS'}</h3>${Object.entries(parameters).filter(([k,v])=>!chain&&typeof v==='number'&&(!human||k!=='grip_diameter_mm')).map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-object-param="${esc(k)}" value="${v}"></div>`).join('')}${human?`
-    ${instance.components?'<p id="object-edited-pose">Edited pose · use Pose limbs to adjust it.</p>':`<div class="single-field"><label for="object-pose">INITIAL POSE</label><select id="object-pose">${HUMAN_POSES.map(p=>`<option ${parameters.pose===p?'selected':''}>${p}</option>`).join('')}</select></div>`}
+    ${instance.components?'<p id="object-edited-pose">Edited pose · use Pose limbs to adjust it.</p>':`<div class="single-field"><label for="object-pose">INITIAL POSE</label><select id="object-pose">${humanPoseOptions(parameters.pose)}</select><p id="object-pose-description">${esc(humanPoseDescription(parameters.pose||'standing'))}</p></div>`}
     <div class="single-field"><label for="object-hold">POSTURE CONTROL</label><select id="object-hold">${postureOptions(posture)}</select></div>
     <div class="single-field" id="object-held-joints-field" ${posture==='custom'?'':'hidden'}><label for="object-held-joints">JOINTS OR GROUPS · COMMA SEPARATED</label><input id="object-held-joints" value="${esc((parameters.hold_joints||[]).join(', '))}" placeholder="left_elbow, right_elbow, torso"></div>
+    <p>Mass and stature estimate torso and limb thickness for rendering and fit checks. Body shape varies between people of the same mass.</p>
     <p>Held joints resist motion with finite torque. Upper body leaves hips, knees and ankles free. Strength scale adjusts available torque. Passive damping slows free motion without holding an angle.</p>
     <div class="single-field"><label for="object-grip">GRIPPED BAR DIAMETER · mm</label><input id="object-grip" type="number" min="8" max="80" step="0.1" placeholder="Open hands" value="${parameters.grip_diameter_mm??''}"></div>
     <p>Curled hands have a grip port at the palm centre. Connect it to a bar with a revolute joint for a grasp that pivots around the bar. Calibrate limb measurements and initial joint angles in Source or expand the model.</p>`:''}<button class="inspect-action" id="object-expand">Expand into editable parts</button></div>`;
+  if(human){
+    const planes=(state.doc.draft_subassemblies||[]).flatMap(group=>(group.mirrors||[])
+      .filter(plane=>plane.axis==='x'||plane.axis==='y').map(plane=>({group,plane})));
+    const current=instance.symmetry,section=document.createElement('div');section.className='inspect-section';
+    section.innerHTML=`<h3>MIRROR-LINE POSE</h3><div class="single-field"><label for="human-mirror-line">FIX PERSON TO MIRROR</label><select id="human-mirror-line">
+      <option value="" ${current?'':'selected'}>Free pose</option>
+      ${current?`<option value="current" selected>Current line · ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm</option>`:''}
+      ${planes.map(({group,plane},index)=>`<option value="${index}">${esc(group.id)} · ${esc(plane.axis.toUpperCase())} = ${esc(plane.offset_mm)} mm</option>`).join('')}
+    </select></div><p>${current?`Centerline fixed at ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm and ${current.axis==='x'?'Y':'X'} = ${esc(current.line_offset_mm)} mm. The whole person moves vertically; arms and legs pose in mirrored pairs, while the back and head flex within the plane.`:
+      'Choose a vertical draft mirror. The current position sets the centerline; mirrored arms and legs will pose together.'}</p>
+      ${planes.length?'':'<p>Add an X or Y draft mirror plane to use this constraint.</p>'}`;
+    $('#inspector').appendChild(section);
+    $('#human-mirror-line').onchange=e=>{
+      if(e.target.value==='current')return;
+      const choice=planes[Number(e.target.value)];
+      objectEdit('human-symmetry',{object:instance.id,...(e.target.value===''?{}:{group:choice.group.id,plane:choice.plane.id})});
+    };
+    if(current)$$('[data-pose]').forEach(input=>{if(input.dataset.pose==='rotation_deg'||+input.dataset.axis<2)input.disabled=true;});
+  }
+  if(chain){
+    $('#inspector [data-object-mode="whole"]').textContent='Move whole line';
+    $('#inspector [data-object-mode="limb"]').textContent='Pose segments';
+    $('#inspector .inspect-id').textContent=state.scene.chains.find(c=>c.id===instance.id)?.profile||'chain';
+  }
   if(selectedPart){
     const segment=document.createElement('div');segment.className='inspect-section';segment.hidden=objectMode(instance)!=='limb';
     segment.innerHTML=`<h3>${esc(selectedPart.label||selectedPart.id)}</h3><p>Adjust this part to pose its joints. The object stays grouped; connected parts follow.</p>`+
@@ -870,7 +1730,10 @@ function renderObjectInspector(instance,selectedPart){
   const changeParameters=edit=>{const next=clone(instance.parameters||{});edit(next);return objectEdit('object-parameters',{object:instance.id,parameters:next});};
   $$('[data-object-param]').forEach(input=>input.onchange=()=>changeParameters(p=>{p[input.dataset.objectParam]=+input.value;}));
   if(human){
-    if($('#object-pose'))$('#object-pose').onchange=e=>changeParameters(p=>{p.pose=e.target.value;});
+    if($('#object-pose'))$('#object-pose').onchange=e=>{
+      $('#object-pose-description').textContent=humanPoseDescription(e.target.value);
+      changeParameters(p=>{p.pose=e.target.value;});
+    };
     $('#object-hold').onchange=e=>{
       const mode=e.target.value;
       if(mode==='custom'){$('#object-held-joints-field').hidden=false;$('#object-held-joints').focus();return;}
@@ -1002,7 +1865,7 @@ function activateDesign(data){
   state.checks=null;state.analysis=null;state.recording=null;state.plan=null;state.simulationOptions=null;state.simulationError=null;
   $('#time-slider').value=0;$('#time-slider').max=100;$('#time-label').textContent='0.00 s';
   $('#timeline-mid').textContent='1.5 s';$('#timeline-end').textContent='3 s';$('#play-button').textContent='▶';
-  clearSnapPreview();setTool('select');buildScene(data.scene);renderLibrary();renderOutline();setMode('design');updateHeader();fitView();
+  clearSnapPreview();setTool('select');adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();setMode('design');updateHeader();fitView();
   status(data.imported?'Opened file · Save to keep it in your workspace':'Loaded '+data.path);
 }
 function confirmDesignOpen(data){
@@ -1114,9 +1977,9 @@ function exportDialog(){modal('Export your creation','<button class="option-row"
 async function exportBuild(){if(state.busy)return;state.busy=true;status('Generating the illustrated build book…');try{const result=await api('export',{engineering:true});modal('Build book ready',`<p>${result.steps} illustrated assembly steps, ${result.stock_bars} stock lengths, plus the parts list and engineering results.</p><a class="button primary" href="${esc(result.url)}" target="_blank">Open printable instructions ↗</a><p>Saved in ${esc(result.directory)}</p>`,[{label:'Done',action:closeModal}]);status('Build instructions exported');}catch(e){toast(e.message,true);}finally{state.busy=false;}}
 function renderDialog(){modal('Render an image','<div class="fields"><div class="field"><label>WIDTH px</label><input id="render-width" value="1600" type="number"></div><div class="field"><label>HEIGHT px</label><input id="render-height" value="1000" type="number"></div></div><div class="single-field"><label>LIGHTING</label><select id="render-light"><option>studio</option><option>technical</option><option>flat</option></select></div><div class="single-field"><label>BACKGROUND</label><select id="render-bg"><option value="#edf1f3">Soft grey</option><option value="#ffffff">White</option><option value="transparent">Transparent</option></select></div>',[{label:'Cancel',action:closeModal},{label:'Render PNG',primary:true,action:async()=>{status('Rendering image…');const result=await api('render',{options:{width:+$('#render-width').value,height:+$('#render-height').value,eye:camera.position.toArray(),target:orbit.target.toArray(),lighting:$('#render-light').value,background:$('#render-bg').value}});closeModal();modal('Image ready',`<a href="${esc(result.url)}" target="_blank"><img src="${esc(result.url)}" style="width:100%" alt="Rendered pipe creation"></a><p>Open the image to save it at full resolution.</p>`,[{label:'Done',action:closeModal}]);status('Image exported');}}]);}
 function humanDialog(){
-  modal('Add a human model',`<p>A configurable 19-part mannequin with articulated spine, neck, shoulders, arms, hands, hips, knees and ankles.</p>
+  modal('Add a human model',`<p>A configurable 19-part mannequin with articulated spine, neck, shoulders, arms, hands, hips, knees and ankles. Mass and stature estimate body thickness for fit checks.</p>
     <div class="fields"><div class="field"><label for="human-height">STATURE mm</label><input id="human-height" value="1750" type="number"></div><div class="field"><label for="human-mass">MASS kg</label><input id="human-mass" value="75" type="number"></div></div>
-    <div class="single-field"><label for="human-pose">INITIAL POSE</label><select id="human-pose">${HUMAN_POSES.map(p=>`<option>${p}</option>`).join('')}</select></div>
+    <div class="single-field"><label for="human-pose">INITIAL POSE</label><select id="human-pose">${humanPoseOptions()}</select><p id="human-pose-description">${esc(humanPoseDescription('standing'))}</p></div>
     <div class="single-field"><label for="human-hold">POSTURE CONTROL</label><select id="human-hold">${HUMAN_POSTURES.filter(([id])=>id!=='custom').map(([id,label])=>`<option value="${id}">${label}</option>`).join('')}</select></div>
     <div class="fields"><div class="field"><label for="human-strength">STRENGTH SCALE</label><input id="human-strength" type="number" min="0.1" max="10" step="0.1" value="1"></div><div class="field"><label for="human-grip">GRIPPED BAR Ø mm</label><input id="human-grip" type="number" min="8" max="80" step="0.1" placeholder="Open hands"></div></div>
     <div class="single-field"><label for="human-damping">PASSIVE JOINT DAMPING · N·m·s/rad</label><input id="human-damping" type="number" min="0" step="0.1" value="0.08"></div>
@@ -1127,6 +1990,7 @@ function humanDialog(){
       await mutate(()=>{state.doc.objects||=[];let i=1;while(state.doc.objects.some(o=>o.id==='human-'+i))i++;state.doc.objects.push({id:'human-'+i,template:'human',parameters,pose:{position_mm:[1000,0,0]}});});
       closeModal();fitView();toast('Added a 19-segment human. Use Source to calibrate individual measurements.');
     }}]);
+  $('#human-pose').onchange=e=>{$('#human-pose-description').textContent=humanPoseDescription(e.target.value);};
 }
 function fitDialog(){const humans=state.scene.parts.filter(p=>p.kind==='human'&&p.id.endsWith('/pelvis')).map(p=>p.id.slice(0,-7));if(!humans.length){humanDialog();return;}modal('Human fit test',`<div class="single-field"><label>HUMAN</label><select id="fit-id">${humans.map(id=>`<option>${esc(id)}</option>`).join('')}</select></div><div class="single-field"><label>TEST</label><select id="fit-kind"><option value="reach">Right-hand reach</option><option value="seat">Seated dimensions</option></select></div><div class="fields">${['X','Y','Z'].map((v,i)=>`<div class="field"><label>TARGET ${v} mm</label><input id="fit-${i}" type="number" value="${[300,400,1200][i]}"></div>`).join('')}</div><div class="single-field"><label>SEAT PART (FOR SEATED TEST)</label><select id="fit-seat">${state.scene.parts.filter(p=>p.kind==='panel').map(p=>`<option>${esc(p.id)}</option>`).join('')}</select></div>`,[{label:'Cancel',action:closeModal},{label:'Run fit test',primary:true,action:async()=>{const params={human:$('#fit-id').value};if($('#fit-kind').value==='reach')params.target=[0,1,2].map(i=>+$('#fit-'+i).value);else params.seat=$('#fit-seat').value;const r=await api('fit',params);closeModal();if(r.parts)for(const [id,p] of Object.entries(r.parts))if(partObjects.has(id))setPose(partObjects.get(id),p);jsonDialog('Fit test result',r);}}]);}
 function connectDialog(connector,port=null,replaceJoint=null){
@@ -1137,6 +2001,17 @@ function connectDialog(connector,port=null,replaceJoint=null){
   const sockets=Object.entries(fitting?.ports||{}).filter(([name,p])=>p.type==='socket'&&!socketOccupied(state.scene,connector,name,replaceJoint));
   if(!sockets.length)return;
   if(port&&socketOccupied(state.scene,connector,port,replaceJoint)){toast('This socket or its shared bore is occupied.');return;}
+  if(member.draft){
+    const run=draftRun(state.doc,member.id),open=['start','end'].filter(e=>!(run.attachments||[]).some(a=>a.end===e));
+    const available=sockets.filter(([,socket])=>socket.through||open.length);
+    if(!available.length){toast('Both draft pipe ends are occupied.');return;}
+    if(!port)port=available[0][0];
+    const attach=()=>{const chosen=$('#modal').open?$('#draft-port')?.value||port:port,socket=fitting.ports[chosen],end=$('#modal').open?$('#draft-end')?.value||open[0]:open[0];
+      try{draftConnect({member:member.id,connector,port:chosen,...(socket.through?{}:{end})});closeModal();}catch(e){toast(e.message,true);}};
+    if(available.length===1&&open.length<=1){attach();return;}
+    modal('Connect draft run',`<p>Add the intended socket relation now. Exact fit and cut length are checked when you finalize.</p><div class="single-field"><label>SOCKET</label><select id="draft-port">${available.map(([name,s])=>`<option value="${esc(name)}" ${name===port?'selected':''}>${esc(s.label||name)}${s.through?' · through':''}</option>`).join('')}</select></div><div class="single-field"><label>PIPE END</label><select id="draft-end">${open.map(end=>`<option>${end}</option>`).join('')}</select></div>`,[{label:'Cancel',action:closeModal},{label:'Connect',primary:true,action:attach}]);
+    $('#draft-end').disabled=!!fitting.ports[port].through;$('#draft-port').onchange=()=>{$('#draft-end').disabled=!!fitting.ports[$('#draft-port').value].through;};return;
+  }
   const wasStation=old&&!fitting.ports[old.a.port]?.through&&old.insertion_mm>fitting.ports[old.a.port]?.engagement_mm;
   if(wasStation&&sockets.some(([name])=>name==='through'))port='through';
   if(!port)port=sockets.some(([name])=>name==='through')?'through':sockets[0][0];
@@ -1151,7 +2026,75 @@ function connectDialog(connector,port=null,replaceJoint=null){
 }
 async function expandObjects(id=null){const doc=await api('expand',typeof id==='string'?{object:id}:{});checkpoint();state.doc=doc;changed();await resolve();toast('Expanded into editable parts. Select any part and use Regroup as object to restore the object.');}
 
-function ray(event){const rect=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);raycaster.setFromCamera(pointer,camera);}
+function placementContext(excluded=[]){
+  const moving=new Set(excluded),bounds=new THREE.Box3(),references=[];
+  for(const part of state.scene?.parts||[]){
+    const object=partObjects.get(part.id);if(!object)continue;
+    object.updateWorldMatrix(true,true);
+    const box=new THREE.Box3().setFromObject(object);if(box.isEmpty())continue;
+    bounds.union(box);
+    if(moving.has(part.id))continue;
+    if(part.kind==='member'&&part.length_mm>0){
+      references.push({id:part.id,a:new THREE.Vector3(0,0,-part.length_mm/2).applyMatrix4(object.matrixWorld),
+        b:new THREE.Vector3(0,0,part.length_mm/2).applyMatrix4(object.matrixWorld)});
+    }else references.push({id:part.id,a:box.getCenter(new THREE.Vector3())});
+  }
+  if(bounds.isEmpty())bounds.setFromCenterAndSize(orbit.target,new THREE.Vector3(1000,1000,1000));
+  // Leave room for intentional construction around the assembly, while
+  // excluding ray/plane intersections many scene lengths away.
+  const reach=Math.max(3000,bounds.getSize(new THREE.Vector3()).length()*3);
+  return {references,bounds:bounds.expandByScalar(reach)};
+}
+function boundedPlacementDelta(drag,delta){
+  if(!delta.toArray().every(Number.isFinite))return new THREE.Vector3();
+  const origin=new THREE.Vector3().setFromMatrixPosition(drag.matrices.get(drag.id));
+  const target=origin.clone().add(delta).clamp(drag.placement.bounds.min,drag.placement.bounds.max);
+  target.z=Math.max(Math.min(0,origin.z),target.z);
+  const result=target.sub(origin);
+  return draftRun(state.doc,drag.id)?mirrorConstrainedDelta(drag.group,result):result;
+}
+function nearbyGeometryPoint(context,exact=true){
+  const hit=exact&&raycaster.intersectObjects(objects.children,true).find(hit=>{
+    let node=hit.object;while(node&&!node.userData.part)node=node.parent;
+    return node&&context.references.some(ref=>ref.id===node.userData.part);
+  });
+  if(hit)return hit.point;
+  const rect=renderer.domElement.getBoundingClientRect(),width=rect.width,height=rect.height;
+  let best=null;
+  for(const ref of context.references){
+    const a=ref.a.clone().project(camera),b=(ref.b||ref.a).clone().project(camera);
+    if(a.z< -1||a.z>1||b.z< -1||b.z>1)continue;
+    const ax=(a.x-pointer.x)*width/2,ay=(a.y-pointer.y)*height/2;
+    const dx=(b.x-a.x)*width/2,dy=(b.y-a.y)*height/2;
+    const t=THREE.MathUtils.clamp(-(ax*dx+ay*dy)/(dx*dx+dy*dy||1),0,1);
+    const distance=Math.hypot(ax+t*dx,ay+t*dy);
+    if(distance>80||best&&distance>=best.distance)continue;
+    let station=t;
+    if(ref.b){
+      const near=-ref.a.clone().applyMatrix4(camera.matrixWorldInverse).z;
+      const far=-ref.b.clone().applyMatrix4(camera.matrixWorldInverse).z;
+      if(near>0&&far>0)station=t*near/((1-t)*far+t*near);
+    }
+    best={distance,point:ref.b?ref.a.clone().lerp(ref.b,station):ref.a};
+  }
+  return best?.point||null;
+}
+function pointAtSceneDepth(reference){
+  const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()),reference);
+  return raycaster.ray.intersectPlane(plane,new THREE.Vector3());
+}
+function resolvedDropPoint(context){
+  const reference=nearbyGeometryPoint(context);
+  if(reference)return pointAtSceneDepth(reference)?.clamp(context.bounds.min,context.bounds.max)||null;
+  const ground=raycaster.ray.intersectPlane(groundPlane,new THREE.Vector3());
+  if(ground&&context.bounds.containsPoint(ground))return ground;
+  const focus=context.bounds.getCenter(new THREE.Vector3());
+  const point=pointAtSceneDepth(focus);
+  if(!point)return null;
+  point.clamp(context.bounds.min,context.bounds.max);point.z=Math.max(0,point.z);
+  return point;
+}
+function ray(event){const rect=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-rect.left)/rect.width*2-1,-(event.clientY-rect.top)/rect.height*2+1);camera.updateMatrixWorld();raycaster.setFromCamera(pointer,camera);}
 function pickSocket(){
   const markers=ports.children.filter(p=>p.visible&&p.userData.portType==='socket');
   const direct=raycaster.intersectObjects(markers,false)[0];
@@ -1191,9 +2134,11 @@ if(renderer){let down=null;
   renderer.domElement.addEventListener('pointermove',e=>{
     if(!pointerDrag||pointerDrag.pointerId!==e.pointerId)return;e.stopImmediatePropagation();
     if(!pointerDrag.started){if(Math.hypot(e.clientX-pointerDrag.x,e.clientY-pointerDrag.y)<4)return;
-      if(!beginPlacement('pointer')){cancelPlacement();return;}pointerDrag.started=true;gizmo.detach();}
-    ray(e);const point=raycaster.ray.intersectPlane(pointerDrag.plane,new THREE.Vector3());if(!point)return;
-    const delta=point.sub(pointerDrag.point);if(state.snap)delta.divideScalar(state.snapSettings.translationMm).round().multiplyScalar(state.snapSettings.translationMm);
+      if(!beginPlacement('pointer')){cancelPlacement();return;}pointerDrag.started=true;pointerDrag.context=dragStart.placement;gizmo.detach();}
+    ray(e);const reference=nearbyGeometryPoint(pointerDrag.context,false);
+    const point=reference?pointAtSceneDepth(reference):raycaster.ray.intersectPlane(pointerDrag.plane,new THREE.Vector3());if(!point)return;
+    let delta=point.sub(pointerDrag.point);if(state.snap)delta.divideScalar(state.snapSettings.translationMm).round().multiplyScalar(state.snapSettings.translationMm);
+    delta=boundedPlacementDelta(dragStart,delta);
     for(const [id,matrix] of dragStart.matrices){const object=partObjects.get(id);matrix.decompose(object.position,object.quaternion,object.scale);object.position.add(delta);object.updateMatrix();}
     previewMovement();
   },true);
@@ -1211,16 +2156,17 @@ if(renderer){let down=null;
   renderer.domElement.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});
   renderer.domElement.addEventListener('drop',async e=>{
     e.preventDefault();const catalog=e.dataTransfer.getData('application/pipesim-part');if(!catalog||state.placementPending)return;
-    ray(e);const hit=state.connectionSnap?pickPart():null;
-    const point=hit?.point.clone()||raycaster.ray.intersectPlane(groundPlane,new THREE.Vector3());if(!point)return;
-    if(state.snap&&!hit)point.divideScalar(state.snapSettings.translationMm).round().multiplyScalar(state.snapSettings.translationMm);
+    ray(e);const context=placementContext(),point=resolvedDropPoint(context);if(!point)return;
+    if(state.snap)point.divideScalar(state.snapSettings.translationMm).round().multiplyScalar(state.snapSettings.translationMm);
+    point.z=Math.max(0,point.z);
     if(state.library[catalog].kind==='chain'){chainDialog(catalog,point.toArray());return;}
     try{const id=await addPart(catalog,point.toArray(),{origin:state.library[catalog].kind==='connector',quiet:true});
-      const matches=dragCandidates([id]);if(matches.length)await offerConnection(matches,{},state.revision,false);else toast('Added '+id+'. Drag it onto a pipe or socket to connect.');
+      const matches=dragCandidates([id]);if(matches.length)await offerConnection(matches,{},state.revision,false,id);else toast('Added '+id+'. Drag it onto a pipe or socket to connect.');
     }catch(error){toast(error.message,true);}
   });
 }
 $('#part-search').oninput=renderLibrary;$('#category').onchange=renderLibrary;$('#size-filter').onchange=renderLibrary;
+$('#finalize-draft').onclick=()=>finalizeDrafts();
 $('#connection-snap-button').onclick=()=>{state.connectionSnap=!state.connectionSnap;updateSnapControls();clearSnapPreview();status(state.connectionSnap?'Connection snapping enabled · drag onto a pipe or socket':'Connection snapping disabled');};
 $('#snap-settings-button').onclick=snapSettingsDialog;
 $('#modal').addEventListener('cancel',e=>{if(reviewCleanup){e.preventDefault();closeModal();}});
@@ -1235,17 +2181,109 @@ $('#examples-button').onclick=()=>{
 };
 $('#new-button').onclick=async()=>{checkpoint();state.doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Untitled creation',parts:[],joints:[],anchors:[]};state.path='designs/untitled.pipe.yaml';state.selected=null;changed();await resolve();setMode('design');};
 $('#undo').onclick=async()=>{if(!state.undo.length)return;state.redo.push(clone(state.doc));state.doc=state.undo.pop();changed();await resolve();};$('#redo').onclick=async()=>{if(!state.redo.length)return;state.undo.push(clone(state.doc));state.doc=state.redo.pop();changed();await resolve();};
-$('#delete-part').onclick=()=>{const id=state.selected;if(id)deleteTreeTarget({label:id,members:[id]});};
+$('#delete-part').onclick=()=>{const id=state.selected;if(!id)return;if(draftRun(state.doc,id))deleteDraft(id);else deleteTreeTarget({label:id,members:[id]});};
 $('#fit-view').onclick=fitView;$('#grid-button').onclick=()=>{grid.visible=!grid.visible;$('#grid-button').classList.toggle('active',grid.visible);};$('#ports-button').onclick=()=>{state.ports=!state.ports;$('#ports-button').classList.toggle('active',state.ports);ports.visible=true;updatePorts();};$('#snap-button').onclick=()=>{state.snap=!state.snap;updateSnapControls();};
 $$('[data-camera]').forEach(b=>b.onclick=()=>{const distance=camera.position.distanceTo(orbit.target);const vector=({top:new THREE.Vector3(.001,-.001,1),front:new THREE.Vector3(0,-1,.001),side:new THREE.Vector3(1,0,.001)})[b.dataset.camera];camera.position.copy(orbit.target).addScaledVector(vector.normalize(),distance);$('#view-title').textContent=b.dataset.camera[0].toUpperCase()+b.dataset.camera.slice(1)+' view';orbit.update();});
 $('#play-button').onclick=()=>{if(!state.recording){setMode('simulate');toast('Run a simulation to record a motion timeline.');return;}state.playing=!state.playing;$('#play-button').textContent=state.playing?'Ⅱ':'▶';};$('#reset-button').onclick=restore;$('#time-slider').oninput=e=>{state.playing=false;showFrame(+e.target.value);};
 $('#capture-frame').onclick=async()=>{if(!state.recording){toast('Record a simulation first.');return;}const frame=clone(state.recording.frames[state.frame]);const expanded=await api('snapshot',{frame});checkpoint();state.doc=expanded;changed();await resolve();toast('Captured this pose and adjusted the remaining joint limits. Compound human rotations may need anatomical review.');};
 $('#import-button').onclick=()=>$('#mesh-file').click();$('#mesh-file').onchange=e=>{const file=e.target.files[0];if(!file)return;modal('Import '+file.name,'<p>Provide the physical mass and convert the mesh coordinates to millimetres. Hollow parts can use separate collision geometry in the library editor.</p><div class="fields"><div class="field"><label>MASS kg</label><input id="import-mass" type="number" value="1" min="0.001"></div><div class="field"><label>SCALE TO mm</label><input id="import-scale" type="number" value="1" min="0.001"></div></div>',[{label:'Cancel',action:closeModal},{label:'Import part',primary:true,action:async()=>{const buffer=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<buffer.length;i+=32768)binary+=String.fromCharCode(...buffer.subarray(i,i+32768));const r=await api('import-mesh',{filename:file.name,data:btoa(binary),mass_kg:+$('#import-mass').value,scale:+$('#import-scale').value});checkpoint();state.doc=r.document;state.library=r.library;changed();renderLibrary();closeModal();await addPart(r.import.part);}}]);e.target.value='';};
-document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='o'){e.preventDefault();if(!$('#modal').open)chooseDesignFile();return;}if(e.key==='Escape'&&dragStart){e.preventDefault();cancelPlacement();setTool('select');return;}if(state.placementPending&&!$('#modal').open)return;if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)||$('#modal').open)return;if((e.ctrlKey||e.metaKey)&&e.key==='z'){e.preventDefault();$('#undo').click();}else if((e.ctrlKey||e.metaKey)&&e.key==='y'){e.preventDefault();$('#redo').click();}else if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();saveDialog();}else if(e.key.toLowerCase()==='f')fitView();else if(e.key.toLowerCase()==='g')setTool('translate');else if(e.key.toLowerCase()==='r')setTool('rotate');else if(e.key.toLowerCase()==='q'||e.key==='Escape')setTool('select');else if(e.key==='Delete')$('#delete-part').click();else if(e.key==='/'){e.preventDefault();$('#part-search').focus();}});
+document.addEventListener('keydown',e=>{if(e.key==='Shift'&&!localRotationHeld){localRotationHeld=true;if(!dragStart)attachGizmo();}});
+document.addEventListener('keyup',e=>{if(e.key==='Shift'){localRotationHeld=false;if(!dragStart)attachGizmo();}});
+window.addEventListener('blur',()=>{if(localRotationHeld){localRotationHeld=false;if(!dragStart)attachGizmo();}});
+document.addEventListener('keydown',e=>{
+  const key=e.key.toLowerCase();
+  if((e.ctrlKey||e.metaKey)&&key==='o'){e.preventDefault();if(!$('#modal').open)chooseDesignFile();return;}
+  if(e.key==='Escape'&&dragStart){e.preventDefault();cancelPlacement();setTool('select');return;}
+  if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)||document.activeElement?.isContentEditable||$('#modal').open)return;
+  if(state.placementPending&&(e.ctrlKey||e.metaKey))return;
+  if((e.ctrlKey||e.metaKey)&&key==='z'){e.preventDefault();$('#undo').click();return;}
+  if((e.ctrlKey||e.metaKey)&&key==='y'){e.preventDefault();$('#redo').click();return;}
+  if((e.ctrlKey||e.metaKey)&&key==='s'){e.preventDefault();saveDialog();return;}
+  if(e.altKey&&!e.ctrlKey&&!e.metaKey&&key==='d'){
+    e.preventDefault();
+    if(e.repeat||!state.selected||state.mode!=='design'||state.busy||dragStart)return;
+    if(keyboardNudging)keyboardQueue.push({selected:state.selected,action:'duplicate'});
+    else if(!state.placementPending)duplicateSelected();
+    return;
+  }
+  const libraryHotkey=libraryHotkeyFromEvent(e);
+  const catalog=libraryHotkey&&Object.keys(libraryHotkeys).find(id=>libraryHotkeys[id]===libraryHotkey&&state.library[id]);
+  if(catalog){e.preventDefault();if(!e.repeat&&!state.busy&&!state.placementPending&&!dragStart)addLibraryCatalog(catalog);return;}
+  if(queueKeyboardNudge(e)){e.preventDefault();return;}
+  if(state.placementPending)return;
+  if(e.key==='Home'||key==='h')fitView();
+  else if(key==='g')setTool('translate');else if(key==='r')setTool('rotate');
+  else if(key==='q'||e.key==='Escape')setTool('select');
+  else if(e.key==='Delete')$('#delete-part').click();
+  else if(e.key==='/'){e.preventDefault();$('#part-search').focus();}
+});
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 let last=performance.now(),accumulator=0;
-function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}renderer?.render(scene,camera);}requestAnimationFrame(tick);
-try{const response=await fetch('/api/bootstrap'),data=await response.json();if(!response.ok)throw new Error(data.error);token=data.token;state.doc=data.document;state.path=data.path;state.library={...data.library,...state.doc.definitions};state.examples=data.examples;state.selected=data.scene.parts.some(p=>p.id==='leg-1')?'leg-1':null;buildScene(data.scene);renderLibrary();renderOutline();renderInspector();updateHeader();fitView();if(data.api_version!==EDITOR_API_VERSION){status('Editor server update required');toast(SERVER_UPDATE_MESSAGE,true);}else status('Workspace ready · all changes stay local');}catch(e){toast(e.message,true);status('Workspace could not be opened');}
+function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();syncMirrorPreviews();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}renderer?.render(scene,camera);}requestAnimationFrame(tick);
+try{const response=await fetch('/api/bootstrap'),data=await response.json();if(!response.ok)throw new Error(data.error);token=data.token;state.doc=data.document;state.path=data.path;state.library={...data.library,...state.doc.definitions};state.examples=data.examples;state.selected=data.scene.parts.some(p=>p.id==='leg-1')?'leg-1':null;adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();renderInspector();updateHeader();fitView();if(data.api_version!==EDITOR_API_VERSION){status('Editor server update required');toast(SERVER_UPDATE_MESSAGE,true);}else status('Workspace ready · all changes stay local');}catch(e){toast(e.message,true);status('Workspace could not be opened');}
+
+function nearbyPanelBoltHoles(panel){
+  const box=panel.geometry.find(shape=>shape.type==='box'&&shape.size_mm?.length===3);
+  const panelObject=partObjects.get(panel.id);
+  if(!box||!panelObject)return [];
+  const center=new THREE.Vector3(...(box.position_mm||[0,0,0]));
+  const inverse=panelObject.matrix.clone().invert(),size=box.size_mm;
+  const normal=new THREE.Vector3(0,0,1).transformDirection(panelObject.matrix);
+  const occupied=new Map();
+  for(const joint of state.scene.joints)for(const end of [joint.a,joint.b])if(end.port){
+    const key=end.part+'/'+end.port;occupied.set(key,(occupied.get(key)||0)+1);
+  }
+  const holes=[];
+  for(const fitting of state.scene.parts){
+    if(fitting.id===panel.id||fitting.draft)continue;
+    const object=partObjects.get(fitting.id);if(!object)continue;
+    for(const [portName,port] of Object.entries(fitting.ports||{})){
+      if(port.type!=='bolt')continue;
+      const used=occupied.get(fitting.id+'/'+portName)||0;
+      if(used>=(port.capacity||1))continue;
+      const world=new THREE.Vector3(...(port.position_mm||[0,0,0])).applyMatrix4(object.matrix);
+      const local=world.clone().applyMatrix4(inverse).sub(center);
+      if(Math.abs(local.x)>size[0]/2||Math.abs(local.y)>size[1]/2)continue;
+      const gap=Math.max(0,Math.abs(local.z)-size[2]/2);
+      if(gap>60)continue;
+      const axis=new THREE.Vector3(...(port.axis||[0,0,1])).transformDirection(object.matrix);
+      if(Math.abs(axis.dot(normal))<.8)continue;
+      holes.push({fitting:fitting.id,port:portName,gap,local:world.applyMatrix4(inverse).toArray(),
+        axis:axis.transformDirection(inverse).toArray()});
+    }
+  }
+  return holes.sort((a,b)=>a.gap-b.gap||a.fitting.localeCompare(b.fitting)||a.port.localeCompare(b.port));
+}
+
+function fastenPanelDialog(panel){
+  const padded=!!state.library[panel.catalog]?.panel_layers;
+  const label=padded?'padded panel':'board';
+  const holes=nearbyPanelBoltHoles(panel);
+  if(!holes.length){modal('Fasten '+label,
+    `<p>No unused, suitably oriented bolt holes lie under this ${label} within 60 mm of its ${padded?'backing':'mounting'} face. Position it over the flanges, then try again.</p>`,
+    [{label:'Close',action:closeModal}]);return;}
+  modal('Fasten '+label+' at bolt holes',`<p>Choose the flange holes for screws through ${esc(panel.id)}${padded?' backing':''}. Each selected hole becomes a fixed attachment; the ${label} stays where it is.</p>
+    <div style="max-height:300px;overflow:auto">${holes.map((hole,i)=>`<label class="check-label"><input type="checkbox" data-panel-hole="${i}" checked>${esc(hole.fitting)} / ${esc(hole.port)} · board X ${hole.local[0].toFixed(1)}, Y ${hole.local[1].toFixed(1)} mm · gap ${hole.gap.toFixed(1)} mm</label>`).join('')}</div>
+    <p>Drilling positions and fasteners are recorded; the ${label} mesh remains solid.</p>`,[
+    {label:'Cancel',action:closeModal},
+    {label:'Fasten selected holes',primary:true,action:async()=>{
+      const selected=$$('[data-panel-hole]:checked').map(input=>holes[+input.dataset.panelHole]);
+      if(!selected.length)throw new Error('Choose at least one bolt hole.');
+      await mutate(()=>{
+        state.doc.joints||=[];
+        let number=1;
+        for(const hole of selected){
+          while(state.doc.joints.some(j=>j.id===`${panel.id}-screw-${number}`))number++;
+          state.doc.joints.push({id:`${panel.id}-screw-${number++}`,type:'fixed',
+            a:{part:hole.fitting,port:hole.port},
+            b:{part:panel.id,frame:{position_mm:hole.local,axis:hole.axis}},
+            metadata:{hardware:`Screw through ${panel.id}${padded?' backing':''} at local X ${hole.local[0].toFixed(1)}, Y ${hole.local[1].toFixed(1)} mm into ${hole.fitting}/${hole.port}; specify length for ${padded?'backing':'panel'} thickness and gap`}});
+        }
+      });
+      closeModal();toast(`Fastened ${selected.length} ${selected.length===1?'hole':'holes'} on ${panel.id}.`);
+    }}
+  ]);
+}
 
 function jointDialog(id=null){
   const old=id?state.doc.joints?.find(j=>j.id===id):null;

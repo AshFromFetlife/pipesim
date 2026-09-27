@@ -1,7 +1,8 @@
 """Bullet rigid-body dynamics with native articulated joints and SI-unit conversion.
 
 Locked connections collapse into compound rigid bodies. Free connections become
-URDF joints, so Bullet (rather than an animation script) integrates their motion.
+URDF joints, except passive chain links, which use ball constraints and direct
+end-to-end tension to avoid an unstable sequence of tiny link inertias.
 Cylindrical sockets have a translation joint followed by a rotation joint.
 Spherical joints have three bounded rotational coordinates, with inertialess
 intermediate links. Closed loops use Bullet constraints; sliding closures retain
@@ -100,6 +101,7 @@ def _inertia(parts,reference):
 
 class World:
     def __init__(self,assembly,dt=1/240,static=False,*,progress=None):
+        assembly.require_finished('simulation')
         self.assembly=assembly
         self.progress=progress or Progress()
         self.dt=dt
@@ -110,6 +112,7 @@ class World:
         self.part_map={}; self.joint_map={}; self.body_ids=[]; self.constraints=[]
         self.events=[]; self.elapsed=0.; self._mesh_number=0
         self.broken=set(); self.reference_coordinates={}
+        self._chain_initial=copy.deepcopy(assembly.doc.get('state',{}).get('joints',{}))
         try:
             self._configure()
             self._build(assembly)
@@ -191,7 +194,13 @@ class World:
     def _build(self,assembly):
         self._built_parts=0
         self.progress.update('building','Preparing rigid bodies and joints')
-        self._partition_welds=[]; self._loop_welds=[]; self._body_roots={}
+        self._partition_welds=[]; self._loop_welds=[]; self._body_roots={}; self._chain_constraints={}
+        driven={d[key] for d in assembly.doc.get('drives',[]) for key in ('driver','follower')}
+        self._chain_joints=[j for j in assembly.joints if j.get('metadata',{}).get('chain_link')
+            and joint_kind(j)=='spherical' and not (j.get('motor') or j.get('break_torque_nm')
+                or j['id'] in driven)]
+        chain_ids={j['id'] for j in self._chain_joints}
+        self._chain_spans=self._chain_support_spans(assembly,self._chain_joints)
         for anchor in assembly.anchors:
             if set(anchor.get('dofs',['x','y','z','rx','ry','rz'])) != {'x','y','z','rx','ry','rz'}:
                 raise DocumentError('Rigid simulation requires fixed world anchors. For a moving world support, anchor a fixture and attach it with a joint; partial DOFs are supported by FEA only.')
@@ -207,7 +216,7 @@ class World:
         self._group_original={i:i for i in adjacency}
         for j in assembly.joints:
             ga,gb=group_for[j['a']['part']],group_for[j['b']['part']]
-            if ga==gb or joint_kind(j)=='distance' or j['id'] in self.broken: continue
+            if ga==gb or joint_kind(j)=='distance' or j['id'] in self.broken or j['id'] in chain_ids: continue
             edges.append(j)
         # Keep anatomical limits and muscle motors in the articulation tree.
         # In a two-hand grip, the passive hand/bar joint can close the loop;
@@ -303,6 +312,7 @@ class World:
             self.solver_iterations=1000; self.substeps=max(1,math.ceil(self.dt*480-1e-9))
             pb.setPhysicsEngineParameter(numSolverIterations=self.solver_iterations,numSubSteps=self.substeps,physicsClientId=self.client)
         for j in loops: self._loop(j)
+        for j in self._chain_joints: self._loop(j,chain=True)
         # Distance-only links remain separate bodies and exchange equal/opposite forces.
 
     def _load_articulation(self,robot,root,tree,groups,frames,fixed,joint_specs):
@@ -388,9 +398,90 @@ class World:
         pb.changeConstraint(constraint,maxForce=1e9,physicsClientId=self.client)
         self.constraints.append(constraint); self._partition_welds.append((parent,link,child))
 
-    def _loop(self,j):
+    def _chain_support_spans(self,assembly,chain_joints):
+        """Find two-ended chain paths that need direct, tension-only load transfer.
+
+        Bullet's ball constraints keep the lightweight links together visually,
+        but a long sequence of 15 g links cannot reliably carry a heavy frame.
+        The parallel end-to-end force carries that tension without adding mass.
+        """
+        adjacency={}; edges={}; chain_ids={j['id'] for j in chain_joints}
+        def port_on(j,pid):
+            endpoint=j['a'] if j['a']['part']==pid else j['b']
+            return assembly.parts[pid].local_frame(endpoint)[0]
+        for j in chain_joints:
+            a,b=(j[end]['part'] for end in ('a','b'))
+            adjacency.setdefault(a,[]).append(b); adjacency.setdefault(b,[]).append(a)
+            edges[frozenset((a,b))]=j
+        spans=[]; seen=set()
+        for start in adjacency:
+            if start in seen: continue
+            component=set(); queue=[start]
+            for pid in queue:
+                if pid in component: continue
+                component.add(pid); queue.extend(adjacency[pid])
+            seen.update(component)
+            boundaries=[]
+            for anchor in assembly.anchors:
+                if anchor['part'] in component:
+                    boundaries.append((anchor['part'],np.zeros(3),anchor['part'],np.zeros(3)))
+            for j in assembly.joints:
+                if j['id'] in chain_ids: continue
+                inside=[end for end in ('a','b') if j[end]['part'] in component]
+                if len(inside)!=1 or joint_kind(j)=='distance': continue
+                end=inside[0]; other='b' if end=='a' else 'a'
+                chain_part=assembly.parts[j[end]['part']]
+                outer_part=assembly.parts[j[other]['part']]
+                boundaries.append((chain_part.id,chain_part.local_frame(j[end])[0],
+                                   outer_part.id,outer_part.local_frame(j[other])[0]))
+            if len(boundaries)<2: continue
+            ends=[pid for pid in component if len(adjacency[pid])==1]
+            if len(ends)!=2: continue  # The support approximation needs an unbranched line.
+            ordered_links=[ends[0]]
+            while len(ordered_links)<len(component):
+                neighbors=[pid for pid in adjacency[ordered_links[-1]] if pid not in ordered_links]
+                if not neighbors: break
+                ordered_links.append(neighbors[0])
+            if len(ordered_links)!=len(component): continue
+            rank={pid:index for index,pid in enumerate(ordered_links)}
+            def station(boundary):
+                pid,local=boundary[:2];index=rank[pid]
+                previous=ordered_links[index-1] if index else None
+                following=ordered_links[index+1] if index+1<len(ordered_links) else None
+                ports=[assembly.parts[pid].local_frame({'port':name})[0] for name in ('a','b')]
+                if previous:
+                    incoming=port_on(edges[frozenset((previous,pid))],pid)
+                else:
+                    outgoing=port_on(edges[frozenset((pid,following))],pid)
+                    incoming=max(ports,key=lambda point:np.linalg.norm(point-outgoing))
+                if following:
+                    outgoing=port_on(edges[frozenset((pid,following))],pid)
+                else:
+                    outgoing=max(ports,key=lambda point:np.linalg.norm(point-incoming))
+                direction=outgoing-incoming
+                fraction=float(np.dot(local-incoming,direction))/max(float(np.dot(direction,direction)),1e-9)
+                return index+float(np.clip(fraction,0,1))
+            boundaries.sort(key=station)
+            for first,last in zip(boundaries,boundaries[1:]):
+                path=ordered_links[rank[first[0]]:rank[last[0]]+1]
+                length=0.;compliance=0.;rated=True
+                for index,pid in enumerate(path):
+                    incoming=first[1] if index==0 else port_on(edges[frozenset((path[index-1],pid))],pid)
+                    outgoing=last[1] if index==len(path)-1 else port_on(edges[frozenset((pid,path[index+1]))],pid)
+                    segment_mm=float(np.linalg.norm(outgoing-incoming))
+                    length+=segment_mm
+                    rigidity=assembly.parts[pid].definition.get('axial_rigidity_n')
+                    if rigidity is None: rated=False
+                    else: compliance+=(segment_mm/1000)/rigidity
+                if length<1e-6: continue
+                path_joints=[edges[frozenset((left,right))]['id'] for left,right in zip(path,path[1:])]
+                stiffness=1/compliance if rated and compliance>0 else 100000.
+                spans.append((first[2],first[3],last[2],last[3],length/1000,path_joints,stiffness))
+        return spans
+
+    def _loop(self,j,chain=False):
         kind=joint_kind(j)
-        if kind not in ('revolute','spherical') or j.get('limits') or j.get('motor'):
+        if kind not in ('revolute','spherical') or (not chain and (j.get('limits') or j.get('motor'))):
             raise unsupported_loop(self.assembly,j)
         pa,_,axis=self.assembly.joint_frames(j)
         a=self.part_map[j['a']['part']]; b=self.part_map[j['b']['part']]
@@ -402,6 +493,7 @@ class World:
             constraint=pb.createConstraint(a[0],a[1],b[0],b[1],pb.JOINT_POINT2POINT,[0,0,0],la,lb,physicsClientId=self.client)
             pb.changeConstraint(constraint,maxForce=j.get('max_force_n',1000000),physicsClientId=self.client)
             self.constraints.append(constraint)
+            if chain: self._chain_constraints.setdefault(j['id'],[]).append(constraint)
         pb.setCollisionFilterPair(a[0],b[0],a[1],b[1],0,physicsClientId=self.client)
 
     def link_pose(self,body,link):
@@ -445,6 +537,8 @@ class World:
         return state
 
     def set_coordinates(self,coordinates):
+        self._chain_initial.update({j['id']:copy.deepcopy(coordinates[j['id']])
+            for j in self._chain_joints if j['id'] in coordinates})
         for jid,values in coordinates.items():
             if jid not in self.joint_map: continue
             converted={'slide':values.get('slide_mm',0)/1000,'angle':math.radians(values.get('angle_deg',values.get('twist_deg',0)))}
@@ -460,6 +554,8 @@ class World:
 
     def _detach(self,ids):
         """Rebuild changed topology at the current pose, preserving momentum and coordinates."""
+        self._chain_initial.update({jid:values for jid,values in self.snapshot()['joints'].items()
+            if jid in {j['id'] for j in self._chain_joints}})
         updated=copy.deepcopy(self.assembly)
         velocities={}
         for pid,p in updated.parts.items():
@@ -500,6 +596,16 @@ class World:
         for j in self.assembly.joints:
             if j['id'] in self.broken: continue
             mapping=self.joint_map.get(j['id'],{})
+            if j['id'] in self._chain_constraints and j.get('break_force_n'):
+                reactions=[pb.getConstraintState(cid,physicsClientId=self.client)
+                           for cid in self._chain_constraints[j['id']]]
+                force=max([self._span_tensions.get(j['id'],0.),
+                           *(float(np.linalg.norm(reaction[:3])) for reaction in reactions)])
+                if force>j['break_force_n']:
+                    detach.append(j['id'])
+                    self.events.append({'time_s':self.elapsed,'type':'joint_break','joint':j['id'],
+                                        'force_n':float(force)})
+                    continue
             if j.get('type')=='socket' and joint_kind(j)!='fixed':
                 connector=self.assembly.parts[j['a']['part']]; member=self.assembly.parts[j['b']['part']]
                 port=connector.ports[j['a']['port']]
@@ -526,6 +632,12 @@ class World:
     def _force(self,pid,force,world_point):
         body,link,_=self.part_map[pid]
         pb.applyExternalForce(body,link,force,world_point,pb.WORLD_FRAME,physicsClientId=self.client)
+
+    def _point_velocity(self,pid,position):
+        body,link,_=self.part_map[pid]
+        linear,angular=self.part_velocity(pid)
+        center,_=self.link_pose(body,link)
+        return np.array(linear)+np.cross(angular,position-np.array(center))
 
     def _joint_effort(self,key,effort):
         body,index=key
@@ -619,6 +731,17 @@ class World:
             if limit and abs(force)>limit:
                 self.broken.add(j['id']); self.events.append({'time_s':self.elapsed,'type':'joint_break','joint':j['id'],'force_n':float(abs(force))}); continue
             self._force(a,axis*force,pa); self._force(b,-axis*force,pb_)
+        self._span_tensions={}
+        for a,local_a,b,local_b,rest,path_joints,stiffness in self._chain_spans:
+            pa=point(self.part_matrix(a),local_a)/1000
+            pb_=point(self.part_matrix(b),local_b)/1000
+            delta=pb_-pa; length=np.linalg.norm(delta)
+            if length<1e-8: continue
+            axis=delta/length
+            speed=np.dot(self._point_velocity(b,pb_)-self._point_velocity(a,pa),axis)
+            force=max(0.,stiffness*(length-rest)+500*speed)
+            for jid in path_joints: self._span_tensions[jid]=max(self._span_tensions.get(jid,0.),force)
+            self._force(a,axis*force,pa); self._force(b,-axis*force,pb_)
         pb.stepSimulation(physicsClientId=self.client)
         self.elapsed+=self.dt
         self._break_events()
@@ -639,6 +762,15 @@ class World:
                 elif coordinate in ('rx','ry','rz'): values.setdefault('rotation_deg',[0,0,0])[('rx','ry','rz').index(coordinate)]=math.degrees(q)
                 reactions[jid]={'force_n':list(forces[:3]),'moment_nm':list(forces[3:])}
             state[jid]=values
+        for j in self._chain_joints:
+            a,b=(j[end]['part'] for end in ('a','b'))
+            initial=self.assembly.parts[a].matrix[:3,:3].T@self.assembly.parts[b].matrix[:3,:3]
+            current=self.part_matrix(a)[:3,:3].T@self.part_matrix(b)[:3,:3]
+            basis=Rotation.from_euler('xyz',j['a'].get('frame',{}).get('rotation_deg',[0,0,0]),degrees=True).as_matrix()
+            relative=basis.T@current@initial.T@basis
+            delta=Rotation.from_matrix(relative).as_euler('xyz',degrees=True)
+            origin=self._chain_initial.get(j['id'],{}).get('rotation_deg',[0,0,0])
+            state[j['id']]={'rotation_deg':(np.array(origin)+delta).tolist()}
         contacts=[]
         bylink={}
         for pid,(body,link,_) in self.part_map.items(): bylink.setdefault((body,link),[]).append(pid)
@@ -708,12 +840,17 @@ def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=1,progre
     doc=copy.deepcopy(assembly.doc); initial=doc.pop('state',{}).get('joints',{})
     frozen=[]
     neutral=Assembly.from_doc(doc,assembly.base,assembly.library)
+    chain_initial={j['id']:initial[j['id']] for j in neutral.joints
+        if j['id'] in initial and j.get('metadata',{}).get('chain_link')
+        and joint_kind(j)=='spherical' and not (j.get('motor') or j.get('break_torque_nm'))}
     if chain_links_per_body>1:
         simplified,frozen=simplify_chains(neutral,chain_links_per_body)
         # Bake only the frozen coordinates into the compound geometry. The
         # remaining joints retain their original axes, limits and motor targets.
         neutral.apply_coordinates({jid:values for jid,values in initial.items() if jid in frozen})
         neutral=simplified
+    chain_initial={jid:values for jid,values in chain_initial.items() if jid not in frozen}
+    if chain_initial: neutral.apply_coordinates(chain_initial)
     with World(neutral,dt,progress=reporter) as world:
         world.set_coordinates(initial)
         def snapshot():
@@ -749,6 +886,8 @@ def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=1,progre
             angle=math.degrees(math.acos(float(np.clip(original@final,-1,1))))
             if angle>20: warnings.append({'type':'tipped_or_rotated','part':pid,'rotation_deg':angle})
         result={'engine':'PyBullet articulated rigid bodies','input_sha256':assembly.input_hash,'duration_s':world.elapsed,'dt_s':dt,'solver_iterations':world.solver_iterations,'substeps':world.substeps,'fps':fps,'settled':bool(maximum_speed<.02 and max(spins,default=0)<.05),'final_max_speed_m_s':maximum_speed,'final_max_angular_speed_rad_s':max(spins,default=0),'frames':frames,'events':world.events+warnings,'chain_simplification':{'links_per_body':chain_links_per_body,'frozen_joints':frozen},'limitations':['Rigid materials; deformation is computed separately by frame FEA','Spherical joints use bounded XYZ rotational coordinates; Euler singularities and transient solver limit errors are possible','Topology changes preserve current poses and velocities; angular axes rebase at the break pose','Unknown strength data is not assigned a fracture threshold']}
+        if world._chain_joints:
+            result['limitations'].append('Flexible segments use ball constraints without angular stops; two-ended lines carry tension through an approximate end-to-end spring, and individual segment reactions are unavailable')
         if frozen: result['limitations'].append('Chain simplification freezes internal joints at the starting pose: bending, contact attribution and joint reactions are approximate; frozen joints have no reaction measurement')
         reporter.update('complete','Simulation complete',force=True,simulated_s=duration,duration_s=duration,percent=100)
         return result

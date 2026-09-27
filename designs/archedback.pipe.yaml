@@ -1,0 +1,765 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Untitled creation
+parts:
+- id: tc125c-1-copy
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 332.44498813
+    - 163.11999999999992
+    - 518.1148635300001
+    rotation_deg:
+    - 0
+    - 0.01909122
+    - 180
+- id: tc125c-1-copy-2
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 333.5
+    - 230
+    - 413.5
+    rotation_deg:
+    - 180
+    - 0
+    - 180
+- id: tc125c-1-copy-3
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 333.5
+    - 310
+    - 500
+    rotation_deg:
+    - 180
+    - 0
+    - 180
+- id: tc125c-1-copy-4
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 333.25069069
+    - 423.11999999999983
+    - 916.6210282200001
+    rotation_deg:
+    - 180
+    - -0.1849248
+    - 180
+- id: tc125c-1-copy-5
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 333.5
+    - 500
+    - 603.5
+    rotation_deg:
+    - 180
+    - 0
+    - 180
+- id: tc125c-1-copy-6
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 333.32293226
+    - 623.1199999999998
+    - 966.6206168500003
+    rotation_deg:
+    - -180
+    - -0.16864154
+    - -180
+- id: tc125c-1-copy-7
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 333.5
+    - 700
+    - 548.5
+    rotation_deg:
+    - 180
+    - 0
+    - 180
+- id: tc125c-1-copy-8
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 332.62081772
+    - 823.1199999799999
+    - 831.6256901900001
+    rotation_deg:
+    - 179.99999999
+    - -0.07086551
+    - -180
+- id: tc125c-1-copy-9
+  catalog: tubeclamp.TC125C
+  parameters: {}
+  pose:
+    position_mm:
+    - 332.43622909
+    - 923.1199999899999
+    - 776.6294374
+    rotation_deg:
+    - 179.99999999
+    - -0.01680575
+    - -179.99999744
+- id: tc161c-1
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290.000001
+    - 163.11999999999992
+    - 653.12000184
+    rotation_deg:
+    - 89.99999701
+    - -89.98090894
+    - -179.99999701
+- id: tc161c-1-copy
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 291.1
+    - 230
+    - 305
+    rotation_deg:
+    - -90
+    - -90
+    - 0
+- id: tc161c-1-copy-2
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290
+    - 333.11999999999983
+    - 653.1200018500001
+    rotation_deg:
+    - -90
+    - -90
+    - 0
+- id: tc161c-1-copy-3
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290.00000285
+    - 423.11999999999983
+    - 653.1200020800001
+    rotation_deg:
+    - -89.99999998
+    - -89.81507687
+    - -2.0e-08
+- id: tc161c-1-copy-4
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290
+    - 523.1199999999998
+    - 653.1200018500001
+    rotation_deg:
+    - -90
+    - -90
+    - 0
+- id: tc161c-1-copy-5
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290.0000022
+    - 623.1199999999998
+    - 653.1200019600001
+    rotation_deg:
+    - -90
+    - -89.83135998
+    - 0
+- id: tc161c-1-copy-6
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 291.1
+    - 700
+    - 305
+    rotation_deg:
+    - -90
+    - -90
+    - 0
+- id: tc161c-1-copy-7
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290.00000157
+    - 823.1200000199999
+    - 653.12000184
+    rotation_deg:
+    - -89.9999953
+    - -89.92913513
+    - -4.7e-06
+- id: tc161c-1-copy-8
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290
+    - 923.1200000099999
+    - 653.1200018500001
+    rotation_deg:
+    - -89.99998869
+    - -89.98319424
+    - -1.131e-05
+- id: tc161c-1-copy-9
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 460
+    - 1010
+    - 100
+    rotation_deg:
+    - -90
+    - -90
+    - 0
+- id: tc161c-1-copy-10
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 460
+    - 1060
+    - 100
+    rotation_deg:
+    - -90
+    - -90
+    - 0
+- id: tc128c-1
+  catalog: tubeclamp.TC128C
+  parameters: {}
+  pose:
+    position_mm:
+    - 290
+    - 39.99999999999993
+    - 653.12
+    rotation_deg:
+    - -90
+    - 0
+    - 0
+- id: tc128c-2
+  catalog: tubeclamp.TC128C
+  parameters: {}
+  pose:
+    position_mm:
+    - 300
+    - 30
+    - 40
+    rotation_deg:
+    - 0
+    - 0
+    - 90
+joints: []
+anchors: []
+draft_subassemblies:
+- id: draft-1
+  runs:
+  - id: tube-c-1
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -298.94498998967435
+    - 163.11999999999992
+    - 518.1037011745246
+    end_mm:
+    - 298.94498998967435
+    - 163.11999999999992
+    - 518.1037011745246
+    attachments:
+    - connector: tc125c-1-copy
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -300
+    - 230
+    - 413.5
+    end_mm:
+    - 300
+    - 230
+    - 413.5
+    attachments:
+    - connector: tc125c-1-copy-2
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy-2
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -300
+    - 310
+    - 500
+    end_mm:
+    - 300
+    - 310
+    - 500
+    attachments:
+    - connector: tc125c-1-copy-3
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy-3
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -299.7508651755573
+    - 423.11999999999983
+    - 916.7291508443378
+    end_mm:
+    - 299.7508651755573
+    - 423.11999999999983
+    - 916.7291508443378
+    attachments:
+    - connector: tc125c-1-copy-4
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy-4
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -300
+    - 500
+    - 603.5
+    end_mm:
+    - 300
+    - 500
+    - 603.5
+    attachments:
+    - connector: tc125c-1-copy-5
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy-5
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -299.82307737033744
+    - 623.1199999999998
+    - 966.7192189369392
+    end_mm:
+    - 299.82307737033744
+    - 623.1199999999998
+    - 966.7192189369392
+    attachments:
+    - connector: tc125c-1-copy-6
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy-6
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -300
+    - 700
+    - 548.5
+    end_mm:
+    - 300
+    - 700
+    - 548.5
+    attachments:
+    - connector: tc125c-1-copy-7
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy-7
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -299.12084334355154
+    - 823.1199999799999
+    - 831.6671242013689
+    end_mm:
+    - 299.12084334355154
+    - 823.1199999799999
+    - 831.6671242013689
+    attachments:
+    - connector: tc125c-1-copy-8
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-1-copy-8
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -298.9362305310709
+    - 923.1199984932056
+    - 776.6392634748298
+    end_mm:
+    - 298.9362305310709
+    - 923.1199984932056
+    - 776.6392634748298
+    attachments:
+    - connector: tc125c-1-copy-9
+      port: x
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-2
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 290.00000000000006
+    - 1073.12
+    - 653.1200018499999
+    end_mm:
+    - 289.99999999999994
+    - 73.1199999999998
+    - 653.1200018500001
+    attachments:
+    - connector: tc161c-1-copy-2
+      port: through
+    - connector: tc161c-1-copy-3
+      port: through
+    - connector: tc161c-1-copy-4
+      port: through
+    - connector: tc161c-1-copy-5
+      port: through
+    - connector: tc161c-1-copy-8
+      port: through
+    - connector: tc161c-1-copy-7
+      port: through
+    - connector: tc161c-1
+      port: through
+    - connector: tc128c-1
+      port: z
+      end: end
+      insertion_mm: 29.680000000000003
+    roll_deg: 90
+  - id: tube-c-2-copy
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 630
+    - -330
+    - 50
+    end_mm:
+    - 630
+    - -330
+    - 1050
+    attachments: []
+    roll_deg: 0
+  - id: tube-c-2-copy-2
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 163.11999999999992
+    - 204.62152000000003
+    end_mm:
+    - 333.5
+    - 163.1199999999999
+    - 354.62152000000003
+    attachments:
+    - connector: tc125c-1-copy
+      port: z
+      end: end
+      insertion_mm: 30
+    - connector: tc161c-1
+      port: cross
+    roll_deg: 4.070458024802883e-47
+  - id: tube-c-2-copy-3
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 230.00000000000006
+    - 80
+    end_mm:
+    - 333.5
+    - 230.00000000000003
+    - 230
+    attachments:
+    - connector: tc125c-1-copy-2
+      port: z
+      end: end
+      insertion_mm: 30
+    - connector: tc161c-1-copy
+      port: cross
+    roll_deg: 8.140916049605766e-47
+  - id: tube-c-2-copy-4
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 423.11999999999983
+    - 533.1200018500001
+    end_mm:
+    - 333.5
+    - 423.11999999999983
+    - 833.1200018500001
+    attachments:
+    - connector: tc125c-1-copy-4
+      port: z
+      end: end
+      insertion_mm: 30
+    - connector: tc161c-1-copy-3
+      port: cross
+    roll_deg: 0
+  - id: tube-c-2-copy-5
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 500
+    - 270
+    end_mm:
+    - 333.5
+    - 500
+    - 670
+    attachments:
+    - connector: tc125c-1-copy-5
+      port: z
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-2-copy-6
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 623.1199999999999
+    - 633.12000185
+    end_mm:
+    - 333.5
+    - 623.1199999999999
+    - 983.1200018499999
+    attachments:
+    - connector: tc125c-1-copy-6
+      port: z
+      end: end
+      insertion_mm: 30
+    - connector: tc161c-1-copy-5
+      port: cross
+    roll_deg: 0
+  - id: tube-c-2-copy-7
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 700
+    - 215
+    end_mm:
+    - 333.5
+    - 700
+    - 465
+    attachments:
+    - connector: tc125c-1-copy-7
+      port: z
+      end: end
+      insertion_mm: 30
+    - connector: tc161c-1-copy-6
+      port: cross
+    roll_deg: 0
+  - id: tube-c-2-copy-8
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 823.12
+    - 498.12152000000003
+    end_mm:
+    - 333.5
+    - 823.12
+    - 698.12152
+    attachments:
+    - connector: tc125c-1-copy-8
+      port: z
+      end: end
+      insertion_mm: 30
+    - connector: tc161c-1-copy-7
+      port: cross
+    roll_deg: 0
+  - id: tube-c-2-copy-9
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 923.1199999999998
+    - 443.12000185000005
+    end_mm:
+    - 333.5
+    - 923.1199999999998
+    - 593.1200018500001
+    attachments:
+    - connector: tc125c-1-copy-9
+      port: z
+      end: end
+      insertion_mm: 30
+    - connector: tc161c-1-copy-8
+      port: cross
+    roll_deg: 0
+  - id: tube-c-2-copy-10
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 333.5
+    - 310
+    - 166.50000000000006
+    end_mm:
+    - 333.5
+    - 310
+    - 366.50000000000006
+    attachments:
+    - connector: tc125c-1-copy-3
+      port: z
+      end: end
+      insertion_mm: 30
+    roll_deg: 0
+  - id: tube-c-2-copy-11
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 730
+    - 1150
+    - 50
+    end_mm:
+    - 730
+    - 1150
+    - 350
+    attachments: []
+    roll_deg: 0
+  - id: tube-c-2-copy-12
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 730
+    - 1250
+    - 50
+    end_mm:
+    - 730
+    - 1250
+    - 350
+    attachments: []
+    roll_deg: 0
+  - id: tube-c-2-copy-13
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 350.00000000000006
+    - 970
+    - 39.999999999999886
+    end_mm:
+    - 349.99999999999994
+    - -30
+    - 40.000000000000114
+    attachments:
+    - connector: tc128c-2
+      port: x
+      end: end
+      insertion_mm: 29.680000000000003
+    roll_deg: 90
+  - id: tube-c-2-copy-14
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -266.88
+    - 30.000000000000007
+    - 40
+    end_mm:
+    - 266.88
+    - 30.000000000000007
+    - 40
+    attachments:
+    - connector: tc128c-2
+      port: y
+      end: end
+      insertion_mm: 29.680000000000003
+    roll_deg: 90
+  - id: tube-c-2-copy-15
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 290
+    - 40.00000000000007
+    - 20
+    end_mm:
+    - 290
+    - 39.99999999999994
+    - 620
+    attachments:
+    - connector: tc128c-1
+      port: y
+      end: end
+      insertion_mm: 29.680000000000003
+    - connector: tc128c-2
+      port: z
+      end: start
+      insertion_mm: 29.680000000000003
+    roll_deg: 0
+  mirrors:
+  - id: mirror-1
+    axis: x
+    offset_mm: 0
+    run_modes:
+      tube-c-1: centered
+      tube-c-1-copy: centered
+      tube-c-1-copy-2: centered
+      tube-c-1-copy-3: centered
+      tube-c-1-copy-4: centered
+      tube-c-1-copy-5: centered
+      tube-c-1-copy-6: centered
+      tube-c-1-copy-7: centered
+      tube-c-1-copy-8: centered
+      tube-c-2: free
+      tube-c-2-copy-14: centered
+  mirror_parts:
+  - tc161c-1
+  - tc128c-1
+  - tc128c-2
+objects: []
+results: {}

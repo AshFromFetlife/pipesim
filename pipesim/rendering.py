@@ -85,6 +85,7 @@ class Renderer:
     def __exit__(self,*args): self.close()
 
 def render_image(assembly,path,**options):
+    assembly.require_finished('rendering')
     path=Path(path); path.parent.mkdir(parents=True,exist_ok=True)
     with Renderer(assembly,**options) as renderer:
         pic=renderer.frame()

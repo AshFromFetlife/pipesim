@@ -2,8 +2,6 @@
 
 A local design studio and command-line toolchain for modular tube structures. Author a design in YAML or JSON, edit it in 3D, check its connections and assembly order, simulate its motion, calculate beam response, and export illustrated build instructions.
 
-![Workbench rendered by PipeSim](docs/media/workbench.png)
-
 ![Workbench rendered by PipeSim](Animation1.webp)
 
 ## Run it
@@ -80,7 +78,7 @@ The build planner checks a stated class of straight insertion paths and gravity-
 | [Pull-up](examples/human-pull-up.pipe.yaml) / [relaxed comparison](examples/human-pull-up-relaxed.pipe.yaml) | 59-part Tubeclamp cage, two hand grips, held upper body and passive swinging legs |
 | [Contact load](examples/contact-load.pipe.yaml) | Free load falling onto a structural platform |
 | [Caster platform](examples/caster-platform.pipe.yaml) | Reusable three-body wheel/fork/swivel objects |
-| [Chain](examples/chain.pipe.yaml) | Set length, move as one object, pose links, attach either end and simulate flexible motion |
+| [Chain](examples/chain.pipe.yaml) | Set length, move as one object, pose segments, attach either end and simulate flexible motion; rope and webbing profiles are also available in the library |
 | [Cantilever](examples/cantilever.pipe.yaml) | Analytical beam benchmark |
 | [Material comparison](examples/material-comparison.pipe.yaml) | Steel tube, aluminium profile and sourced timber |
 

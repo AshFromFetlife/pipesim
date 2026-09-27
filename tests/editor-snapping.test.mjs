@@ -85,7 +85,11 @@ test('invalid and unavailable saved preferences fall back safely',()=>{
   assert.deepEqual(loadSnapDefaults({getItem:()=>'{bad json'}),DEFAULT_SNAP_SETTINGS);
   assert.throws(()=>validateSnapSettings({...DEFAULT_SNAP_SETTINGS,rotationDeg:0}));
   assert.throws(()=>validateSnapSettings({...DEFAULT_SNAP_SETTINGS,translationMm:NaN}));
+  assert.throws(()=>validateSnapSettings({...DEFAULT_SNAP_SETTINGS,keyboardMoveMm:0}));
+  assert.throws(()=>validateSnapSettings({...DEFAULT_SNAP_SETTINGS,keyboardRotateDeg:181}));
   let saved;const storage={setItem:(key,value)=>saved=value,getItem:()=>saved};
   saveSnapDefaults(storage,{...DEFAULT_SNAP_SETTINGS,translationMm:25,rotationDeg:90});
   assert.equal(loadSnapDefaults(storage).translationMm,25);
+  saved=JSON.stringify({gridEnabled:true,translationMm:25,rotationDeg:90,connectionsEnabled:true,connectionPixels:30,alignEnabled:true,alignmentDeg:6});
+  assert.equal(loadSnapDefaults(storage).keyboardMoveMm,DEFAULT_SNAP_SETTINGS.keyboardMoveMm);
 });

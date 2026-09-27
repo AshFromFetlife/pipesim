@@ -39,6 +39,7 @@ def beam_stiffness(length,youngs,shear,section):
     return k
 
 def analyse(assembly,include_self_weight=True):
+    assembly.require_finished('structural analysis')
     members={pid:p for pid,p in assembly.parts.items() if p.kind=='member'}
     if not members:
         return {'status':'no_members','input_sha256':assembly.input_hash,'members':[],'message':'Add a structural member with a material and section definition'}

@@ -29,6 +29,64 @@
         "type": "object"
       }
     },
+    "draft_subassemblies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "mirror_parts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "mirrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "axis": {"enum": ["x", "y", "z"]},
+                "offset_mm": {"type": "number"},
+                "run_modes": {"type": "object", "additionalProperties": {"enum": ["centered", "in_plane", "free"]}}
+              },
+              "required": ["id", "axis", "offset_mm"],
+              "additionalProperties": false
+            }
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "catalog": {"type": "string", "minLength": 1},
+                "parameters": {"type": "object"},
+                "start_mm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "end_mm": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "roll_deg": {"type": "number"},
+                "locked_length_mm": {"type": "number", "exclusiveMinimum": 0},
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "connector": {"type": "string", "minLength": 1},
+                      "port": {"type": "string", "minLength": 1},
+                      "end": {"enum": ["start", "end"]},
+                      "insertion_mm": {"type": "number", "minimum": 0},
+                      "at_mm": {"type": "number", "minimum": 0}
+                    },
+                    "required": ["connector", "port"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["id", "catalog", "start_mm", "end_mm"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["id", "runs"],
+        "additionalProperties": false
+      }
+    },
     "parts": {
       "type": "array",
       "items": {
@@ -622,6 +680,17 @@
             "type": "string",
             "minLength": 1
           },
+          "symmetry": {
+            "type": "object",
+            "properties": {
+              "axis": {"enum": ["x", "y"]},
+              "offset_mm": {"type": "number"},
+              "line_offset_mm": {"type": "number"},
+              "rotation_deg": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+            },
+            "required": ["axis", "offset_mm", "line_offset_mm", "rotation_deg"],
+            "additionalProperties": false
+          },
           "parameters": {
             "type": "object"
           },
@@ -1205,6 +1274,17 @@
               "template": {
                 "type": "string",
                 "minLength": 1
+              },
+              "symmetry": {
+                "type": "object",
+                "properties": {
+                  "axis": {"enum": ["x", "y"]},
+                  "offset_mm": {"type": "number"},
+                  "line_offset_mm": {"type": "number"},
+                  "rotation_deg": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+                },
+                "required": ["axis", "offset_mm", "line_offset_mm", "rotation_deg"],
+                "additionalProperties": false
               },
               "parameters": {
                 "type": "object"

@@ -6,6 +6,7 @@ from .document import Assembly, DocumentError
 
 def delete_parts(assembly, members=None, object_id=None):
     direct={p['id'] for p in assembly.doc['parts']}
+    draft_ids={run['id'] for group in assembly.doc.get('draft_subassemblies',[]) for run in group['runs']}
     owners={o['id']:{pid for pid in assembly.parts if pid not in direct and pid.startswith(o['id']+'/')}
             for o in assembly.doc.get('objects',[])}
     if object_id is not None:
@@ -15,7 +16,7 @@ def delete_parts(assembly, members=None, object_id=None):
         if not isinstance(members,list) or not members or not all(isinstance(p,str) for p in members):
             raise DocumentError('Select parts to delete')
         members=set(members)
-    if not members<=assembly.parts.keys(): raise DocumentError('A selected part no longer exists')
+    if not members<=assembly.parts.keys()|draft_ids: raise DocumentError('A selected part no longer exists')
     for oid,owned in owners.items():
         if owned&members and not owned<=members:
             raise DocumentError(f'Expand {oid} before deleting individual parts, or delete the whole object')
@@ -28,6 +29,25 @@ def delete_parts(assembly, members=None, object_id=None):
         from .posing import _editable
         doc=copy.deepcopy(_editable(assembly,members).doc)
     doc['parts']=[p for p in doc['parts'] if p['id'] not in members]
+    from .drafting import _layout
+    for group in doc.get('draft_subassemblies', []):
+        for run in group['runs']:
+            if run['id'] in members: continue
+            if any(a['connector'] in members for a in run.get('attachments', [])):
+                # Preserve the displayed span before its bound fitting vanishes.
+                layout=_layout(assembly,run)
+                run['start_mm']=layout['start'].tolist()
+                run['end_mm']=layout['end'].tolist()
+                run['attachments']=[a for a in run['attachments'] if a['connector'] not in members]
+        group['runs']=[run for run in group['runs'] if run['id'] not in members]
+        for plane in group.get('mirrors', []):
+            if 'run_modes' in plane:
+                plane['run_modes']={rid:mode for rid,mode in plane['run_modes'].items() if rid not in members}
+        if 'mirror_parts' in group:
+            group['mirror_parts']=[pid for pid in group['mirror_parts'] if pid not in members]
+    if 'draft_subassemblies' in doc:
+        doc['draft_subassemblies']=[group for group in doc['draft_subassemblies'] if group['runs']]
+        if not doc['draft_subassemblies']: doc.pop('draft_subassemblies')
     doc['objects']=[o for o in doc.get('objects',[]) if o['id'] not in removed_objects]
     doc['joints']=[j for j in doc.get('joints',[]) if j['id'] not in removed_joints]
     for key in ('anchors','loads'):

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from datetime import datetime,timezone
 from .document import Assembly, Library, DocumentError, read, write, plain
+from .human_poses import HUMAN_POSES
 
 def parser():
     p=argparse.ArgumentParser(prog='pipesim',description='Create, inspect, simulate and build modular 3D pipe structures.')
@@ -40,7 +41,7 @@ def parser():
         if name=='fit': command.add_argument('--human'); command.add_argument('--target',nargs=3,type=float); command.add_argument('--hand',choices=['left','right'],default='right'); command.add_argument('--seat')
         if name=='snapshot': command.add_argument('--simulation'); command.add_argument('--frame',type=int,default=-1)
     human=sub.add_parser('human',help='Generate an editable 19-segment humanoid design')
-    human.add_argument('--height',type=float,default=1750); human.add_argument('--mass',type=float,default=75); human.add_argument('--pose',choices=['standing','seated','crouching','pull-up'],default='standing'); human.add_argument('--output','-o',required=True)
+    human.add_argument('--height',type=float,default=1750); human.add_argument('--mass',type=float,default=75); human.add_argument('--pose',choices=HUMAN_POSES,default='standing'); human.add_argument('--output','-o',required=True)
     human.add_argument('--hold-joints',nargs='+',help='Anatomical joint names or groups: arms, torso, upper_body, legs')
     human.add_argument('--hold-pose',action='store_true',help='Hold all anatomical joints with bounded torque')
     human.add_argument('--strength-scale',type=float,default=1)
@@ -74,6 +75,8 @@ def main(argv=None):
             print(json.dumps(result,indent=2)); return 0
         else:
             assembly=Assembly.load(args.design)
+            if args.command not in ('bundle','expand'):
+                assembly.require_finished(args.command)
             if args.command=='motion-check':
                 from .motion import check_motion
                 result=check_motion(assembly,args.joint,args.samples)

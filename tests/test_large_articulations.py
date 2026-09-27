@@ -43,8 +43,33 @@ def test_long_chain_keeps_every_joint_readable_and_conserves_mass(factory,blank,
         mass=sum(pb.getDynamicsInfo(b,i,physicsClientId=world.client)[0]
                  for b in world.body_ids for i in range(-1,pb.getNumJoints(b,physicsClientId=world.client)))
         expected=sum(p.mass for p in assembly.parts.values())-assembly.parts['chain/link-1'].mass
-        assert mass==pytest.approx(expected+2e-6*len(assembly.joints),abs=1e-8)
+        # The non-chain sling still has two tiny spherical-axis helpers.
+        assert mass==pytest.approx(expected+2e-6,abs=1e-8)
+        assert len(world._chain_joints)==count-1
     assert assembly.doc==original
+
+
+def test_heavy_load_on_chain_with_external_top_attachment_stays_supported(factory,blank):
+    assembly=hanging_chain(factory,blank,25)
+    doc=copy.deepcopy(assembly.doc)
+    top=assembly.parts['chain/link-1'].frame({'port':'b'})[0]
+    doc['anchors']=[{'part':'fixture','surface':'ceiling'}]
+    doc['parts'].append({'id':'fixture','catalog':'generic.box',
+        'parameters':{'width_mm':50,'depth_mm':50,'height_mm':50,'mass_kg':5},
+        'pose':{'position_mm':top.tolist()}})
+    doc['joints'].append({'id':'top-hook','type':'spherical',
+        'a':{'part':'fixture'},'b':{'part':'chain/link-1','port':'b'}})
+    assembly=factory(doc)
+    initial=np.array(assembly.parts['load'].matrix[:3,3])
+    result=physics.simulate(assembly,1,20)
+    positions=np.array([frame['parts']['load']['position_mm'] for frame in result['frames']])
+    speeds=np.linalg.norm(np.diff(positions,axis=0)*20/1000,axis=1)
+    assert max(speeds)<10
+    assert max(np.linalg.norm(positions-initial,axis=1))<1000
+    assert set(result['frames'][-1]['joints'])=={j['id'] for j in assembly.joints}
+    doc['joints']=[j for j in doc['joints'] if j['id']!='top-hook']
+    loose=physics.simulate(factory(doc),.7,10)
+    assert loose['frames'][-1]['parts']['load']['position_mm'][2]<initial[2]-1500
 
 
 def test_partitioned_chain_initial_coordinates_match_the_editor(factory,blank,monkeypatch):

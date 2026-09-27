@@ -28,14 +28,15 @@ def test_simplification_conserves_mass_pose_and_individual_part_ids(factory,blan
     assert assembly.doc==original
     assert all(j['type']=='spherical' for j in assembly.joints)
     with World(simplified) as world:
-        assert len(world.joint_map)==3
+        assert len(world._chain_joints)==3
+        assert len(world.constraints)>=3
         assert world.part_map['chain/link-1'][:2]!=world.part_map['chain/link-2'][:2]
         groups={}
         for pid,(body,link,_) in world.part_map.items(): groups.setdefault((body,link),[]).append(pid)
         assert max(map(len,groups.values()))==4
         mass=sum(pb.getDynamicsInfo(body,i,physicsClientId=world.client)[0]
                  for body in world.body_ids for i in range(-1,pb.getNumJoints(body,physicsClientId=world.client)))
-        assert mass==pytest.approx(sum(p.mass for p in assembly.parts.values())-assembly.parts['chain/link-1'].mass+6e-6)
+        assert mass==pytest.approx(sum(p.mass for p in assembly.parts.values())-assembly.parts['chain/link-1'].mass)
         for pid,pose in world.snapshot()['parts'].items():
             assert transform(pose)==pytest.approx(assembly.parts[pid].matrix,abs=.001)
 

@@ -124,6 +124,18 @@ def _scale_shape(shape, scale):
     for child in shape.get('collision_geometry',[]): _scale_shape(child,scale)
 
 
+def _scale_human_girth(shape, region, ratio):
+    if region in ('pelvis','lumbar','thorax') and shape['type']=='box':
+        shape['size_mm'][:2]=[value*ratio for value in shape['size_mm'][:2]]
+    elif region in ('upper_arm','forearm','thigh','shin') and shape['type']=='capsule':
+        old_radius=shape['radius_mm']
+        shape['radius_mm']=old_radius*ratio
+        # The joint-centre distance is skeletal; changing girth must not
+        # lengthen the limb or move either joint.
+        shape['length_mm']=max(1,shape['length_mm']-1.8*(shape['radius_mm']-old_radius))
+    for child in shape.get('collision_geometry',[]): _scale_human_girth(child,region,ratio)
+
+
 def object_components(instance,library=None):
     """Resolve parameter deltas around the saved, edited component definitions."""
     components=copy.deepcopy(instance['components'])
@@ -135,13 +147,15 @@ def object_components(instance,library=None):
         return generate(parameters,library,components)
     if instance['template']!='human':
         raise DocumentError('Edit the saved components of this object to change its dimensions')
-    from .human import humanoid
+    from .human import body_girth_scales, humanoid
     changed={k for k in set(parameters)|set(reference) if parameters.get(k)!=reference.get(k)}
     supported={'mass_kg','stature_mm','strength_scale','hold_pose','hold_joints','joint_damping_nms_rad','grip_diameter_mm'}
     if changed-supported: raise DocumentError('This human has an edited pose. Pose its limbs or expand its parts to edit '+', '.join(sorted(changed-supported)))
     generated=humanoid(**parameters)  # Validate human controls and get defaults for newly held joints.
     size=parameters.get('stature_mm',1750)/reference.get('stature_mm',1750)
     mass=parameters.get('mass_kg',75)/reference.get('mass_kg',75)
+    new_girth=body_girth_scales(parameters.get('stature_mm',1750),parameters.get('mass_kg',75))
+    old_girth=body_girth_scales(reference.get('stature_mm',1750),reference.get('mass_kg',75))
     effort=parameters.get('strength_scale',1)/reference.get('strength_scale',1)*mass
     for part in components['parts']:
         if part.get('catalog') and library is not None and changed&{'stature_mm','mass_kg','grip_diameter_mm'}:
@@ -158,6 +172,11 @@ def object_components(instance,library=None):
             for shape in part.get('body',{}).get('geometry',[]): _scale_shape(shape,size)
             for port in part.get('body',{}).get('ports',{}).values():
                 if 'position_mm' in port: port['position_mm']=[v*size for v in port['position_mm']]
+        region=part['id'].split('_',1)[-1] if part['id'].startswith(('left_','right_')) else part['id']
+        if region in new_girth:
+            ratio=new_girth[region]/old_girth[region]
+            if ratio!=1:
+                for shape in part.get('body',{}).get('geometry',[]): _scale_human_girth(shape,region,ratio)
         for properties in (part,part.get('body',{})):
             if 'mass_kg' in properties: properties['mass_kg']*=mass
             if 'center_of_mass_mm' in properties: properties['center_of_mass_mm']=[v*size for v in properties['center_of_mass_mm']]
@@ -201,6 +220,12 @@ def move_object(assembly, object_id, target, *, preview=False):
     from .snapping import move_document
     instance=next((o for o in assembly.doc.get('objects',[]) if o['id']==object_id),None)
     if instance is None: raise DocumentError('Select a grouped object to move as a whole')
+    limited=False
+    if instance.get('symmetry'):
+        from .human_symmetry import project_object_pose
+        projected=project_object_pose(target,instance['symmetry'])
+        limited=not np.allclose(transform(projected),transform(target),atol=1e-7,rtol=0)
+        target=projected
     delta=transform(target)@np.linalg.inv(transform(instance.get('pose')))
     members={pid for pid in assembly.parts if pid.startswith(object_id+'/')}
     poses={pid:pose_of(delta@assembly.parts[pid].matrix) for pid in members
@@ -212,7 +237,8 @@ def move_object(assembly, object_id, target, *, preview=False):
         try: _movement_coordinates(assembly,candidate)
         except DocumentError as exc:
             raise DocumentError(f'{exc}. Detach or loosen the attachment in Connections to structure before moving the whole object.') from exc
-        return {'poses':poses,'moved':list(poses),'limited':False,'message':'Whole object moved; limb pose preserved'}
+        return {'poses':poses,'moved':list(poses),'limited':limited,
+                'message':'The human stays on its mirror line' if limited else 'Whole object moved; limb pose preserved'}
     document=copy.deepcopy(assembly.doc)
     if poses:
         try:
@@ -225,13 +251,14 @@ def move_object(assembly, object_id, target, *, preview=False):
                 _movement_coordinates(assembly,candidate)
                 next(o for o in document['objects'] if o['id']==object_id)['pose']=copy.deepcopy(target)
                 document.pop('results',None);document.pop('build_plan',None)
-                return {'document':document,'poses':poses,'moved':list(poses),'limited':False,'message':'Whole chain moved; shape preserved'}
+                return {'document':document,'poses':poses,'moved':list(poses),'limited':limited,'message':'Whole chain moved; shape preserved'}
             editable=_editable(assembly,members)
             document=move_document(editable,poses)
         except DocumentError as exc:
             raise DocumentError(f'{exc}. Detach or loosen the attachment in Connections to structure before moving the whole object.') from exc
         document=restore_objects(assembly.doc,document,assembly.base,assembly.library,{object_id:target})
-    return {'document':document,'poses':poses,'moved':list(poses),'limited':False,'message':'Whole object moved; limb pose preserved'}
+    return {'document':document,'poses':poses,'moved':list(poses),'limited':limited,
+            'message':'The human stays on its mirror line' if limited else 'Whole object moved; limb pose preserved'}
 
 
 def update_object_parameters(assembly, object_id, parameters):
@@ -314,6 +341,19 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
     if not part_id.startswith(object_id+'/') or target is None or target['part'] not in assembly.parts or target['part'].startswith(object_id+'/'):
         raise DocumentError('Choose a body part and a separate part of the structure')
     if kind not in ('fixed','revolute','spherical'): raise DocumentError('Choose fixed, revolute or spherical for this attachment')
+    surface_attachment='surface_hint_mm' in target
+    if surface_attachment:
+        if not chain or assembly.parts[target['part']].kind!='human':
+            raise DocumentError('A surface attachment needs a flexible link and a human body part')
+        from .geometry import mesh_for_part
+        from trimesh.proximity import closest_point_naive
+        hint=np.asarray(target['surface_hint_mm'],float)
+        if hint.shape!=(3,) or not np.isfinite(hint).all() or np.max(np.abs(hint))>10000:
+            raise DocumentError('Surface position must contain three finite local coordinates within 10000 mm')
+        mesh=mesh_for_part(assembly.parts[target['part']])
+        nearest,_,face=closest_point_naive(mesh,hint[None,:])
+        normal=mesh.face_normals[face[0]]
+        target={'part':target['part'],'frame':{'position_mm':nearest[0].tolist(),'axis':normal.tolist()}}
     if chain and (any(a['part'].startswith(object_id+'/') for a in assembly.anchors) or
                   any(j['a']['part'].startswith(object_id+'/')!=j['b']['part'].startswith(object_id+'/') for j in assembly.joints)):
         # Attaching the other end is an explicit request to shape the chain.
@@ -351,7 +391,9 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
         jid=object_id+'-'+part_id.rsplit('/',1)[-1]+'-attachment';base=jid;n=2;existing={j['id'] for j in assembly.joints}
         while jid in existing: jid=base+'-'+str(n);n+=1
         joint={'id':jid,'type':kind,'a':copy.deepcopy(target),'b':source,
-               'metadata':{'hardware':'Assumed chain end attachment; choose a hook or shackle and its limits' if chain else 'Assumed body attachment; choose grip strength and limits for the intended task'}}
+               'metadata':{'hardware':('Idealized no-slip flexible-line attachment to a body surface; specify real straps, padding or hardware and release strength' if surface_attachment
+                                       else 'Assumed chain end attachment; choose a hook or shackle and its limits' if chain
+                                       else 'Assumed body attachment; choose grip strength and limits for the intended task')}}
     doc=copy.deepcopy(assembly.doc)
     if any(j['id']==joint['id'] for j in assembly.joints): raise DocumentError('This attachment is already connected')
     doc.setdefault('joints',[]).append(joint)

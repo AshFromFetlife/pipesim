@@ -130,6 +130,45 @@ def substitute(value, params):
     if isinstance(value, list): return [substitute(v,params) for v in value]
     return value
 
+
+def resolve_panel_layers(definition, params):
+    """Build a board and pad around one panel origin so board workflows still apply."""
+    layers=definition.get('panel_layers')
+    if layers is None: return
+    if definition.get('kind')!='panel': raise DocumentError('Layered padding requires a panel body')
+    width,depth,total=(params.get(key) for key in ('width_mm','depth_mm','thickness_mm'))
+    padding=layers.get('padding_mm');inset=layers.get('edge_inset_mm',0)
+    values=(width,depth,total,padding,inset)
+    if any(isinstance(value,bool) or not isinstance(value,(int,float)) or not math.isfinite(value) for value in values):
+        raise DocumentError('Padded panel dimensions must be finite numbers')
+    if width<=0 or depth<=0 or total<=0 or not 0<padding<total or not 0<=inset<min(width,depth)/2:
+        raise DocumentError('Padded panel needs positive width/depth, padding thinner than total thickness, and an inset inside the panel')
+    backing=total-padding;pad_width=width-2*inset;pad_depth=depth-2*inset
+    definition['geometry']=[
+        {'type':'box','size_mm':[width,depth,backing],'position_mm':[0,0,-padding/2],
+         'color':layers.get('backing_color','#66584b')},
+        {'type':'box','size_mm':[pad_width,pad_depth,padding],'position_mm':[0,0,backing/2],
+         'color':layers.get('padding_color','#354550')},
+    ]
+    board_density=layers.get('backing_density_kg_m3',650)
+    pad_density=layers.get('padding_density_kg_m3',60)
+    if any(not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0 for value in (board_density,pad_density)):
+        raise DocumentError('Padded panel layer densities must be positive finite numbers')
+    board_mass=width*depth*backing*board_density*1e-9
+    pad_mass=pad_width*pad_depth*padding*pad_density*1e-9
+    mass=board_mass+pad_mass
+    board_z=-padding/2;pad_z=backing/2
+    center_z=(board_mass*board_z+pad_mass*pad_z)/mass
+    definition['mass_kg']=mass
+    definition['center_of_mass_mm']=[0,0,center_z]
+    definition['inertia_kg_m2']=[
+        (board_mass*(depth**2+backing**2)/12+pad_mass*(pad_depth**2+padding**2)/12
+         +board_mass*(board_z-center_z)**2+pad_mass*(pad_z-center_z)**2)*1e-6,
+        (board_mass*(width**2+backing**2)/12+pad_mass*(pad_width**2+padding**2)/12
+         +board_mass*(board_z-center_z)**2+pad_mass*(pad_z-center_z)**2)*1e-6,
+        (board_mass*(width**2+depth**2)+pad_mass*(pad_width**2+pad_depth**2))/12*1e-6,
+    ]
+
 class Library:
     def __init__(self):
         self.parts, self.materials, self.objects = {}, {}, {}
@@ -207,6 +246,10 @@ class Assembly:
     base: Path
     anchors: list[dict] = field(default_factory=list)
 
+    def require_finished(self, operation='this calculation'):
+        if self.doc.get('draft_subassemblies'):
+            raise DocumentError(f'Finalize draft subassemblies before {operation}; draft runs have no exact cut lengths or physical geometry')
+
     @property
     def input_hash(self):
         """Identify the resolved design, including external catalogue and mesh edits."""
@@ -276,6 +319,7 @@ class Assembly:
             definition=copy.deepcopy(library.parts.get(ref,{}))
             params={**definition.get("parameters",{}),**spec.get("parameters",{})}
             definition=substitute(definition,params)
+            resolve_panel_layers(definition,params)
             definition.update(copy.deepcopy(spec.get("body",{})))
             for k in ("mass_kg","color","friction","restitution","center_of_mass_mm","inertia_kg_m2"):
                 if k in spec: definition[k]=spec[k]
@@ -299,6 +343,12 @@ class Assembly:
             if anchor["part"] not in resolved: raise DocumentError(f"Anchor refers to unknown part {anchor['part']}")
         result=cls(copy.deepcopy(doc),library,resolved,joints,base,anchors)
         result.apply_coordinates(doc.get("state",{}).get("joints",{}))
+        if doc.get('draft_subassemblies'):
+            from .drafting import validate_drafts
+            validate_drafts(result)
+        if any(instance.get('symmetry') for instance in doc.get('objects', [])):
+            from .human_symmetry import validate_human_symmetry
+            validate_human_symmetry(result)
         return result
 
     def rigid_groups(self):

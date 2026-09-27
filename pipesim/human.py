@@ -13,11 +13,26 @@ from scipy.spatial.transform import Rotation
 from scipy.optimize import least_squares
 from .math3d import transform, pose_of, align_axis, point
 from .document import DocumentError
+from .human_poses import HUMAN_POSES
 
 ARM_JOINTS=tuple(side+'_'+joint for side in ('left','right') for joint in ('clavicle_joint','shoulder','elbow','wrist'))
 TORSO_JOINTS=('lumbar_flex','thoracic_flex','neck_base','neck_head')
 LEG_JOINTS=tuple(side+'_'+joint for side in ('left','right') for joint in ('hip','knee','ankle'))
 POSTURE_GROUPS={'arms':ARM_JOINTS,'torso':TORSO_JOINTS,'upper_body':TORSO_JOINTS+ARM_JOINTS,'legs':LEG_JOINTS}
+
+
+def body_girth_scales(stature_mm, mass_kg):
+    """Bounded body envelope estimate relative to a 75 kg, 1750 mm mannequin.
+
+    Mass alone cannot determine an individual's shape. Use mass relative to
+    height squared so a change of stature retains the existing proportions,
+    while waist, hip, thigh and arm girths respond at different rates.
+    """
+    relative_bmi=np.clip((mass_kg/75)*(1750/stature_mm)**2,.55,2.2)
+    return {region:float(relative_bmi**exponent) for region,exponent in {
+        'pelvis':.45,'lumbar':.60,'thorax':.35,
+        'upper_arm':.35,'forearm':.25,'thigh':.40,'shin':.25,
+    }.items()}
 
 
 def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_angles_deg=None,hold_pose=False,strength_scale=1,hold_joints=None,grip_diameter_mm=None,joint_damping_nms_rad=.08):
@@ -42,6 +57,7 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
     forearm=measures.get('forearm_length_mm',.145*H)
     hand=measures.get('hand_length_mm',.105*H)
     foot=measures.get('foot_length_mm',.145*H)
+    girth=body_girth_scales(H,mass_kg)
     ankle_z=.05*H; knee_z=ankle_z+shin; hip_z=knee_z+thigh
     torso_offset=hip_z-.52*H
     parts=[]; joints=[]; weights={}
@@ -61,9 +77,9 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         joint={'id':name,'type':kind,'a':ends[0],'b':ends[1],'damping':joint_damping_nms_rad,'limits':limits or {'rotation_deg':[[-20,20],[-20,20],[-30,30]]},'metadata':{'anatomical':True,'limits_status':'engineering default, not person-specific'}}
         joints.append(joint)
     z=lambda f:f*H+torso_offset
-    body('pelvis',{'type':'box','size_mm':[.18*H,.12*H,.11*H]},[0,0,z(.54)],.142)
-    body('lumbar',{'type':'box','size_mm':[.14*H,.115*H,.10*H]},[0,0,z(.632)],.12)
-    body('thorax',{'type':'box','size_mm':[.20*H,.13*H,.17*H]},[0,0,z(.745)],.20)
+    body('pelvis',{'type':'box','size_mm':[.18*H*girth['pelvis'],.12*H*girth['pelvis'],.11*H]},[0,0,z(.54)],.142)
+    body('lumbar',{'type':'box','size_mm':[.14*H*girth['lumbar'],.115*H*girth['lumbar'],.10*H]},[0,0,z(.632)],.12)
+    body('thorax',{'type':'box','size_mm':[.20*H*girth['thorax'],.13*H*girth['thorax'],.17*H]},[0,0,z(.745)],.20)
     body('neck',{'type':'capsule','radius_mm':.024*H,'length_mm':.035*H},[0,0,z(.856)],.011)
     body('head',{'type':'capsule','radius_mm':.045*H,'length_mm':.03*H},[0,0,z(.94)],.0694)
     join('lumbar_flex','pelvis','lumbar',[0,0,z(.585)],limits={'rotation_deg':[[-30,45],[-20,20],[-30,30]]})
@@ -75,8 +91,8 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         elbow=[sign*shoulder,0,z(.80)-upper]; wrist=[sign*shoulder,0,elbow[2]-forearm]
         palm=[sign*shoulder,0,wrist[2]-hand]
         limb(side+'_clavicle',collar,shoulder_pos,.019*H,.008)
-        limb(side+'_upper_arm',shoulder_pos,elbow,.027*H,.0271)
-        limb(side+'_forearm',elbow,wrist,.022*H,.0162)
+        limb(side+'_upper_arm',shoulder_pos,elbow,.027*H*girth['upper_arm'],.0271)
+        limb(side+'_forearm',elbow,wrist,.022*H*girth['forearm'],.0162)
         limb(side+'_hand',wrist,palm,.023*H,.0061)
         parts[-1]['body']['ports']={'grip':{'type':'mount','label':'Palm grip centre','position_mm':[0,0,0],'axis':[1,0,0],'assembly':'hook','capacity':1}}
         if grip_diameter_mm is not None:
@@ -95,25 +111,18 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         join(side+'_elbow',side+'_upper_arm',side+'_forearm',elbow,'revolute',limits={'angle_deg':[0,150]})
         join(side+'_wrist',side+'_forearm',side+'_hand',wrist,limits={'rotation_deg':[[-70,80],[-25,35],[-75,75]]})
         hp=[sign*hip,0,hip_z]; knee=[sign*hip,0,knee_z]; ankle=[sign*hip,0,ankle_z]
-        limb(side+'_thigh',hp,knee,.037*H,.1416)
-        limb(side+'_shin',knee,ankle,.027*H,.0433)
+        limb(side+'_thigh',hp,knee,.037*H*girth['thigh'],.1416)
+        limb(side+'_shin',knee,ankle,.027*H*girth['shin'],.0433)
         body(side+'_foot',{'type':'box','size_mm':[.055*H,foot,.045*H]},[sign*hip,foot*.25,.0225*H],.0137)
         join(side+'_hip','pelvis',side+'_thigh',hp,limits={'rotation_deg':[[-25,125],[-45,45],[-45,45]]})
         join(side+'_knee',side+'_thigh',side+'_shin',knee,'revolute',limits={'angle_deg':[-155,0]})
         join(side+'_ankle',side+'_shin',side+'_foot',ankle,limits={'rotation_deg':[[-45,25],[-20,20],[-15,15]]})
     total=sum(weights.values())
     for p in parts: p['body']['mass_kg']=mass_kg*weights[p['id']]/total
-    angles={}
-    if pose=='seated':
-        for side in ('left','right'): angles.update({side+'_hip':[90,0,0],side+'_knee':-90,side+'_elbow':80})
-    elif pose=='crouching':
-        angles['lumbar_flex']=[30,0,0]
-        for side in ('left','right'): angles.update({side+'_hip':[100,0,0],side+'_knee':-125,side+'_ankle':[25,0,0]})
-    elif pose=='pull-up':
-        for side in ('left','right'):
-            angles.update({side+'_shoulder':[80,0,0],side+'_elbow':135,side+'_wrist':[-35,0,0],
-                           side+'_hip':[4,0,0],side+'_knee':-8,side+'_ankle':[4,0,0]})
-    elif pose!='standing': raise DocumentError('Human pose must be standing, seated, crouching or pull-up')
+    if pose not in HUMAN_POSES:
+        raise DocumentError('Unknown human pose: '+str(pose))
+    preset=HUMAN_POSES[pose]
+    angles=copy.deepcopy(preset['angles'])
     angles.update(joint_angles_deg or {})
     joint_names={j['id'] for j in joints}
     if set(angles)-joint_names: raise DocumentError('Unknown anatomical joint: '+', '.join(sorted(set(angles)-joint_names)))
@@ -148,6 +157,23 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         if j['type']=='revolute': j['limits']['angle_deg']=[v-vector[0] for v in j['limits']['angle_deg']]
         else: j['limits']['rotation_deg']=[[lo-v,hi-v] for v,(lo,hi) in zip(vector,j['limits']['rotation_deg'])]
         j['metadata']['reference_anatomical_angles_deg']=vector
+    if preset['root_rotation_deg']:
+        rotation=Rotation.from_euler('XYZ',preset['root_rotation_deg'],degrees=True).as_matrix()
+        pelvis_position=matrices['pelvis'][:3,3]
+        delta=np.eye(4); delta[:3,:3]=rotation; delta[:3,3]=pelvis_position-rotation@pelvis_position
+        for pid in matrices: matrices[pid]=delta@matrices[pid]
+    if preset['ground']:
+        # Lower floor poses to the ground using exact primitive support extents.
+        # This is one rigid translation, so anatomical pivots remain coincident.
+        lowest=float('inf')
+        for p in parts:
+            matrix=matrices[p['id']]; shape=p['body']['geometry'][0]
+            if shape['type']=='box':
+                half_z=sum(abs(matrix[2,i])*shape['size_mm'][i]/2 for i in range(3))
+            else:  # Capsules are axially aligned in the part frame.
+                half_z=shape['radius_mm']+abs(matrix[2,2])*shape['length_mm']/2
+            lowest=min(lowest,matrix[2,3]-half_z)
+        for matrix in matrices.values(): matrix[2,3]-=lowest
     for p in parts: p['pose']=pose_of(matrices[p['id']])
     if held:
         for j in joints:
@@ -158,7 +184,7 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
             j['metadata']['actuation']='bounded posture servo; assumed strength, no balance or muscle physiology model'
     # Re-express joint pivots in their transformed bodies after posing. Child and
     # parent attachment points already follow local coordinates; both still coincide.
-    return {'parts':parts,'joints':joints,'metadata':{'segments':19,'stature_mm':stature_mm,'mass_kg':mass_kg,'pose':pose,'measurements':measures,'held_joints':sorted(held),'status':'configurable engineering mannequin; calibrate to the intended person','sources':['https://pubmed.ncbi.nlm.nih.gov/8872282/','https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53089158/How+Scaling+Works']}}
+    return {'parts':parts,'joints':joints,'metadata':{'segments':19,'stature_mm':stature_mm,'mass_kg':mass_kg,'pose':pose,'measurements':measures,'held_joints':sorted(held),'status':'configurable engineering mannequin; body girths estimated from mass and stature, not individual measurements','sources':['https://pubmed.ncbi.nlm.nih.gov/8872282/','https://pmc.ncbi.nlm.nih.gov/articles/PMC2569934/','https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53089158/How+Scaling+Works']}}
 
 def reach(assembly,human,target_mm,hand='right',check_collision=True):
     if hand not in ('left','right'): raise DocumentError('hand must be left or right')
@@ -226,6 +252,9 @@ def seat_fit(assembly,human,seat):
     if abs(panel.matrix[2,2])<.98: raise DocumentError('Seat fit currently requires a nearly horizontal seat')
     local_box=mesh_for_part(panel).bounds
     width=float(local_box[1,0]-local_box[0,0]); depth=float(local_box[1,1]-local_box[0,1]); hip_width=float(mesh_for_part(pelvis).extents[0])
+    if panel.definition.get('panel_layers'):
+        # The backing can be wider than the actual upholstered contact surface.
+        width,depth=map(float,panel.shapes[1]['size_mm'][:2])
     thigh=assembly.parts[human+'/right_thigh']; shin=assembly.parts[human+'/right_shin']; foot=assembly.parts[human+'/right_foot']
     def joint_point(name):
         j=next(j for j in assembly.joints if j['id']==human+'/'+name)

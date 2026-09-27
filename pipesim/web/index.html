@@ -20,24 +20,24 @@
 <nav class="workspace-bar">
   <div class="workspace-label">WORKSPACE <span>01</span></div>
   <div class="mode-tabs" role="tablist" aria-label="Workspace mode"><button class="active" data-mode="design" role="tab">Design</button><button data-mode="check" role="tab">Validate</button><button data-mode="simulate" role="tab">Simulate</button><button data-mode="build" role="tab">Build instructions</button></div>
-  <div class="workspace-actions"><button id="examples-button" title="Open an example">Examples <span>⌄</span></button><button id="new-button">+ New design</button></div>
+  <div class="workspace-actions"><button id="finalize-draft" title="Check and materialize draft pipe lengths" disabled>Finalize draft</button><button id="examples-button" title="Open an example">Examples <span>⌄</span></button><button id="new-button">+ New design</button></div>
 </nav>
 <main>
   <aside class="library-pane">
     <div class="pane-tabs"><button class="active" data-left="library">Part library</button><button data-left="outline">Design tree <span id="tree-count">0</span></button></div>
     <div id="library-content">
       <div class="library-search"><span>⌕</span><input id="part-search" placeholder="Find a part or product code" aria-label="Search part library"><kbd>/</kbd></div>
-      <div class="filter-row"><select id="category" aria-label="Part category"><option value="all">All components</option><option value="connector" selected>Connectors</option><option value="member">Tube & profiles</option><option value="panel">Panels & timber</option><option value="motion">Motion & hardware</option><option value="load">Loads & shapes</option></select><select id="size-filter" aria-label="Tube size"><option value="C" selected>C42</option><option value="all">All sizes</option><option value="T">T21</option><option value="A">A27</option><option value="B">B34</option><option value="D">D48</option><option value="E">E60</option></select></div>
+      <div class="filter-row"><select id="category" aria-label="Part category"><option value="all">All components</option><option value="connector" selected>Connectors</option><option value="member">Tube & profiles</option><option value="panel">Panels & padding</option><option value="motion">Motion & hardware</option><option value="load">Loads & shapes</option></select><select id="size-filter" aria-label="Tube size"><option value="C" selected>C42</option><option value="all">All sizes</option><option value="T">T21</option><option value="A">A27</option><option value="B">B34</option><option value="D">D48</option><option value="E">E60</option></select></div>
       <div class="library-caption"><span id="library-count">COMPONENTS</span><button id="library-edit" title="Edit a library definition">Edit library ↗</button></div>
       <div id="part-list" class="part-list"></div>
-      <div class="library-bottom"><button id="chain-button" class="wide-button"><span>&#9939;</span> Add a chain <span>+</span></button><button id="human-button" class="wide-button"><span>♙</span> Add a human model <span>+</span></button><button id="import-button" class="wide-button"><span>↥</span> Import a 3D part <span>+</span></button><p>Real parts. Editable dimensions.<br>Drag a component into your design.</p></div>
+      <div class="library-bottom"><button id="chain-button" class="wide-button"><span>&#9939;</span> Add chain, rope or strap <span>+</span></button><button id="human-button" class="wide-button"><span>♙</span> Add a human model <span>+</span></button><button id="import-button" class="wide-button"><span>↥</span> Import a 3D part <span>+</span></button><p>Real parts. Editable dimensions.<br>Drag a component into your design.</p></div>
     </div>
     <div id="outline-content" class="hidden"><div class="outline-label">OBJECTS & RIGID BODIES</div><div id="outline-list"></div><button id="expand-button" class="wide-button">Expand reusable objects ↗</button></div>
   </aside>
   <section class="view-pane" aria-label="3D design viewport">
     <div class="view-topline"><div><span class="view-dot"></span><strong id="view-title">Perspective</strong><span class="view-caption">Z up · millimetres</span></div><div class="view-tools"><button id="undo" title="Undo (Ctrl+Z)">↶</button><button id="redo" title="Redo (Ctrl+Y)">↷</button><span class="divider"></span><button id="fit-view" title="Fit design (F)">⛶</button><button id="grid-button" class="active" title="Toggle grid">▦</button><button id="ports-button" title="Show connection ports">⊙</button><button id="camera-button" title="Render an image">▣</button></div></div>
     <div id="viewport"><div id="canvas-fallback" class="hidden">WebGL is unavailable. The CLI renderer works without a GPU.</div></div>
-    <div class="floating-tools"><button data-tool="select" class="active" title="Select (Q)">↖</button><button data-tool="translate" title="Move (G)">✥</button><button data-tool="rotate" title="Rotate (R)">⟳</button><div></div><button data-tool="connect" title="Connect a member to a socket">⌘</button><button id="delete-part" title="Delete selected part">⌫</button></div>
+    <div class="floating-tools"><button data-tool="select" class="active" title="Select (Q)">↖</button><button data-tool="translate" title="Move (G)">✥</button><button data-tool="rotate" title="Rotate (R) · hold Shift for local axes">⟳</button><div></div><button data-tool="connect" title="Connect a member to a socket">⌘</button><button id="delete-part" title="Delete selected part">⌫</button></div>
     <div id="placement-hint" class="placement-hint hidden"></div>
     <div id="snap-hint" class="placement-hint snap-hint hidden" role="status"></div>
     <div id="selection-label" class="selection-label hidden"></div>

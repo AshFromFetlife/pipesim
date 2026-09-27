@@ -209,3 +209,76 @@ def test_chain_end_attachments_pose_the_chain_and_detach_reconnect(factory,blank
     detached=factory(detach_attachment(after,'chain',second['joint']['id']))
     restored=factory(attach_part(detached,'chain',reconnect=second['joint']['id'])['document'])
     aligned(restored);assert len(restored.joints)==len(after.joints)
+
+
+def test_flexible_link_attaches_to_human_surface_without_moving_the_person(factory,blank):
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'person','template':'human','parameters':{'mass_kg':90}},
+                    {'id':'line','template':'chain','parameters':{'length_mm':750,'link_catalog':'generic.rope-jute-6'}}]
+    before=factory(doc)
+    person_pose={pid:part.matrix.copy() for pid,part in before.parts.items() if pid.startswith('person/')}
+    attached=attach_part(before,'line','line/link-1',
+                         {'part':'person/thorax','surface_hint_mm':[0,-1000,0]},'spherical')
+    after=factory(attached['document'])
+    joint=attached['joint']
+    assert joint['a']['part']=='person/thorax'
+    assert joint['b']['part']=='line/link-1'
+    assert joint['type']=='spherical'
+    surface=joint['a']['frame']['position_mm']
+    assert surface[1]==pytest.approx(-after.parts['person/thorax'].shapes[0]['size_mm'][1]/2)
+    a,b,_=after.joint_frames(joint)
+    assert np.linalg.norm(a-b)<.05
+    for pid,matrix in person_pose.items():
+        assert np.allclose(after.parts[pid].matrix,matrix,atol=1e-7,rtol=0)
+    detached=factory(detach_attachment(after,'line',joint['id']))
+    reattached=factory(attach_part(detached,'line',reconnect=joint['id'])['document'])
+    assert np.linalg.norm(reattached.joint_frames(joint)[0]-reattached.joint_frames(joint)[1])<.05
+
+
+def test_multiple_surface_attachments_can_follow_the_same_flexible_line(factory,blank):
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'person','template':'human','parameters':{'mass_kg':75}},
+                    {'id':'belt','template':'chain','parameters':{'length_mm':600,'link_catalog':'generic.strap-seatbelt-65'}}]
+    before=factory(doc)
+    first=factory(attach_part(before,'belt','belt/link-1',
+                              {'part':'person/thorax','surface_hint_mm':[0,-500,0]},'spherical')['document'])
+    second=factory(attach_part(first,'belt','belt/link-8',
+                               {'part':'person/lumbar','surface_hint_mm':[0,-500,0]},'spherical')['document'])
+    connections=[joint for joint in second.joints if joint['id'].startswith('belt-link-')]
+    assert len(connections)==2
+    assert {joint['b']['part'] for joint in connections}=={'belt/link-1','belt/link-8'}
+    assert all(np.linalg.norm(second.joint_frames(joint)[0]-second.joint_frames(joint)[1])<.5 for joint in connections)
+    assert second.doc['objects'][1]['layout_mode']=='posable'
+    assert validate(second)['valid']
+    third=factory(attach_part(second,'belt','belt/link-15',
+                              {'part':'person/pelvis','surface_hint_mm':[0,-500,0]},'spherical')['document'])
+    from pipesim.physics import World
+    with World(third,1/240) as world:
+        assert len(world._chain_spans)==2
+    from pipesim.physics import simulate
+    third.doc['anchors']=[{'part':'person/pelvis','surface':'fixture'}]
+    recording=simulate(factory(third.doc),.1,10)
+    assert all(np.isfinite(pose['position_mm']).all() for pose in recording['frames'][-1]['parts'].values())
+
+
+def test_flexible_surface_attachment_rejects_nonhuman_target(factory,blank):
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'line','template':'chain','parameters':{'length_mm':150}}]
+    doc['parts']=[{'id':'block','catalog':'generic.box'}]
+    with pytest.raises(DocumentError,match='human body part'):
+        attach_part(factory(doc),'line','line/link-1',{'part':'block','surface_hint_mm':[0,0,0]},'spherical')
+
+
+def test_rope_can_land_on_a_curved_forearm_surface(factory,blank):
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'person','template':'human','parameters':{}},
+                    {'id':'rope','template':'chain','parameters':{'length_mm':200,'link_catalog':'generic.rope-jute-6'}}]
+    before=factory(doc)
+    result=attach_part(before,'rope','rope/link-4',
+                       {'part':'person/left_forearm','surface_hint_mm':[500,0,0]},'spherical')
+    point=np.array(result['joint']['a']['frame']['position_mm'])
+    radius=before.parts['person/left_forearm'].shapes[0]['radius_mm']
+    assert np.linalg.norm(point[:2])==pytest.approx(radius,abs=1)
+    after=factory(result['document'])
+    a,b,_=after.joint_frames(result['joint'])
+    assert np.linalg.norm(a-b)<.5

@@ -15,6 +15,16 @@
 .tree-actions-menu .tree-delete{color:var(--danger,#bd6155)}
 #simulation-error{margin-top:14px;overflow-wrap:anywhere}
 .object-outline .outline-group{margin-left:12px}
+/* Library part actions and visible shortcut labels. */
+.part-card-row{position:relative}
+.part-card-row .part-card{padding-right:38px}
+.library-actions-toggle{position:absolute;right:9px;top:12px;width:27px;height:27px;border-radius:4px;color:#718991;font-size:19px;line-height:1;opacity:0}
+.part-card-row:hover .library-actions-toggle,.part-card-row:focus-within .library-actions-toggle{opacity:1}
+.library-actions-toggle:hover,.library-actions-toggle:focus-visible{background:var(--teal-light);color:var(--teal)}
+.part-hotkey{display:inline-block;margin-left:5px;padding:1px 4px;border-radius:3px;background:#e5f0eb;color:#397469;font:8px/1.4 Consolas,monospace}
+.library-actions-menu{position:fixed;z-index:25;width:190px;padding:5px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px #152e4333}
+.library-actions-menu button{display:block;width:100%;padding:10px 8px;text-align:left;border-radius:3px;font-size:11px;color:inherit}
+.library-actions-menu button:hover,.library-actions-menu button:focus-visible{background:var(--teal-light)}
 /* Split duplication button and its keyboard-accessible scope menu. */
 .duplicate-control{position:relative;margin-top:13px}
 .duplicate-buttons{display:flex}
@@ -24,4 +34,5 @@
 .duplicate-menu{position:absolute;top:calc(100% + 5px);right:0;width:100%;min-width:190px;z-index:8;padding:5px;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px #152e4333}
 .duplicate-menu button{display:block;width:100%;padding:10px 8px;text-align:left;border-radius:3px;font-size:10px;line-height:1.4;color:var(--ink)}
 .duplicate-menu button:hover,.duplicate-menu button:focus-visible{background:var(--teal-light)}
+.draft-connection-card:hover,.draft-connection-card:focus-visible,.draft-connection-card:focus-within{border-color:#e3ae5b;background:#fff8ea;outline:none}
 .duplicate-menu small{display:block;margin-top:4px;font-size:9px;font-weight:400;color:var(--muted)}

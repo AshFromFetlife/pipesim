@@ -9,6 +9,7 @@ from .document import write, fingerprint, DocumentError
 from .planning import plan_build
 
 def bom(assembly):
+    assembly.require_finished('the bill of materials')
     groups={}
     for p in assembly.parts.values():
         if p.kind=='human': continue
@@ -24,6 +25,7 @@ def bom(assembly):
     return {'items':list(groups.values()),'additional_hardware':hardware,'total_mass_kg':sum(g['mass_kg'] for g in groups.values()),'input_sha256':assembly.input_hash}
 
 def cutting_plan(assembly,kerf_mm=None,stock_lengths_mm=None,end_trim_mm=None):
+    assembly.require_finished('the cutting plan')
     build=assembly.doc.get('build',{})
     kerf=build.get('kerf_mm',3) if kerf_mm is None else kerf_mm
     trim=build.get('end_trim_mm',0) if end_trim_mm is None else end_trim_mm
