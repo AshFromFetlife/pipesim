@@ -1,0 +1,29 @@
+<!doctype html><meta charset="utf-8"><title>Human skin regression gallery</title>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+<style>body{margin:0;background:#eaf0f2;font:15px system-ui;color:#26424b}header{padding:14px 22px;background:white;display:flex;gap:18px;align-items:center}h1{font-size:18px;margin:0}button,select{padding:6px}#status{margin-left:auto}#panels{display:grid;grid-template-columns:repeat(4,1fr);height:calc(100vh - 63px)}.panel{position:relative;border:1px solid #c7d6dc;min-width:0}.label{position:absolute;top:8px;left:10px}canvas{display:block;width:100%;height:100%}</style>
+<header><h1>Imported skin / collision pose comparison</h1><select id="pose"></select><button id="toggle">Show collision mannequin</button><button id="save">Save rendered comparison</button><span id="status">Loading…</span></header><main id="panels"></main>
+<script type="module">
+import * as THREE from 'three';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';import {RetargetedHuman} from '/pipesim/web/human-model.js';
+const poses=await(await fetch('/output/human-model-regression/poses.json')).json(),select=document.querySelector('#pose'),models=[];
+for(const pose of Object.keys(poses))select.add(new Option(pose,pose));select.value=new URLSearchParams(location.search).get('pose')||'standing';
+const setPose=(object,pose)=>{object.position.fromArray(pose.position_mm);object.rotation.set(...pose.rotation_deg.map(THREE.MathUtils.degToRad),'ZYX');object.updateMatrixWorld(true);};
+let errors=[];const sources=await(await fetch('/output/human-model-regression/models.json')).json();document.querySelector('#panels').style.gridTemplateColumns=`repeat(${sources.length},1fr)`;
+for(const [name,url] of sources){
+ const panel=document.createElement('section');panel.className='panel';panel.innerHTML='<div class="label">'+name+'</div>';document.querySelector('#panels').append(panel);
+ const scene=new THREE.Scene();scene.background=new THREE.Color('#eaf0f2');scene.add(new THREE.HemisphereLight(0xffffff,0x8a9ca4,2));const light=new THREE.DirectionalLight(0xffffff,3);light.position.set(-1000,2500,4000);scene.add(light);
+ const grid=new THREE.GridHelper(3500,14,0x879da6,0xc5d3d8);grid.rotation.x=Math.PI/2;scene.add(grid);
+ const camera=new THREE.PerspectiveCamera(38,1,1,20000);camera.up.set(0,0,1);camera.position.set(1900,4500,2000);camera.lookAt(0,0,850);
+ const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});renderer.setPixelRatio(1);panel.append(renderer.domElement);const parts=new Map();
+ for(const p of poses.standing.parts){const object=new THREE.Group();setPose(object,p.pose);for(const s of p.body.geometry){const geo=s.type==='box'?new THREE.BoxGeometry(...s.size_mm):new THREE.CapsuleGeometry(s.radius_mm,s.length_mm,8,16).rotateX(Math.PI/2);object.add(new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:p.body.color,roughness:.7})));}parts.set('person/'+p.id,object);scene.add(object);}
+ const human={id:'person',render_model:{enabled:true},stature_mm:1750,rest_parts:poses.standing.parts.map(p=>({id:p.id,pose:p.pose})),joints:poses.standing.joints};
+ try{const gltf=await new GLTFLoader().loadAsync(url),model=new RetargetedHuman(gltf,human,parts);scene.add(model.root);models.push({model,parts,renderer,scene,camera,panel});}catch(error){errors.push(name+': '+error.message);panel.querySelector('.label').textContent=error.message;}
+}
+let simple=false;function render(){for(const {model,parts,renderer,scene,camera,panel} of models){for(const p of poses[select.value].parts)setPose(parts.get('person/'+p.id),p.pose);model.update(poses[select.value].time_s||0);model.setEnabled(!simple);camera.aspect=panel.clientWidth/panel.clientHeight;camera.updateProjectionMatrix();renderer.setSize(panel.clientWidth,panel.clientHeight);renderer.render(scene,camera);}document.querySelector('#status').textContent=errors.length?errors.join('; '):`${models.length} rigs · ${select.value} · ${simple?'collision bodies':'weighted skins'} · ready`;document.body.dataset.ready='true';}
+select.onchange=render;document.querySelector('#toggle').onclick=()=>{simple=!simple;document.querySelector('#toggle').textContent=simple?'Show imported skins':'Show collision mannequin';render();};window.addEventListener('resize',render);render();window.humanRegression={models,render};
+document.querySelector('#save').onclick=()=>{
+ render();const image=document.createElement('canvas'),canvases=models.map(m=>m.renderer.domElement);image.width=canvases.reduce((sum,c)=>sum+c.width,0);image.height=Math.max(...canvases.map(c=>c.height))+80;
+ const context=image.getContext('2d');context.fillStyle='#eaf0f2';context.fillRect(0,0,image.width,image.height);context.fillStyle='#26424b';context.font='bold 22px system-ui';context.fillText('PipeSim · '+select.value+' · '+(simple?'19 collision bodies':'retargeted weighted skins'),20,30);context.font='14px system-ui';
+ let x=0;for(const {renderer,panel} of models){context.fillText(panel.querySelector('.label').textContent,x+12,61);context.drawImage(renderer.domElement,x,80);x+=renderer.domElement.width;}
+ const link=document.createElement('a');link.download='human-model-'+select.value+(simple?'-collision':'-imported')+'.png';link.href=image.toDataURL('image/png');link.click();
+};
+</script>

@@ -50,6 +50,7 @@ class EditorServer(ThreadingHTTPServer):
         self.simulations=SimulationJobs()
         self.draft_jobs={}; self.draft_jobs_lock=threading.Lock()
         self.autosave_lock=threading.Lock()
+        self.human_model_cache={}
         super().__init__(('127.0.0.1',port),Handler)
     def server_close(self):
         with self.draft_jobs_lock:
@@ -115,6 +116,16 @@ class Handler(BaseHTTPRequestHandler):
     def scene(self,assembly):
         from .grouping import regroup_candidates
         result=assembly.scene()
+        for human in result.get('humans',[]):
+            config=human['render_model']
+            path=self.server.path(str((assembly.base/config['file']).resolve()))
+            error=getattr(assembly,'human_model_errors',{}).get(human['id'])
+            if error:
+                config.pop('url',None)
+                config['load_error']=error
+            else:
+                config.pop('load_error',None)
+                config['url']='/asset?path='+urllib.parse.quote(path.relative_to(self.server.root).as_posix())
         from .naming import part_name
         for p in result['parts']: p['label']=part_name(assembly,p['id'])
         from .chain import summary
@@ -138,8 +149,27 @@ class Handler(BaseHTTPRequestHandler):
         return result
     def assembly(self,doc,base,*,validate_mirror_geometry=True):
         for ref in doc.get('libraries',[]): self.server.path(str((base/ref).resolve()))
+        from .human_assets import validate_render_model,validate_stored_asset
+        model_errors={}
+        instances=list(doc.get('objects',[]))+[entry['instance'] for entry in doc.get('expanded_objects',[])]
+        for instance in instances:
+            config=instance.get('render_model')
+            if not config: continue
+            validate_render_model(config)
+            path=self.server.path(str((base/config['file']).resolve()))
+            # The simplified mannequin remains editable/simulatable when an
+            # optional appearance asset is offline, missing or incompatible.
+            if config.get('enabled') is False: continue
+            try:
+                info=path.stat(); signature=(info.st_mtime_ns,info.st_size)
+                if self.server.human_model_cache.get(path)!=signature:
+                    validate_stored_asset(path)
+                    self.server.human_model_cache[path]=signature
+            except (DocumentError,OSError) as exc:
+                model_errors[instance['id']]='Imported appearance unavailable; showing the simple mannequin. '+str(exc)
         assembly=Assembly.from_doc(doc,base,self.server.previews.library(doc,base),
                                    validate_mirror_geometry=validate_mirror_geometry)
+        assembly.human_model_errors=model_errors
         for part in assembly.parts.values():
             for shape in part.shapes:
                 if shape['type']=='mesh':
@@ -347,6 +377,12 @@ class Handler(BaseHTTPRequestHandler):
                     files=sorted(directory.glob(f'{digest}-*.autosave.json'),key=lambda p:p.stat().st_mtime_ns,reverse=True)
                     for old in files[keep:]: old.unlink()
                 result={'saved':path.relative_to(self.server.root).as_posix()}
+            elif route=='/api/import-human-model':
+                from .human_assets import import_human_model
+                directory=self.server.path('.pipesim/human-models')
+                result=import_human_model(directory,base,data['filename'],data['content_base64'],data.get('files'))
+                path=result.pop('asset')
+                result['url']='/asset?path='+urllib.parse.quote(path.relative_to(self.server.root).as_posix())
             elif route=='/api/import-mesh':
                 name=re.sub(r'[^A-Za-z0-9_.-]','_',data['filename'])
                 directory=self.server.root/'.pipesim'/'imports'/secrets.token_hex(6); directory.mkdir(parents=True)
@@ -535,13 +571,30 @@ class Handler(BaseHTTPRequestHandler):
                     result=snapshot_design(assembly,data['frame'])
                     from .grouping import restore_objects
                     result=restore_objects({'objects':[o for o in assembly.doc.get('objects',[]) if o['template']=='chain']},result,assembly.base,assembly.library)
-                elif route in ('/api/export','/api/render'):
+                elif route in ('/api/export','/api/render','/api/render-video'):
                     if route=='/api/export' and doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before exporting a build book')
                     directory=self.server.root/'output'/('export-'+secrets.token_hex(4)); directory.mkdir(parents=True)
                     if route=='/api/export':
                         from .exporting import build_export
                         result=build_export(assembly,directory,engineering=data.get('engineering',False))
                         relative=(directory/'instructions.html').relative_to(self.server.root).as_posix()
+                    elif route=='/api/render-video':
+                        from .rendering import render_video,animation_frames
+                        format=data.get('format','mp4')
+                        if format not in ('mp4','gif'): raise DocumentError('Choose MP4 or GIF for browser video export')
+                        source=data.get('source','recording')
+                        if source=='recording':
+                            recording=data.get('recording') or doc.get('results',{}).get('simulate')
+                            if not recording or not recording.get('frames'): raise DocumentError('Run a simulation before exporting its recording')
+                        elif source=='animation':
+                            duration=float(data.get('duration',4)); fps=float(data.get('fps',30))
+                            if not 0<duration<=300 or not 1<=fps<=120: raise DocumentError('Use a duration up to 300 seconds and a frame rate from 1 to 120')
+                            recording=animation_frames(assembly,duration=duration,fps=fps)
+                        else: raise DocumentError('Choose a simulation recording or authored animation')
+                        target=directory/('render.'+format)
+                        render_video(assembly,target,recording,**data.get('options',{}))
+                        relative=target.relative_to(self.server.root).as_posix()
+                        result={'format':format,'frames':len(recording['frames']),'fps':recording.get('fps',30)}
                     else:
                         from .rendering import render_image
                         render_image(assembly,directory/'render.png',**data.get('options',{}))

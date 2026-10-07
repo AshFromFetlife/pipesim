@@ -14,6 +14,7 @@ from scipy.optimize import least_squares
 from .math3d import transform, pose_of, align_axis, point
 from .document import DocumentError
 from .human_poses import HUMAN_POSES
+from .human_motion import FLEXIBILITIES, ACTIVITIES, POSTURES, capacity_nm, joint_envelope
 
 ARM_JOINTS=tuple(side+'_'+joint for side in ('left','right') for joint in ('clavicle_joint','shoulder','elbow','wrist'))
 TORSO_JOINTS=('lumbar_flex','thoracic_flex','neck_base','neck_head')
@@ -35,7 +36,7 @@ def body_girth_scales(stature_mm, mass_kg):
     }.items()}
 
 
-def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_angles_deg=None,hold_pose=False,strength_scale=1,hold_joints=None,grip_diameter_mm=None,joint_damping_nms_rad=.08):
+def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_angles_deg=None,hold_pose=False,strength_scale=1,hold_joints=None,grip_diameter_mm=None,joint_damping_nms_rad=.08,flexibility='athletic',posture_control=None,movement_seed=0):
     if not 500<=stature_mm<=2500 or not 5<=mass_kg<=350: raise DocumentError('Human stature must be 500–2500 mm and mass 5–350 kg')
     H=float(stature_mm); measures=measurements or {}
     allowed={'shoulder_width_mm','hip_width_mm','thigh_length_mm','shin_length_mm','upper_arm_length_mm','forearm_length_mm','hand_length_mm','foot_length_mm'}
@@ -49,6 +50,10 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         raise DocumentError('grip_diameter_mm must be between 8 and 80 mm')
     if not isinstance(joint_damping_nms_rad,(int,float)) or not np.isfinite(joint_damping_nms_rad) or joint_damping_nms_rad<0:
         raise DocumentError('joint_damping_nms_rad must be finite and nonnegative')
+    if flexibility not in FLEXIBILITIES: raise DocumentError('Unknown human flexibility: '+str(flexibility))
+    if posture_control is not None and posture_control not in POSTURES: raise DocumentError('Unknown posture_control: '+str(posture_control))
+    if isinstance(movement_seed,bool) or not isinstance(movement_seed,int) or not 0<=movement_seed<=2147483647:
+        raise DocumentError('movement_seed must be an integer between 0 and 2147483647')
     shoulder=measures.get('shoulder_width_mm',.264*H)/2
     hip=measures.get('hip_width_mm',.11*H)/2
     thigh=measures.get('thigh_length_mm',.235*H)
@@ -75,6 +80,11 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
             matrix=transform(byid[pid]['pose']); inv=np.linalg.inv(matrix)
             ends.append({'part':pid,'frame':{'position_mm':point(inv,pivot).tolist(),'axis':(inv[:3,:3]@np.array(axis)).tolist(),'rotation_deg':pose_of(inv)['rotation_deg']}})
         joint={'id':name,'type':kind,'a':ends[0],'b':ends[1],'damping':joint_damping_nms_rad,'limits':limits or {'rotation_deg':[[-20,20],[-20,20],[-30,30]]},'metadata':{'anatomical':True,'limits_status':'engineering default, not person-specific'}}
+        joint['type'],joint['limits']=joint_envelope(name,kind,joint['limits'],flexibility)
+        joint['metadata'].update(flexibility=flexibility,neutral_limits=copy.deepcopy(joint['limits']))
+        if flexibility=='fragile':
+            joint['metadata']['fragile_torque_nm']=capacity_nm(name,mass_kg)*.8
+            joint['metadata']['fragile_status']='engineering release threshold; not a prediction of injury'
         joints.append(joint)
     z=lambda f:f*H+torso_offset
     body('pelvis',{'type':'box','size_mm':[.18*H*girth['pelvis'],.12*H*girth['pelvis'],.11*H]},[0,0,z(.54)],.142)
@@ -118,7 +128,9 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         join(side+'_knee',side+'_thigh',side+'_shin',knee,'revolute',limits={'angle_deg':[-155,0]})
         join(side+'_ankle',side+'_shin',side+'_foot',ankle,limits={'rotation_deg':[[-45,25],[-20,20],[-15,15]]})
     total=sum(weights.values())
-    for p in parts: p['body']['mass_kg']=mass_kg*weights[p['id']]/total
+    for p in parts:
+        p['body']['mass_kg']=mass_kg*weights[p['id']]/total
+        p['body']['source']['flexibility']=flexibility
     if pose not in HUMAN_POSES:
         raise DocumentError('Unknown human pose: '+str(pose))
     preset=HUMAN_POSES[pose]
@@ -131,6 +143,8 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         if name in POSTURE_GROUPS: held.update(POSTURE_GROUPS[name])
         elif name in joint_names: held.add(name)
         else: raise DocumentError('Unknown posture joint or group: '+name)
+    if posture_control is not None:
+        held=set(joint_names) if posture_control in ('hold','fidget') else set(POSTURE_GROUPS.get(posture_control,()))
     matrices={p['id']:transform(p['pose']) for p in parts}
     # Anatomical angles are in the world-aligned neutral body axes. Store joint axes
     # in the actual parent frame so simulation and IK use the same coordinates.
@@ -138,9 +152,16 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
         if j['id'] not in angles: continue
         value=angles[j['id']]
         vector=[value,0,0] if isinstance(value,(float,int)) else value
+        if not isinstance(vector,(list,tuple)) or len(vector)!=3 or any(not isinstance(v,(int,float)) or not np.isfinite(v) for v in vector):
+            raise DocumentError(j['id']+': anatomical angles must be a finite number or three finite numbers')
+        # Catalog poses are adapted to the selected envelope. Explicit authored
+        # angles remain strict, so changing a preset never silently changes input.
+        if j['id'] not in (joint_angles_deg or {}):
+            bounds=[j['limits']['angle_deg']] if j['type']=='revolute' else j['limits']['rotation_deg']
+            vector=[float(np.clip(v,lo,hi)) for v,(lo,hi) in zip(vector,bounds)]+([0,0] if j['type']=='revolute' else [])
         if j['type']=='revolute':
             lo,hi=j['limits']['angle_deg']
-            if not lo<=vector[0]<=hi: raise DocumentError(f"{j['id']}: anatomical angle outside limits")
+            if not lo<=vector[0]<=hi or any(abs(v)>1e-9 for v in vector[1:]): raise DocumentError(f"{j['id']}: anatomical angle outside limits")
         else:
             if any(not lo<=v<=hi for v,(lo,hi) in zip(vector,j['limits']['rotation_deg'])): raise DocumentError(f"{j['id']}: anatomical angle outside limits")
         parent=matrices[j['a']['part']]; pivot=point(parent,j['a']['frame']['position_mm'])
@@ -178,10 +199,12 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
     if held:
         for j in joints:
             if j['id'] not in held: continue
-            capacity=120 if '_hip' in j['id'] else 90 if '_knee' in j['id'] else 40 if '_ankle' in j['id'] else 35 if '_shoulder' in j['id'] else 20 if '_elbow' in j['id'] else 5 if '_wrist' in j['id'] else 10 if 'neck' in j['id'] else 60
-            j['motor']={'mode':'position','target':0,'max_torque_nm':capacity*strength_scale*mass_kg/75,'kp':35,'kd':1}
+            j['motor']={'mode':'position','target':0,'max_torque_nm':capacity_nm(j['id'],mass_kg,strength_scale),'kp':35,'kd':1}
             if j['type']=='spherical': j['motor']['rotation_deg']=[0,0,0]
             j['metadata']['actuation']='bounded posture servo; assumed strength, no balance or muscle physiology model'
+    if posture_control in ACTIVITIES:
+        for j in joints:
+            j['metadata']['human_activity']={'mode':posture_control,'seed':movement_seed,'max_torque_nm':capacity_nm(j['id'],mass_kg,strength_scale)}
     # Re-express joint pivots in their transformed bodies after posing. Child and
     # parent attachment points already follow local coordinates; both still coincide.
     return {'parts':parts,'joints':joints,'metadata':{'segments':19,'stature_mm':stature_mm,'mass_kg':mass_kg,'pose':pose,'measurements':measures,'held_joints':sorted(held),'status':'configurable engineering mannequin; body girths estimated from mass and stature, not individual measurements','sources':['https://pubmed.ncbi.nlm.nih.gov/8872282/','https://pmc.ncbi.nlm.nih.gov/articles/PMC2569934/','https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53089158/How+Scaling+Works']}}
@@ -227,7 +250,8 @@ def reach(assembly,human,target_mm,hand='right',check_collision=True):
         matrices=posed(values)
         return np.r_[(matrices[handid][:3,3]-target),np.array(values)*.002]
     best=None
-    for seed in (np.zeros(7),(np.array(lower)+np.array(upper))/2,np.array([90,0,0,90,0,0,0])):
+    seed_angles=np.zeros(len(lower));seed_angles[0]=90;seed_angles[3]=90
+    for seed in (np.zeros(len(lower)),(np.array(lower)+np.array(upper))/2,seed_angles):
         result=least_squares(residual,np.clip(seed,lower,upper),bounds=(lower,upper),max_nfev=250,ftol=1e-9,xtol=1e-9,gtol=1e-9)
         if best is None or np.linalg.norm(result.fun[:3])<np.linalg.norm(best.fun[:3]): best=result
     matrices=posed(best.x); error=float(np.linalg.norm(matrices[handid][:3,3]-target))
@@ -243,7 +267,8 @@ def reach(assembly,human,target_mm,hand='right',check_collision=True):
                 for b in candidate.parts:
                     if a==b or frozenset([a,b]) in adjacent or (b in moving and a>b): continue
                     if world.intersect(a,b,3): collisions.append([a,b])
-    return {'human':human,'hand':hand,'reachable':error<=5 and not collisions,'position_reachable':error<=5,'target_mm':target.tolist(),'palm_mm':matrices[handid][:3,3].tolist(),'error_mm':error,'collisions':collisions,'angles_deg':{shoulder['id']:best.x[:3].tolist(),elbow['id']:float(best.x[3]),wrist['id']:best.x[4:].tolist()},'parts':{pid:pose_of(matrices[pid]) for pid in descendants[0]},'limitations':['Static pose feasibility; no collision-free reach trajectory is implied','Results depend on individual segment dimensions and joint ranges']}
+    elbow_axes=3 if elbow['type']=='spherical' else 1
+    return {'human':human,'hand':hand,'reachable':error<=5 and not collisions,'position_reachable':error<=5,'target_mm':target.tolist(),'palm_mm':matrices[handid][:3,3].tolist(),'error_mm':error,'collisions':collisions,'angles_deg':{shoulder['id']:best.x[:3].tolist(),elbow['id']:best.x[3:6].tolist() if elbow_axes==3 else float(best.x[3]),wrist['id']:best.x[3+elbow_axes:].tolist()},'parts':{pid:pose_of(matrices[pid]) for pid in descendants[0]},'limitations':['Static pose feasibility; no collision-free reach trajectory is implied','Results depend on individual segment dimensions and joint ranges']}
 
 def seat_fit(assembly,human,seat):
     from .geometry import bounds,mesh_for_part

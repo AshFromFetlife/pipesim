@@ -1,13 +1,30 @@
 """Create a portable design directory with resolved catalogue data and local meshes."""
 import copy
+import hashlib
 from pathlib import Path
 from .document import Assembly,write
-from .editing import expand_objects
+from .editing import expand_objects,reference_path
 
 def bundle(assembly,directory):
     directory=Path(directory); directory.mkdir(parents=True,exist_ok=True)
     doc=expand_objects(assembly); doc['libraries']=[]; doc['definitions']={}
     doc.pop('results',None); doc.pop('build_plan',None)
+    for record in doc.get('expanded_objects',[]):
+        config=record['instance'].get('render_model')
+        if not config: continue
+        from .human_assets import validate_stored_asset
+        source=(assembly.base/config['file']).resolve()
+        if config.get('enabled') is False and not source.is_file():
+            # Keep an offline appearance reference without making a simple
+            # mannequin export depend on optional render-only files.
+            config['file']=reference_path(source,directory)
+            continue
+        if config.get('enabled') is not False: validate_stored_asset(source)
+        payload=source.read_bytes()
+        assets=directory/'assets'; assets.mkdir(exist_ok=True)
+        filename='human-'+hashlib.sha256(payload).hexdigest()[:24]+source.suffix.lower()
+        (assets/filename).write_bytes(payload)
+        config['file']='assets/'+filename
     materials={}
     for index,spec in enumerate(doc['parts']):
         part=assembly.parts[spec['id']]; definition=copy.deepcopy(part.definition)

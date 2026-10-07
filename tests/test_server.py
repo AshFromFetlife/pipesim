@@ -179,6 +179,104 @@ def test_mutations_require_same_origin_session_token(editor):
         assert error.value.code==403
 
 
+def test_browser_video_api_exports_recording_and_serves_download(editor,load):
+    from pipesim.math3d import pose_of
+    from PIL import Image
+    import io
+    assembly=load('workbench')
+    poses={pid:pose_of(p.matrix) for pid,p in assembly.parts.items()}
+    moved=copy.deepcopy(poses)
+    for pose in moved.values(): pose['position_mm'][0]+=200
+    recording={'fps':10,'frames':[{'time_s':0,'parts':poses},{'time_s':.1,'parts':moved}]}
+    payload={'document':assembly.doc,'source':'recording','recording':recording,'format':'gif','options':{'width':160,'height':160}}
+    with pytest.raises(urllib.error.HTTPError) as error: request(editor,'/api/render-video',payload,token=False)
+    assert error.value.code==403
+    result=json.loads(request(editor,'/api/render-video',payload)[1])
+    assert result['format']=='gif' and result['frames']==2 and result['fps']==10
+    image=Image.open(io.BytesIO(request(editor,result['url'])[1]))
+    assert image.n_frames==2 and image.size==(160,160)
+
+
+def test_browser_video_api_rejects_missing_motion_and_invalid_format(editor,load):
+    for extra in ({'source':'recording'}, {'format':'../escape'}, {'source':'animation','duration':301}):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            request(editor,'/api/render-video',{'document':load('workbench').doc,**extra})
+        assert error.value.code==400
+
+
+def test_browser_video_api_renders_authored_animation_tracks(editor,load):
+    doc=load('sliding-collar').doc
+    assert doc['animation']['tracks']
+    result=json.loads(request(editor,'/api/render-video',{'document':doc,'source':'animation','format':'gif',
+        'duration':1,'fps':3,'options':{'width':100,'height':100}})[1])
+    assert result['frames']==4 and result['fps']==3
+    assert request(editor,result['url'])[0]==200
+
+
+def test_human_import_is_textured_portable_and_survives_pose_snapshots(editor,blank):
+    from test_human_assets import skinned_fixture,encoded
+    data,_=skinned_fixture(vrm=True)
+    payload={'filename':'person.gltf','content_base64':encoded(json.dumps(data).encode()),'path':'design.pipe.yaml'}
+    with pytest.raises(urllib.error.HTTPError) as error: request(editor,'/api/import-human-model',payload,token=False)
+    assert error.value.code==403
+    imported=json.loads(request(editor,'/api/import-human-model',payload)[1])
+    assert request(editor,imported['url'])[0]==200
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'person','template':'human','render_model':imported['render_model']}]
+    scene=json.loads(request(editor,'/api/resolve',{'document':doc})[1])
+    assert len(scene['parts'])==19 and len(scene['humans'])==1
+    assert scene['humans'][0]['render_model']['url']==imported['url']
+    saved=json.loads(request(editor,'/api/save',{'document':doc,'source_path':'design.pipe.yaml','path':'designs/people/person.yaml'})[1])
+    assert saved['document']['objects'][0]['render_model']['file'].startswith('../../.pipesim/')
+    reopened=json.loads(request(editor,'/api/open?path=designs/people/person.yaml')[1])
+    assert reopened['scene']['humans'][0]['render_model']['metadata']['bones']==imported['metadata']['bones']
+    frame={'time_s':0,'parts':{p['id']:p['pose'] for p in scene['parts']},'joints':{}}
+    snapshot=json.loads(request(editor,'/api/snapshot',{'document':doc,'frame':frame})[1])
+    snapscene=json.loads(request(editor,'/api/resolve',{'document':snapshot})[1])
+    assert snapscene['humans'][0]['render_model']['file']==imported['render_model']['file']
+    regrouped=json.loads(request(editor,'/api/regroup',{'document':snapshot,'object':'person'})[1])
+    assert regrouped['document']['objects'][0]['render_model']==imported['render_model']
+    regrouped['document']['objects'][0]['render_model']['enabled']=False
+    disabled=json.loads(request(editor,'/api/resolve',{'document':regrouped['document']})[1])
+    assert disabled['humans'][0]['render_model']['metadata']==imported['metadata']
+
+
+def test_human_assets_cannot_escape_workspace_or_load_remote_resources(editor,blank):
+    from test_human_assets import skinned_fixture,encoded
+    doc=copy.deepcopy(blank)
+    for name in ('../outside.glb','.git/avatar.glb'):
+        doc['objects']=[{'id':'person','template':'human','render_model':{'file':name}}]
+        with pytest.raises(urllib.error.HTTPError) as error: request(editor,'/api/resolve',{'document':doc})
+        assert error.value.code==400
+    data,_=skinned_fixture()
+    data['images'][0]['uri']='https://example.org/track.png'
+    asset=editor.root/'unsafe.gltf';asset.write_text(json.dumps(data))
+    doc['objects'][0]['render_model']['file']='unsafe.gltf'
+    result=json.loads(request(editor,'/api/resolve',{'document':doc})[1])
+    config=result['humans'][0]['render_model']
+    assert 'selected model folder' in config['load_error'] and 'url' not in config
+    assert len(result['parts'])==19
+
+
+@pytest.mark.parametrize('missing', [True, False])
+def test_disabled_human_model_can_resolve_save_and_reopen_without_reading_asset(editor,blank,missing):
+    doc=copy.deepcopy(blank)
+    config={'file':'optional.glb','enabled':False,'bone_map':{'pelvis':0},
+            'extra_bones':{'Hair':{'mode':'damped_spring','mass':.1}}}
+    if not missing: (editor.root/'optional.glb').write_bytes(b'incompatible appearance data')
+    doc['objects']=[{'id':'person','template':'human','render_model':config}]
+    scene=json.loads(request(editor,'/api/resolve',{'document':doc})[1])
+    assert len(scene['parts'])==19 and not scene['humans'][0]['render_model']['enabled']
+    request(editor,'/api/save',{'document':doc,'path':'saved.yaml'})
+    reopened=json.loads(request(editor,'/api/open?path=saved.yaml')[1])
+    assert reopened['document']['objects'][0]['render_model']==config
+    doc['objects'][0]['render_model']['enabled']=True
+    fallback=json.loads(request(editor,'/api/resolve',{'document':doc})[1])
+    assert 'unavailable' in fallback['humans'][0]['render_model']['load_error']
+    assert 'url' not in fallback['humans'][0]['render_model']
+    assert len(fallback['parts'])==19
+
+
 def test_simulation_runs_as_a_cancellable_job_without_resending_design(editor,blank):
     import time
     doc=copy.deepcopy(blank)

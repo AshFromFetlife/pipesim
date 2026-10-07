@@ -49,7 +49,7 @@ Open `output/workbench-build/instructions.html` and print it, including to PDF. 
 | Validation | Schema and reference checks; bore/axis/engagement checks; duplicate sockets; collisions inside rigid groups; moving-part intersection warnings; gravity support polygons; motion sampling |
 | Assembly planning | Reverse search with conservative clearance advancement, closed-socket insertion restrictions, split-fitting placement, stable intermediate states, explicit fixture and sequence support, bounded search with an `indeterminate` result |
 | Dynamics | PyBullet rigid compounds and articulated joints; gravity, friction and contact; loose sliding/twisting sockets; physical stops; limits, motors, GT2/gear couplings; tension-only links; explicit break thresholds and continued motion after separation |
-| Human fit | 19 segments, 18 anatomical joints, whole-person movement and flipping, limb posing, lossless expansion/regrouping, grip detach/reconnect previews, configurable stature/mass/limb measurements, standing/seated/crouching/pull-up poses, joint-limited arm IK, collision checks, seated dimension screening, clearance tests, ragdoll dynamics and bounded posture servos |
+| Human fit | 19 segments, 18 anatomical joints, whole-person movement and flipping, limb posing, lossless expansion/regrouping, grip detach/reconnect previews, configurable measurements and flexibility, procedural posture movement, joint-limited arm IK, collision and clearance checks, ragdoll dynamics, bounded posture servos, textured GLB/glTF/VRM character skins with editable bone mapping |
 | Engineering | 3D Euler–Bernoulli frame elements, rigid offsets, distributed self-weight, point forces/moments, mechanisms, stress/deflection, Euler buckling, conditional connector axial-slip checks, multiaxial force ramps, optional dynamic tipping/sliding trials, contact-to-FEA load transfer |
 | Output | PNG/JPEG, transparent backgrounds, GIF/MP4/PNG sequences, GLB/STL geometry, camera and lighting controls, BOM, kerf-aware stock cutting, illustrated printable steps and engineering diagrams |
 
@@ -61,7 +61,7 @@ Tubeclamp models use the supplier's published drawing dimensions and annotated s
 
 FEA is a linear beam model. Panels are rigid load-transfer bodies; it does not calculate shell stress, timber splitting, casting fracture, plastic collapse or coupled deformable contact. Unknown connector capacities remain unknown. Explicit break limits produce physical separation; missing strength data never becomes an invented fracture threshold.
 
-The human is a configurable articulated mannequin with physical mass, inertia, contact and joint limits. Its default proportions, segment fractions, mobility ranges and posture-control strengths are engineering approximations. Fit tests require measurements for the intended person. There is no soft-tissue, muscle, comfort, injury or active-balance model; a passive standing ragdoll is expected to fall.
+The human is a configurable articulated mannequin with physical mass, inertia, contact and joint limits. Its default proportions, segment fractions, mobility ranges, posture-control strengths and fragile-joint release thresholds are engineering approximations. Fit tests require measurements for the intended person. There is no validated soft-tissue, muscle, comfort, injury or active-balance model; a passive standing ragdoll is expected to fall. Imported character skins appear in the editor, headless images and exported animations; physics retains the 19-segment mannequin. See [human controls and imported models](docs/human-models.md).
 
 The build planner checks a stated class of straight insertion paths and gravity-supported intermediate states on the supplied collision geometry. It does not prove arbitrary assembly impossibility, tool access, thread engagement, tolerance stacks or anchor capacity. General coordinated multi-part insertions can return `indeterminate`. See [model limits](docs/model-limits.md) for exact boundaries.
 
@@ -84,6 +84,7 @@ The build planner checks a stated class of straight insertion paths and gravity-
 
 - [File format and library authoring](docs/file-format.md)
 - [Editor guide and worked workflows](docs/workflows.md)
+- [Human controls, rigged character import and authoring tools](docs/human-models.md)
 - [Simulation, FEA and model limits](docs/model-limits.md)
 - [Supplier sources and geometry decisions](docs/sources.md)
 - [Architecture and verification](docs/development.md)

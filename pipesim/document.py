@@ -281,6 +281,11 @@ class Assembly:
         anchors=copy.deepcopy(doc.get("anchors",[]))
         object_ids=[o['id'] for o in doc.get('objects',[])]
         if len(set(object_ids))!=len(object_ids): raise DocumentError('Duplicate object id')
+        for instance in list(doc.get('objects',[]))+[entry['instance'] for entry in doc.get('expanded_objects',[])]:
+            if 'render_model' in instance:
+                from .human_assets import validate_render_model
+                if instance.get('template')!='human': raise DocumentError('Imported character skins belong to human objects')
+                validate_render_model(instance['render_model'])
         for instance in doc.get("objects",[]):
             if 'components' in instance:
                 from .grouping import object_components
@@ -421,7 +426,8 @@ class Assembly:
             for pid in downstream: self.parts[pid].matrix=delta@self.parts[pid].matrix
 
     def scene(self):
-        return {"name":self.doc.get("name","Untitled"), "parts":[{"id":p.id,"catalog":p.spec.get("catalog"),"kind":p.kind,"pose":pose_of(p.matrix),"geometry":p.shapes,"ports":p.ports,"section":p.section,"length_mm":p.length,"mass_kg":p.mass,"color":p.definition.get("color","#929faa"),"source":p.definition.get("source",{})} for p in self.parts.values()],"groups":self.rigid_groups(),"joints":self.joints,"anchors":self.anchors}
+        from .human_assets import scene_humans
+        return {"name":self.doc.get("name","Untitled"), "parts":[{"id":p.id,"catalog":p.spec.get("catalog"),"kind":p.kind,"pose":pose_of(p.matrix),"geometry":p.shapes,"ports":p.ports,"section":p.section,"length_mm":p.length,"mass_kg":p.mass,"color":p.definition.get("color","#929faa"),"source":p.definition.get("source",{})} for p in self.parts.values()],"groups":self.rigid_groups(),"joints":self.joints,"anchors":self.anchors,"humans":scene_humans(self)}
 
 def joint_kind(joint):
     if joint.get("locked",joint.get("type")=="fixed"): return "fixed"

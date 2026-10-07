@@ -151,7 +151,7 @@ def object_components(instance,library=None):
         raise DocumentError('Edit the saved components of this object to change its dimensions')
     from .human import body_girth_scales, humanoid
     changed={k for k in set(parameters)|set(reference) if parameters.get(k)!=reference.get(k)}
-    supported={'mass_kg','stature_mm','strength_scale','hold_pose','hold_joints','joint_damping_nms_rad','grip_diameter_mm'}
+    supported={'mass_kg','stature_mm','strength_scale','hold_pose','hold_joints','joint_damping_nms_rad','grip_diameter_mm','flexibility','posture_control','movement_seed'}
     if changed-supported: raise DocumentError('This human has an edited pose. Pose its limbs or expand its parts to edit '+', '.join(sorted(changed-supported)))
     generated=humanoid(**parameters)  # Validate human controls and get defaults for newly held joints.
     size=parameters.get('stature_mm',1750)/reference.get('stature_mm',1750)
@@ -160,6 +160,8 @@ def object_components(instance,library=None):
     old_girth=body_girth_scales(reference.get('stature_mm',1750),reference.get('mass_kg',75))
     effort=parameters.get('strength_scale',1)/reference.get('strength_scale',1)*mass
     for part in components['parts']:
+        if 'flexibility' in changed:
+            part.setdefault('body',{}).setdefault('source',{})['flexibility']=parameters.get('flexibility','athletic')
         if part.get('catalog') and library is not None and changed&{'stature_mm','mass_kg','grip_diameter_mm'}:
             from .document import substitute
             definition=library.parts.get(part['catalog'],{})
@@ -192,9 +194,34 @@ def object_components(instance,library=None):
             for key in ('slide_mm',):
                 if key in joint.get('limits',{}): joint['limits'][key]=[v*size for v in joint['limits'][key]]
         if joint['id'] not in defaults: continue
+        default=defaults[joint['id']]
+        if 'flexibility' in changed:
+            angles=joint.get('metadata',{}).get('reference_anatomical_angles_deg',[0,0,0])
+            neutral=copy.deepcopy(default['metadata']['neutral_limits'])
+            bounds=neutral.get('rotation_deg',[neutral.get('angle_deg',[-180,180])])
+            if any(not lo-1e-5<=v<=hi+1e-5 for v,(lo,hi) in zip(angles,bounds)) or (default['type']=='revolute' and max(abs(v) for v in angles[1:])>.1):
+                raise DocumentError(joint['id']+': current pose exceeds the selected flexibility; move the limb within that range first')
+            joint['type']=default['type']
+            joint['limits']=({'rotation_deg':[[lo-v,hi-v] for v,(lo,hi) in zip(angles,bounds)]}
+                             if default['type']=='spherical' else {'angle_deg':[v-angles[0] for v in bounds[0]]})
+            metadata=joint.setdefault('metadata',{})
+            for key in ('flexibility','neutral_limits','fragile_torque_nm','fragile_status','dislocated'):
+                metadata.pop(key,None)
+                if key in default['metadata']: metadata[key]=copy.deepcopy(default['metadata'][key])
+            if joint.get('motor'):
+                if joint['type']=='spherical': joint['motor'].setdefault('rotation_deg',[joint['motor'].get('target',0),0,0])
+                else: joint['motor']['target']=joint['motor'].pop('rotation_deg',[joint['motor'].get('target',0)])[0]
+        if changed&{'posture_control','movement_seed','strength_scale','mass_kg'}:
+            joint.setdefault('metadata',{}).pop('human_activity',None)
+            if 'human_activity' in default['metadata']:
+                joint['metadata']['human_activity']=copy.deepcopy(default['metadata']['human_activity'])
+            if 'mass_kg' in changed and 'fragile_torque_nm' in joint.get('metadata',{}):
+                joint['metadata']['fragile_torque_nm']*=mass
         if 'joint_damping_nms_rad' in changed: joint['damping']=parameters.get('joint_damping_nms_rad',.08)
-        if changed&{'hold_pose','hold_joints'}:
+        if changed&{'hold_pose','hold_joints','posture_control'}:
             if 'motor' not in defaults[joint['id']]: joint.pop('motor',None)
+            elif 'posture_control' in changed:
+                joint['motor']=copy.deepcopy(defaults[joint['id']]['motor']);continue
             elif 'motor' not in joint:
                 joint['motor']=copy.deepcopy(defaults[joint['id']]['motor']);continue
         if 'max_torque_nm' in joint.get('motor',{}): joint['motor']['max_torque_nm']*=effort
@@ -376,6 +403,17 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
     if not part_id.startswith(object_id+'/') or target is None or target['part'] not in assembly.parts or target['part'].startswith(object_id+'/'):
         raise DocumentError('Choose a body part and a separate part of the structure')
     if kind not in ('fixed','revolute','spherical'): raise DocumentError('Choose fixed, revolute or spherical for this attachment')
+    if instance['template']=='human' and kind=='revolute' and part_id.endswith(('_hand',)) and 'grip' in assembly.parts[part_id].ports:
+        target_part=assembly.parts[target['part']]
+        round_shapes=[s for s in target_part.shapes if s['type'] in ('tube','cylinder')]
+        if target_part.kind=='member' and len(round_shapes)==1:
+            diameter=round_shapes[0].get('diameter_mm',2*round_shapes[0].get('radius_mm',0))
+            if 8<=diameter<=80:
+                # Grip dimensions belong to an actual attachment. Updating the
+                # existing parameter preserves edited skeletons and joint poses.
+                doc=update_object_parameters(assembly,object_id,{**instance.get('parameters',{}),'grip_diameter_mm':diameter})
+                assembly=Assembly.from_doc(doc,assembly.base,assembly.library)
+                instance=next(o for o in doc['objects'] if o['id']==object_id)
     surface_attachment='surface_hint_mm' in target
     if surface_attachment:
         if not chain or assembly.parts[target['part']].kind!='human':

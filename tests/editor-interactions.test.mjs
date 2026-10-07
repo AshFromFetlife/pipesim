@@ -16,6 +16,8 @@ import * as preferences from '../pipesim/web/preferences.js';
 import {nextFlexibleShortcutLength} from '../pipesim/web/resize-shortcuts.js';
 import * as drafting from '../pipesim/web/drafting.js';
 import {HUMAN_POSES} from '../pipesim/web/human-poses.js';
+import {HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg} from '../pipesim/web/human-model.js';
+import {makeRig,exportRig} from './helpers/human-rig-fixtures.mjs';
 
 let server,url,bootstrap,workspace;
 before(async()=>{
@@ -710,7 +712,7 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   const initialDoc=resolved.document||doc;
   const fetchEditor=async(path,options)=>{
     if(path==='/api/bootstrap')return new Response(JSON.stringify({...bootstrap,path:'output/ui-test.pipe.yaml',document:initialDoc,scene:resolved,...bootstrapOverride()}));
-    const intercepted=interceptFetch(path,options);if(intercepted)return intercepted;
+    const intercepted=interceptFetch(path,options);if(intercepted){inFlight++;try{return await intercepted;}finally{inFlight--;}}
     inFlight++;try{
       const response=await fetch(new URL(path,url),options);
       const body=await response.arrayBuffer();await beforeResponse(path);
@@ -723,14 +725,14 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   const evaluate=new AsyncFunction('THREE','OrbitControls','TransformControls','GLTFLoader','STLLoader','OBJLoader','connectionCandidates','hingeCandidates','clearConnectionIntent','alignmentDelta','socketOccupied','rotationAlignment',
     'DEFAULT_SNAP_SETTINGS','loadSnapDefaults','saveSnapDefaults','validateSnapSettings',
     'DEFAULT_PREFERENCES','loadPreferences','savePreferences','validatePreferences','displayValue','storedValue',
-    'draftRuns','draftRun','draftPreview','HUMAN_POSES','nextFlexibleShortcutLength',
+    'draftRuns','draftRun','draftPreview','HUMAN_POSES','nextFlexibleShortcutLength','HumanModelLayer','HUMAN_BONE_SEGMENTS','EXTRA_BONE_MODES','suggestBoneMappings','boneDiagramSvg',
     'window','document','devicePixelRatio','getComputedStyle','ResizeObserver','requestAnimationFrame','fetch','setTimeout','clearTimeout',
     source+'\nreturn {state, camera, orbit, scene, partObjects, ports, resizeHandles, viewport, gizmo, snapGhost, mirrorGhost, mirrorCopies, draftConnect, performAutosave};');
   const app=await evaluate({...Three,WebGLRenderer:Renderer},Controls,Gizmo,class{},MeshLoader,class{},
     snapping.connectionCandidates,snapping.hingeCandidates,snapping.clearConnectionIntent,snapping.alignmentDelta,snapping.socketOccupied,snapping.rotationAlignment,
     settings.DEFAULT_SNAP_SETTINGS,settings.loadSnapDefaults,settings.saveSnapDefaults,settings.validateSnapSettings,
     preferences.DEFAULT_PREFERENCES,preferences.loadPreferences,preferences.savePreferences,preferences.validatePreferences,preferences.displayValue,preferences.storedValue,
-    drafting.draftRuns,drafting.draftRun,drafting.draftPreview,HUMAN_POSES,nextFlexibleShortcutLength,
+    drafting.draftRuns,drafting.draftRun,drafting.draftPreview,HUMAN_POSES,nextFlexibleShortcutLength,HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg,
     window,document,1,()=>({getPropertyValue:()=> '#dce5e9'}),class{constructor(callback){this.callback=callback;}observe(){this.callback();}},callback=>{frame=callback;},fetchEditor,
     (callback,delay)=>{const timer=setTimeout(callback,delay);timers.push(timer);return timer;},clearTimeout);
   const tick=()=>frame?.(performance.now());tick();
@@ -1022,6 +1024,57 @@ test('Shift resize leaves a through fitting behind while normal resize carries i
     await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].end_mm[0]<700);
     assert.equal(requests.at(-1).behavior,'detach');
     assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].attachments,[]);
+  }finally{await ui.close();}
+});
+
+test('browser video export explains missing motion and preserves the design',async()=>{
+  const ui=await editor(fixture());try{
+    const before=JSON.stringify(ui.state.doc);
+    ui.document.querySelector('#export-button').click();ui.document.querySelector('#export-video-option').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Render a video');
+    assert.match(ui.document.querySelector('#modal-content').textContent,/Run a simulation first/);
+    assert.equal(ui.document.querySelector('#modal-actions .primary').disabled,true);
+    assert.equal(JSON.stringify(ui.state.doc),before);
+  }finally{await ui.close();}
+});
+
+test('browser video export renders a real recording as GIF without changing playback or the design',async()=>{
+  const ui=await editor(fixture());try{
+    const poses=Object.fromEntries(ui.state.scene.parts.map(p=>[p.id,structuredClone(p.pose)]));
+    const moved=structuredClone(poses);for(const pose of Object.values(moved))pose.position_mm[0]+=200;
+    ui.state.recording={fps:10,duration_s:.1,frames:[{time_s:0,parts:poses},{time_s:.1,parts:moved}]};
+    const before=JSON.stringify(ui.state.doc),recording=JSON.stringify(ui.state.recording);
+    ui.document.querySelector('#export-button').click();ui.document.querySelector('#export-video-option').click();
+    assert.equal(ui.document.querySelector('#video-source').value,'recording');
+    assert.equal(ui.document.querySelector('#video-fps').disabled,true);
+    ui.document.querySelector('#video-width').value='161';ui.document.querySelector('#video-height').value='160';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.document.querySelector('#toast').textContent.includes('must both be even'));
+    ui.document.querySelector('#video-width').value='160';ui.document.querySelector('#video-format').value='gif';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.document.querySelector('#modal-title').textContent==='Video ready');
+    const link=ui.document.querySelector('#modal-content a');assert.equal(link.download,'pipesim-video.gif');
+    assert.match(link.getAttribute('href'),/\/files\/output\/export-.*\/render.gif$/);
+    const response=await fetch(link.href);assert.equal(response.status,200);
+    assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0,3).toString(),'GIF');
+    assert.equal(JSON.stringify(ui.state.doc),before);assert.equal(JSON.stringify(ui.state.recording),recording);
+  }finally{await ui.close();}
+});
+
+test('browser video export retains controls and reports encoder errors for retry',async()=>{
+  const doc=fixture();doc.animation={duration_s:2,fps:20,tracks:[{joint:'example',coordinate:'slide_mm',keyframes:[{time_s:0,value:0},{time_s:2,value:10}]}]};
+  let sent;
+  const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
+    if(path==='/api/render-video'){sent=JSON.parse(options.body);return Promise.resolve(new Response(JSON.stringify({error:'FFmpeg is not visible to this server.'}),{status:400}));}
+  }});try{
+    ui.document.querySelector('#export-button').click();ui.document.querySelector('#export-video-option').click();
+    assert.equal(ui.document.querySelector('#video-source').value,'animation');
+    assert.equal(ui.document.querySelector('#video-fps').disabled,false);
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.document.querySelector('#video-render-status').textContent.includes('FFmpeg is not visible'));
+    assert.equal(sent.source,'animation');assert.equal(sent.duration,2);assert.equal(sent.fps,20);assert.equal(sent.format,'mp4');
+    assert.deepEqual(sent.options.eye,ui.camera.position.toArray());
+    assert.equal(ui.document.querySelector('#video-format').disabled,false);assert.equal(ui.document.querySelector('#modal-actions .primary').disabled,false);
   }finally{await ui.close();}
 });
 
@@ -2542,7 +2595,7 @@ test('human inspector edits selective posture controls and preserves undo',async
   const doc=blankDesign('Selective muscles');doc.objects=[{id:'person',template:'human',parameters:{pose:'pull-up',hold_joints:['upper_body'],strength_scale:6,grip_diameter_mm:42.4}}];
   const ui=await editor(doc);try{
     ui.select('person/pelvis');assert.equal(ui.document.querySelector('#object-hold').value,'upper_body');
-    assert.equal(ui.document.querySelector('#object-pose').value,'pull-up');assert.equal(ui.document.querySelector('#object-grip').value,'42.4');
+    assert.equal(ui.document.querySelector('#object-pose').value,'pull-up');assert.equal(ui.document.querySelector('#object-grip'),null);
     assert.equal(ui.document.querySelector('#object-pose').options.length,42);
     assert.match(ui.document.querySelector('#object-pose-description').textContent,/overhead bar/);
     const set=async(mode,count)=>{
@@ -2562,7 +2615,7 @@ test('human inspector edits selective posture controls and preserves undo',async
   }finally{await ui.close();}
 });
 
-test('add human dialog creates a pull-up pose with gripping hands and free legs',async()=>{
+test('add human dialog creates a pull-up pose with free legs and moves grip configuration to connections',async()=>{
   const ui=await editor(blankDesign('Human creation'));try{
     ui.document.querySelector('#human-button').click();
     const poses=ui.document.querySelector('#human-pose');
@@ -2572,12 +2625,82 @@ test('add human dialog creates a pull-up pose with gripping hands and free legs'
     poses.value='snow-angel';poses.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
     assert.match(ui.document.querySelector('#human-pose-description').textContent,/Face upward/);
     poses.value='pull-up';
-    ui.document.querySelector('#human-hold').value='upper_body';ui.document.querySelector('#human-strength').value='6';ui.document.querySelector('#human-grip').value='42.4';
+    ui.document.querySelector('#human-hold').value='upper_body';ui.document.querySelector('#human-strength').value='6';assert.equal(ui.document.querySelector('#human-grip'),null);ui.document.querySelector('#human-flexibility').value='athletic';
     modalAction(ui,'Add human');await ui.wait(()=>ui.state.scene.parts.length===19);
     const parameters=ui.state.doc.objects[0].parameters;
-    assert.equal(parameters.pose,'pull-up');assert.equal(parameters.grip_diameter_mm,42.4);assert.deepEqual(parameters.hold_joints,['upper_body']);
+    assert.equal(parameters.pose,'pull-up');assert.equal(parameters.grip_diameter_mm,undefined);assert.equal(parameters.flexibility,'athletic');assert.deepEqual(parameters.hold_joints,['upper_body']);
     assert.equal(ui.state.scene.joints.filter(j=>j.motor).length,12);assert.equal(ui.state.scene.joints.filter(j=>j.id.includes('_hip')&&j.motor).length,0);
     assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('new human activity and flexibility controls persist and can return to passive posture',async()=>{
+  const ui=await editor(blankDesign('Human movement'));try{
+    ui.document.querySelector('#human-button').click();
+    assert.equal(ui.document.querySelector('#human-flexibility').options.length,7);
+    for(const id of ['random_spasms','fidget','struggle','destructive'])assert.ok([...ui.document.querySelector('#human-hold').options].some(o=>o.value===id));
+    assert.match(ui.document.querySelector('#human-strength').title,/joint torque/);
+    assert.match(ui.document.querySelector('#human-damping').title,/joint speed/);
+    const activity=ui.document.querySelector('#human-hold');activity.value='fidget';activity.dispatchEvent(new ui.window.Event('change'));
+    assert.equal(ui.document.querySelector('#human-seed-field').hidden,false);
+    ui.document.querySelector('#human-seed').value='42';ui.document.querySelector('#human-flexibility').value='fragile';
+    modalAction(ui,'Add human');await ui.wait(()=>ui.state.scene.parts.length===19);
+    assert.equal(ui.state.doc.objects[0].parameters.posture_control,'fidget');assert.equal(ui.state.doc.objects[0].parameters.movement_seed,42);
+    ui.select('human-1/pelvis');assert.equal(ui.document.querySelector('#object-flexibility').value,'fragile');
+    assert.equal(ui.document.querySelector('#object-hold').value,'fidget');
+    const flexibility=ui.document.querySelector('#object-flexibility');flexibility.value='full_360';flexibility.dispatchEvent(new ui.window.Event('change'));
+    await ui.wait(()=>ui.state.doc.objects[0].parameters.flexibility==='full_360');await ui.drain();
+    const posture=ui.document.querySelector('#object-hold');posture.value='relaxed';posture.dispatchEvent(new ui.window.Event('change'));
+    await ui.wait(()=>!ui.state.doc.objects[0].parameters.posture_control);await ui.drain();
+    assert.equal(ui.document.querySelector('#object-hold').value,'relaxed');assert.ok(ui.state.scene.joints.every(j=>!j.motor));
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.objects[0].parameters.posture_control==='fidget');
+  }finally{await ui.close();}
+});
+
+test('add human file picker imports an actual weighted GLB and stores its configuration',async()=>{
+  const ui=await editor(blankDesign('Imported human'));try{
+    ui.document.querySelector('#human-button').click();
+    const file=new File([await exportRig(makeRig())],'avatar.glb',{type:'model/gltf-binary'}),input=ui.document.querySelector('#human-model-file');
+    Object.defineProperty(input,'files',{configurable:true,value:[file]});input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.document.querySelector('#human-model-status').textContent.includes('avatar.glb imported'));
+    assert.equal(ui.document.querySelector('#modal-actions .primary').disabled,false);
+    modalAction(ui,'Add human');await ui.wait(()=>ui.state.doc.objects?.[0]?.render_model);await ui.drain();
+    const model=ui.state.doc.objects[0].render_model;assert.equal(model.name,'avatar.glb');assert.equal(model.enabled,true);
+    assert.ok(model.metadata.bones.length>=19);assert.ok(model.metadata.vertex_count>0);assert.ok(model.metadata.uv_sets.includes('TEXCOORD_0'));
+    assert.equal(Object.keys(model.bone_map).length,19);assert.equal(typeof model.bone_map.head,'number');
+    assert.equal(ui.state.scene.parts.filter(p=>p.kind==='human').length,19);
+  }finally{await ui.close();}
+});
+
+test('human import toggle and bone settings preserve the model and simulation recording',async()=>{
+  const doc=blankDesign('Human appearance');const payload=await exportRig(makeRig());const imported=await post('import-human-model',doc,{filename:'fixture.glb',content_base64:Buffer.from(payload).toString('base64')});doc.objects=[{id:'person',template:'human',render_model:{...imported.render_model,enabled:false,bone_map:{pelvis:'mixamorig:Hips'},extra_bones:{Hair:{mode:'damped_spring',mass:.05}},metadata:{bones:[{name:'mixamorig:Hips',named:true,index:0},{name:'Hair',named:true,index:1,parent_bone:0},{name:'Bone 23',named:false,index:23,parent_bone:0}]}}}];
+  // The rendering module has separate real GLB tests. This harness exercises saved controls
+  // without depending on WebGL or a texture decoder in jsdom.
+  const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
+    if(path!=='/api/resolve')return null;
+    const current=JSON.parse(options.body).document;
+    return post('resolve',{...current,objects:current.objects.map(o=>({...o,render_model:{...o.render_model,enabled:false}}))}).then(scene=>new Response(JSON.stringify(scene)));
+  }});try{
+    ui.select('person/pelvis');
+    const recording={frames:[{time_s:0,parts:Object.fromEntries(ui.state.scene.parts.map(p=>[p.id,p.pose]))}],fps:30};ui.state.recording=recording;
+    const toggle=ui.document.querySelector('#object-model-enabled');toggle.checked=true;toggle.dispatchEvent(new ui.window.Event('change'));
+    await ui.wait(()=>ui.state.doc.objects[0].render_model.enabled===true);await ui.drain();
+    assert.equal(ui.state.recording,recording);assert.deepEqual(ui.state.doc.objects[0].render_model.extra_bones,{Hair:{mode:'damped_spring',mass:.05}});
+    ui.document.querySelector('#object-model-configure').click();
+    assert.ok(ui.document.querySelector('.bone-diagram'));assert.match(ui.document.querySelector('#bone-diagram').textContent,/Bone 23/);
+    ui.document.querySelector('#bone-map-head').focus();ui.document.querySelector('[data-bone-index="23"]').dispatchEvent(new ui.window.MouseEvent('click',{bubbles:true}));assert.equal(ui.document.querySelector('#bone-map-head').value,'node:23');
+    const offsetSegment=ui.document.querySelector('#bone-offset-segment');offsetSegment.value='left_clavicle';offsetSegment.dispatchEvent(new ui.window.Event('change'));
+    const offset=ui.document.querySelector('#bone-offset-2');offset.value='18';offset.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    const bone=ui.document.querySelector('#extra-bone');assert.equal(bone.value,'node:1');
+    const mode=ui.document.querySelector('#extra-mode');mode.value='weighted_ball_joint';mode.dispatchEvent(new ui.window.Event('change'));
+    ui.document.querySelector('#bone-map-pelvis').value='node:0';modalAction(ui,'Apply settings');
+    await ui.wait(()=>ui.state.doc.objects[0].render_model.extra_bones.Hair.mode==='weighted_ball_joint');await ui.drain();
+    assert.equal(ui.state.recording,recording);assert.equal(ui.state.doc.objects[0].render_model.bone_map.pelvis,0);assert.deepEqual(ui.state.doc.objects[0].render_model.bone_offsets.left_clavicle,[0,0,18]);
+    ui.document.querySelector('#object-model-configure').click();assert.equal(ui.document.querySelector('#extra-bone').value,'node:1');assert.equal(ui.document.querySelector('#extra-mode').value,'weighted_ball_joint');
+    assert.equal(ui.document.querySelector('#bone-offset-segment').value,'left_clavicle');assert.equal(ui.document.querySelector('#bone-offset-2').value,'18');modalAction(ui,'Cancel');
+    const off=ui.document.querySelector('#object-model-enabled');off.checked=false;off.dispatchEvent(new ui.window.Event('change'));
+    await ui.wait(()=>ui.state.doc.objects[0].render_model.enabled===false);await ui.drain();
+    assert.equal(ui.state.recording,recording);assert.equal(ui.state.doc.objects[0].render_model.extra_bones.Hair.mode,'weighted_ball_joint');
   }finally{await ui.close();}
 });
 

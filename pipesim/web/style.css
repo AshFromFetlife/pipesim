@@ -38,3 +38,23 @@
 .duplicate-menu small{display:block;margin-top:4px;font-size:9px;font-weight:400;color:var(--muted)}
 .preferences-sections{display:grid;gap:16px;margin-top:24px}.preferences-sections section{padding:15px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}.preferences-sections h3{margin:0 0 10px;color:#526d76;font-size:10px;letter-spacing:.7px}.preferences-sections .fields{grid-template-columns:repeat(3,minmax(0,1fr))}.preferences-sections .field select{height:30px;width:100%;min-width:0;border:1px solid #dbe3e7;border-radius:4px;background:var(--field,#fafcfc);color:var(--ink);font-size:10px}.preferences-sections p{margin-bottom:0}
 .resize-label{position:absolute;z-index:4;padding:3px 5px;border-radius:4px;background:#f4bb65;color:#2b3437;font-size:9px;font-weight:700;pointer-events:none;box-shadow:0 1px 5px #0004}
+.field-help{display:inline-flex;align-items:center;justify-content:center;position:relative;width:16px;height:16px;margin-left:5px;border:1px solid var(--muted);border-radius:50%;font-size:10px;cursor:help;text-transform:none}
+.field-help [role=tooltip]{display:none;position:absolute;z-index:100;top:22px;left:-20px;width:225px;padding:10px;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--ink);font:12px/1.5 sans-serif;letter-spacing:normal;box-shadow:0 4px 14px #0003}
+.field-help:hover [role=tooltip],.field-help:focus [role=tooltip]{display:block}
+.human-model-options summary{cursor:pointer;padding:10px 0;font-size:11px;font-weight:600}
+.human-model-options .fields{gap:8px}
+.human-model-status{overflow-wrap:anywhere}
+.bone-controls{max-height:360px;overflow:auto;padding-right:5px}
+.bone-diagram-wrap{margin:15px 0 8px;border:1px solid var(--line);border-radius:6px;background:#f8fbfb;overflow:hidden}
+.bone-diagram-heading{display:flex;align-items:baseline;justify-content:space-between;gap:15px;padding:10px 12px;border-bottom:1px solid var(--line);font-size:10px;color:#536d77}
+.bone-diagram-heading span{font-size:9px;color:#8a9ba4;text-align:right}
+#bone-diagram{max-height:440px;overflow:auto}
+.bone-diagram{display:block;width:100%;min-width:520px;height:auto}
+.bone-links line{stroke:#aebec3;stroke-width:2;vector-effect:non-scaling-stroke}
+.bone-node{cursor:pointer;color:#526f78}
+.bone-node circle{fill:#fff;stroke:#668b86;stroke-width:2;vector-effect:non-scaling-stroke}
+.bone-node text{fill:currentColor;font:10px Consolas,monospace;paint-order:stroke;stroke:#f8fbfb;stroke-width:3px;stroke-linejoin:round}
+.bone-node text tspan{fill:#8d9fa5;font-size:8px}
+.bone-node:hover,.bone-node.mapped{color:#236f61}
+.bone-node:hover circle,.bone-node.mapped circle{fill:#dcefe8;stroke:#287969}
+.bone-diagram-empty{padding:15px;margin:0!important}

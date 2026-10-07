@@ -10,6 +10,7 @@ import {DEFAULT_PREFERENCES,loadPreferences,savePreferences,validatePreferences,
 import {nextFlexibleShortcutLength} from './resize-shortcuts.js';
 import {draftRuns,draftRun,draftPreview} from './drafting.js';
 import {HUMAN_POSES} from './human-poses.js';
+import {HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg} from './human-model.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const clone=x=>structuredClone(x), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -51,6 +52,8 @@ grid.visible=preferences.gridVisible;
 const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2(), groundPlane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
 const partObjects=new Map();
 const beamObjects=new Map();
+const humanModels=new HumanModelLayer({scene:objects,onError:message=>toast(message,true)});
+let humanModelsReady=Promise.resolve();
 let hoveredDraftConnection=null;
 const mirrorCopies=new Map(),mirrorPlanes=new Map();
 const rotationHandle=new THREE.Object3D(),wholeObjectHandle=new THREE.Object3D();scene.add(rotationHandle,wholeObjectHandle);
@@ -479,12 +482,14 @@ async function requestResize(target,side,length,shift=false){
   finally{state.placementPending=false;updateResizeHandles();}
 }
 function buildScene(data){
+  humanModels.dispose();
   state.scene=data;sceneGeneration++;gizmo?.detach();dispose(objects);dispose(ports);dispose(overlays);partObjects.clear();beamObjects.clear();
   if(state.selected&&!data.parts.some(p=>p.id===state.selected)){
     const chain=data.chains?.find(c=>state.selected.startsWith(c.id+'/'));
     if(chain)state.selected=chain.end_part;
   }
   for(const part of data.parts){const group=new THREE.Group();group.name=part.id;group.userData.part=part.id;for(const shape of part.geometry)group.add(meshShape(shape,part.color,part.kind));setPose(group,part.pose);objects.add(group);partObjects.set(part.id,group);}
+  humanModelsReady=humanModels.rebuild(data.humans||[],partObjects).then(()=>humanModels.update(state.recording?.frames[state.frame]?.time_s||0));
   for(const drive of state.doc.drives||[]){if(!drive.route_mm?.length)continue;const points=drive.route_mm.map(p=>new THREE.Vector3(...p));const curve=new THREE.CatmullRomCurve3(points,false,'catmullrom',0);const belt=new THREE.Mesh(new THREE.TubeGeometry(curve,80,2,6,false),new THREE.MeshStandardMaterial({color:'#374b52',roughness:.8}));overlays.add(belt);}
   for(const anchor of data.anchors){const part=partObjects.get(anchor.part);if(!part)continue;const loc=part.position.clone();const marker=new THREE.Mesh(new THREE.RingGeometry(70,73,48),new THREE.MeshBasicMaterial({color:'#74a28c',transparent:true,opacity:.55,side:THREE.DoubleSide}));marker.position.copy(loc);marker.position.z+=1;marker.quaternion.copy(part.quaternion);overlays.add(marker);}
   updatePorts();updateConnectionHint();highlightSelection();updateHeader();updateResizeHandles();if(state.tool==='translate'||state.tool==='rotate')attachGizmo();
@@ -1852,18 +1857,122 @@ function humanPoseOptions(selected='standing'){
   }).join('')+'</optgroup>';
 }
 function humanPoseDescription(id){return HUMAN_POSES.find(p=>p.id===id)?.description||'';}
-const HUMAN_POSTURES=[['relaxed','Relaxed'],['upper_body','Hold upper body · free legs'],['arms','Hold arms'],['torso','Hold torso'],['legs','Hold legs'],['all','Hold whole body'],['custom','Choose individual joints']];
+const HUMAN_POSTURES=[['relaxed','Relaxed'],['upper_body','Hold upper body · free legs'],['arms','Hold arms'],['torso','Hold torso'],['legs','Hold legs'],['all','Hold whole body'],['random_spasms','Random spasms'],['fidget','Fidget'],['struggle','Struggle'],['destructive','Destructive'],['custom','Choose individual joints']];
+const HUMAN_MOTION_MODES=['random_spasms','fidget','struggle','destructive'];
+const HUMAN_POSTURE_HELP={random_spasms:'Irregular short, sharp bursts of muscle torque, separated by pauses.',fidget:'Holds the pose with small, gentle random muscle forces that change every second.',struggle:'Continuous random exertion at a modest fraction of maximum strength, changing smoothly over time.',destructive:'Fast bursts of maximum available muscle torque in changing directions. Use Fragile flexibility to allow joints to dislocate.',relaxed:'No active posture control. Gravity, contacts and passive joint damping determine motion.'};
+const HUMAN_FLEXIBILITIES=[['minimum','Minimum','Conservative everyday joint ranges. Preset poses are adjusted to fit these limits.'],['athletic','Athletic','Wider ranges for an active, warmed-up person.'],['gymnast','Gymnast','Large ranges for splits, deep stretches and hypermobility.'],['contortionist','Contortionist','Extreme ranges for unusual contortion poses.'],['full_socket_span','Full socket span','Unrestricted joint rotation with body collision still active.'],['fragile','Fragile','Minimum ranges until excessive torque at a joint limit releases that joint. The simulation records the dislocation.'],['full_360','Full 360','Unrestricted rotation with human self-collision disabled. Body parts can pass through one another.']];
+const HUMAN_PARAMETER_HELP={strength_scale:'Multiplies available joint torque for posture holding and active movement. 1 uses the baseline engineering strength estimate for this body mass; 2 doubles it. It does not change body mass or passive damping.',joint_damping_nms_rad:'Passive resistance to joint speed, in N·m·s/rad. Higher values slow swinging and absorb motion; 0 removes this damping. It does not hold a pose or add muscle strength.'};
+function humanTooltip(key){return HUMAN_PARAMETER_HELP[key]?`<span class="field-help" tabindex="0" aria-label="${esc(HUMAN_PARAMETER_HELP[key])}">?<span role="tooltip">${esc(HUMAN_PARAMETER_HELP[key])}</span></span>`:'';}
+function flexibilityOptions(selected='minimum'){return HUMAN_FLEXIBILITIES.map(([id,label])=>`<option value="${id}" ${id===selected?'selected':''}>${label}</option>`).join('');}
+function flexibilityDescription(id){return HUMAN_FLEXIBILITIES.find(([value])=>value===id)?.[2]||'';}
+function postureDescription(id){return HUMAN_POSTURE_HELP[id]||'Selected joints resist motion with finite muscle torque; unselected joints remain free.';}
 function humanPosture(parameters){
+  if(HUMAN_MOTION_MODES.includes(parameters.posture_control))return parameters.posture_control;
+  if(parameters.posture_control==='hold')return 'all';
+  if(parameters.posture_control==='passive')return 'relaxed';
+  if(['arms','torso','upper_body','legs'].includes(parameters.posture_control))return parameters.posture_control;
   if(parameters.hold_pose)return 'all';
   const held=parameters.hold_joints||[];
   return !held.length?'relaxed':held.length===1&&HUMAN_POSTURES.some(([id])=>id===held[0]&&!['relaxed','all','custom'].includes(id))?held[0]:'custom';
 }
 function setHumanPosture(parameters,mode,joints=[]){
+  delete parameters.posture_control;
   parameters.hold_pose=mode==='all';
-  if(mode==='all'||mode==='relaxed')delete parameters.hold_joints;
+  if(HUMAN_MOTION_MODES.includes(mode)){parameters.posture_control=mode;delete parameters.hold_joints;}
+  else if(mode==='all'||mode==='relaxed')delete parameters.hold_joints;
   else parameters.hold_joints=mode==='custom'?joints:[mode];
 }
 function postureOptions(mode){return HUMAN_POSTURES.map(([id,label])=>`<option value="${id}" ${mode===id?'selected':''}>${label}</option>`).join('');}
+function humanImportFields(prefix){return `<div class="single-field"><label for="${prefix}-model-file">IMPORTED APPEARANCE · OPTIONAL</label><input id="${prefix}-model-file" type="file" multiple accept=".glb,.gltf,.vrm,.bin,.png,.jpg,.jpeg,.webp"><p>Choose a rigged GLB or VRM, or a glTF together with its textures and buffers. Bones, skin weights, UVs and materials are retained. The 19 segments still provide collisions.</p><p id="${prefix}-model-status" class="human-model-status" role="status"></p></div>`;}
+async function encodeHumanFile(file){
+  if(file.size>200*1024*1024)throw new Error('Each imported file must be smaller than 200 MiB.');
+  const bytes=new Uint8Array(await file.arrayBuffer());let binary='';
+  for(let offset=0;offset<bytes.length;offset+=32768)binary+=String.fromCharCode(...bytes.subarray(offset,offset+32768));
+  return {name:file.webkitRelativePath||file.name,content_base64:btoa(binary)};
+}
+function bindHumanImport(prefix,onImported){
+  const input=$(`#${prefix}-model-file`),message=$(`#${prefix}-model-status`);
+  input.onchange=async()=>{
+    const files=Array.from(input.files||[]),models=files.filter(f=>/\.(glb|gltf|vrm)$/i.test(f.name));
+    if(!files.length)return;
+    input.disabled=true;const addButton=prefix==='human'?$('#modal-actions .primary'):null;if(addButton)addButton.disabled=true;
+    try{
+      if(models.length!==1)throw new Error('Choose exactly one GLB, glTF or VRM model, plus any textures and buffers it needs.');
+      if(files.reduce((total,file)=>total+file.size,0)>200*1024*1024)throw new Error('The model and textures together must be smaller than 200 MiB.');
+      message.textContent='Importing skeleton, materials and textures…';
+      const main=await encodeHumanFile(models[0]),siblings=await Promise.all(files.filter(f=>f!==models[0]).map(encodeHumanFile));
+      const result=await api('import-human-model',{filename:main.name,content_base64:main.content_base64,files:siblings});
+      await onImported(result.render_model);
+      message.textContent=`${result.render_model.name||models[0].name} imported. Bone mapping and extra-bone motion can be adjusted in properties.`;
+    }catch(error){message.textContent=error.message;toast(error.message,true);}
+    finally{input.disabled=false;if(addButton)addButton.disabled=false;}
+  };
+}
+async function changeHumanAppearance(id,edit){
+  checkpoint();const frame=state.frame;
+  try{edit(state.doc.objects.find(object=>object.id===id));state.dirty=true;state.revision++;await resolve();if(state.recording)showFrame(frame);}
+  catch(error){state.doc=state.undo.pop()||state.doc;state.revision++;await resolve();if(state.recording)showFrame(frame);throw error;}
+}
+function renderHumanModelControls(instance){
+  const model=instance.render_model,section=document.createElement('div');section.className='inspect-section';
+  const inventory=model?.metadata?.bones||model?.bones||[];
+  const modes=Array.isArray(EXTRA_BONE_MODES)?EXTRA_BONE_MODES.map(item=>Array.isArray(item)?item:[item.id,item.label]):Object.entries(EXTRA_BONE_MODES);
+  const modeOptions=selected=>modes.map(([id,label])=>`<option value="${esc(id)}" ${selected===id?'selected':''}>${esc(label)}</option>`).join('');
+  section.innerHTML=`<h3>HUMAN APPEARANCE</h3>${model?`<p class="human-model-status">${esc(model.name||model.file)}</p><label class="check-row"><input id="object-model-enabled" type="checkbox" ${model.enabled!==false?'checked':''}> Use imported model</label><p>Turn off to use the simple 19-segment model in editing, simulation playback and image renders. All import settings are kept.</p><button id="object-model-configure" class="inspect-action secondary">Bone mapping and extra bones</button>`:''}${humanImportFields('object')}`;
+  $('#inspector').appendChild(section);
+  const editModel=edit=>changeHumanAppearance(instance.id,object=>edit(object.render_model));
+  bindHumanImport('object',imported=>changeHumanAppearance(instance.id,object=>{object.render_model=imported;}));
+  if(!model)return;
+  $('#object-model-enabled').onchange=e=>{const enabled=e.target.checked;editModel(m=>{m.enabled=enabled;});};
+  $('#object-model-configure').onclick=()=>{
+    const active=humanModels.models?.get(instance.id),loaded=active?.inventory||[];
+    const choices=(inventory.length?inventory:loaded).map(b=>typeof b==='string'?{name:b}:b).filter(b=>b.name);
+    const segments=Array.isArray(HUMAN_BONE_SEGMENTS)?HUMAN_BONE_SEGMENTS.map(item=>Array.isArray(item)?item:[item.id||item,item.label||String(item).replaceAll('_',' ')]):Object.entries(HUMAN_BONE_SEGMENTS);
+    const stored=state.doc.objects.find(object=>object.id===instance.id)?.render_model||model;
+    const draft=clone(stored);draft.bone_map=suggestBoneMappings(choices,draft.bone_map||{});draft.bone_offsets||={};draft.extra_bones||={};
+    const matched=Object.keys(draft.bone_map).length;
+    const offsetSegments=[...segments].sort(([a],[b])=>Number(b in draft.bone_offsets)-Number(a in draft.bone_offsets));
+    const initialOffset=offsetSegments.find(([segment])=>segment in draft.bone_offsets)?.[0]||'left_clavicle';
+    const extraKey=bone=>bone.index!=null&&String(bone.index) in draft.extra_bones?String(bone.index):bone.name in draft.extra_bones?bone.name:null;
+    const initialExtra=choices.find(bone=>extraKey(bone));
+    const extraValue=bone=>bone.index==null?'name:'+bone.name:'node:'+bone.index;
+    modal('Human bone mapping',`<p>${matched?`${matched} body bones were matched automatically from VRM roles or authored names. `:''}Changes preview in the viewport immediately. Use mapped-bone offsets for shoulders and other main body joints.</p><p id="bone-preview-status" class="human-model-status" role="status"></p><div class="bone-diagram-wrap"><div class="bone-diagram-heading"><strong>Imported skeleton</strong><span>Focus a body field, then click a labeled joint to assign it.</span></div><div id="bone-diagram">${boneDiagramSvg(choices,draft.bone_map)}</div></div><details class="human-model-options" open><summary>Main body bones</summary><div class="bone-controls">${segments.map(([segment,label])=>`<div class="single-field"><label for="bone-map-${esc(segment)}">${esc(label)}</label><select id="bone-map-${esc(segment)}" data-human-bone="${esc(segment)}"><option value="">No match</option>${choices.map(bone=>`<option value="${bone.index==null?esc(bone.name):'node:'+bone.index}" ${draft.bone_map[segment]===bone.name||draft.bone_map[segment]===bone.index?'selected':''}>${esc(bone.name)}${bone.index==null?'':' · #'+bone.index}</option>`).join('')}</select></div>`).join('')}</div></details><details class="human-model-options" open><summary>Mapped bone rotation offsets · ${Object.keys(draft.bone_offsets).length} adjusted</summary><p>Rotate a mapped bone after automatic retargeting. These local XYZ angles are useful for clavicles, shoulders and exporter-specific bone axes.</p><div class="single-field"><label for="bone-offset-segment">BODY BONE</label><select id="bone-offset-segment">${offsetSegments.map(([segment,label])=>`<option value="${esc(segment)}" ${segment===initialOffset?'selected':''}>${esc(label)}${segment in draft.bone_offsets?' · adjusted':''}</option>`).join('')}</select></div><div id="bone-offset-settings"></div></details><details class="human-model-options" open><summary>Extra bone motion · ${Object.keys(draft.extra_bones).length} overridden</summary><div class="single-field"><label for="extra-default">DEFAULT MODE</label><select id="extra-default">${modeOptions(draft.default_extra_mode||'fixed_to_parent')}</select></div><p>Only unmapped bones receive extra motion. Existing overrides remain marked and reopen automatically.</p><div class="single-field"><label for="extra-bone">BONE OVERRIDE</label><select id="extra-bone"><option value="">Choose a bone</option>${choices.map(bone=>`<option value="${esc(extraValue(bone))}" ${bone===initialExtra?'selected':''}>${esc(bone.name)}${bone.index==null?'':' · #'+bone.index}${extraKey(bone)?' · overridden':''}</option>`).join('')}</select></div><div id="extra-bone-settings"></div></details>`,[{label:'Cancel',action:closeModal},{label:'Apply settings',primary:true,action:async()=>{
+      await changeHumanAppearance(instance.id,object=>{object.render_model=clone(draft);});accepted=true;closeModal();
+    }}]);
+    let accepted=false,previewTimer=null;
+    const preview=()=>{
+      if(!active||!model.url)return;
+      clearTimeout(previewTimer);$('#bone-preview-status').textContent='Updating preview…';
+      previewTimer=setTimeout(async()=>{try{await humanModels.preview(instance,{...draft,url:model.url},partObjects);humanModels.update(state.recording?.frames[state.frame]?.time_s||0);if($('#bone-preview-status'))$('#bone-preview-status').textContent='Preview updated.';}catch(error){if($('#bone-preview-status'))$('#bone-preview-status').textContent=error.message;}},120);
+    };
+    reviewCleanup=()=>{clearTimeout(previewTimer);if(!accepted&&active&&model.url)humanModels.preview(instance,model,partObjects).then(()=>humanModels.update(state.recording?.frames[state.frame]?.time_s||0)).catch(error=>toast(error.message,true));};
+    let focusedBoneSelect=$('[data-human-bone]');
+    const readBoneMap=()=>Object.fromEntries($$('[data-human-bone]').filter(input=>input.value).map(input=>[input.dataset.humanBone,input.value.startsWith('node:')?Number(input.value.slice(5)):input.value]));
+    const bindDiagram=()=>$$('#bone-diagram [data-bone-index]').forEach(node=>node.onclick=()=>{if(!focusedBoneSelect)return;focusedBoneSelect.value='node:'+node.dataset.boneIndex;focusedBoneSelect.dispatchEvent(new window.Event('change',{bubbles:true}));});
+    const refreshBoneDiagram=()=>{$('#bone-diagram').innerHTML=boneDiagramSvg(choices,readBoneMap());bindDiagram();};
+    $$('[data-human-bone]').forEach(input=>{input.onfocus=()=>{focusedBoneSelect=input;};input.onchange=()=>{draft.bone_map=readBoneMap();refreshBoneDiagram();preview();};});bindDiagram();
+    const renderBoneOffset=()=>{
+      const segment=$('#bone-offset-segment').value,values=draft.bone_offsets[segment]||[0,0,0],target=$('#bone-offset-settings');
+      target.innerHTML=`<label>POST-RETARGET LOCAL ROTATION · degrees</label><div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label for="bone-offset-${i}">${axis}</label><input id="bone-offset-${i}" type="number" step="1" data-bone-offset="${i}" value="${values[i]||0}"></div>`).join('')}</div>`;
+      target.querySelectorAll('input').forEach(input=>input.oninput=()=>{const angles=$$('[data-bone-offset]').map(field=>Number(field.value)||0);if(angles.some(Boolean))draft.bone_offsets[segment]=angles;else delete draft.bone_offsets[segment];preview();});
+    };
+    $('#bone-offset-segment').onchange=renderBoneOffset;renderBoneOffset();
+    $('#extra-default').onchange=()=>{draft.default_extra_mode=$('#extra-default').value;preview();};
+    $('#extra-bone').onchange=e=>{
+      const selected=e.target.value,target=$('#extra-bone-settings');if(!selected){target.innerHTML='';return;}
+      const bone=selected.startsWith('node:')?choices.find(item=>item.index===Number(selected.slice(5))):choices.find(item=>item.name===selected.slice(5));
+      const existing=extraKey(bone),key=existing||(bone.index==null?bone.name:String(bone.index)),values=draft.extra_bones[key]||{};
+      target.innerHTML=`<div class="single-field"><label for="extra-mode">MODE</label><select id="extra-mode"><option value="">Use default</option>${modeOptions(values.mode)}</select></div><div class="fields">${[['mass','MASS · kg',.05],['stiffness','STIFFNESS',2],['damping','DAMPING',.5],['limit_deg','ANGLE LIMIT · deg',25]].map(([key,label,fallback])=>`<div class="field"><label for="extra-${key}">${label}</label><input id="extra-${key}" data-extra-value="${key}" type="number" min="0" step="any" value="${values[key]??fallback}"></div>`).join('')}</div><label>FIXED ANGLE OFFSET · degrees</label><div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label for="extra-angle-${i}">${axis}</label><input id="extra-angle-${i}" type="number" data-extra-angle="${i}" value="${values.rotation_deg?.[i]||0}"></div>`).join('')}</div>`;
+      const save=()=>{const mode=$('#extra-mode').value;if(!mode){delete draft.extra_bones[key];preview();return;}draft.extra_bones[key]={mode,rotation_deg:$$('[data-extra-angle]').map(input=>+input.value)};$$('[data-extra-value]').forEach(input=>{draft.extra_bones[key][input.dataset.extraValue]=+input.value;});preview();};
+      target.querySelectorAll('input,select').forEach(input=>input.oninput=save);
+      $('#extra-mode').onchange=()=>{
+        if(!values.mode){const weighted=$('#extra-mode').value==='weighted_ball_joint';$('#extra-stiffness').value=weighted?.08:2;$('#extra-damping').value=weighted?.12:.5;$('#extra-limit_deg').value=weighted?70:25;}
+        save();
+      };
+    };
+    if(initialExtra)$('#extra-bone').dispatchEvent(new window.Event('change',{bubbles:true}));
+  };
+}
 function renderObjectAttachments(instance,selectedPart){
   const chain=instance.template==='chain';
   const flexibleLines=chain?[]:(state.doc.objects||[]).filter(o=>o.template==='chain');
@@ -1905,12 +2014,12 @@ function attachmentDialog(instance,selectedPart,reconnect=null,preferredTarget=n
   if(!targets.length){toast('Add a bar or another structure part to attach to.');return;}
   let result=null,request=0;const revision=state.revision;
   state.placementPending=true;gizmo?.detach();
-  modal(reconnect?'Reconnect body attachment':chain?'Attach flexible line to a part':'Attach body part to structure',reconnect?`<p>${esc(reconnect)}</p><p>Preview reaching the saved attachment point.</p><p id="attachment-preview-status" role="status"></p>`:`
+  modal(reconnect?'Reconnect body attachment':chain?'Attach flexible line to a part':'Add connection · human',reconnect?`<p>${esc(reconnect)}</p><p>Preview reaching the saved attachment point.</p><p id="attachment-preview-status" role="status"></p>`:`
     <div class="single-field"><label for="attachment-limb">${chain?'CHAIN LINK':'BODY PART'}</label><select id="attachment-limb">${limbs.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(p.id)}</option>`).join('')}</select></div>
     ${chain?`<div class="single-field"><label for="attachment-source-port">POINT ON LINK</label><select id="attachment-source-port"><option value="b">B eye</option><option value="a">A eye</option></select></div>`:''}
     <div class="single-field"><label for="attachment-target">STRUCTURE PART</label><select id="attachment-target">${targets.map(p=>`<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('')}</select></div>
     <div id="attachment-location"></div><div class="single-field"><label for="attachment-kind">ATTACHMENT</label><select id="attachment-kind"><option value="revolute">Grip · pivots around the bar</option><option value="fixed">Fixed · holds position and orientation</option><option value="spherical">Ball joint · rotates freely</option></select></div>
-    <p>The preview poses the connected ${chain?'line':'limb'} to meet the attachment. Other attachments and joint limits remain active.${chain?' Multiple links can attach along a body; each connection is an idealized no-slip point, not frictional wrapping.':''}</p><p id="attachment-preview-status" role="status"></p>`,[
+    <p>${chain?'':'For a hand gripping a round bar, the bar diameter sets the curled hand shape automatically. '}The preview poses the connected ${chain?'line':'limb'} to meet the attachment. Other attachments and joint limits remain active.${chain?' Multiple links can attach along a body; each connection is an idealized no-slip point, not frictional wrapping.':''}</p><p id="attachment-preview-status" role="status"></p>`,[
     {label:'Cancel',action:closeModal},
     {label:'Connect',primary:true,action:async()=>{if(!result||revision!==state.revision)return;const accepted=result;closeModal();await acceptPlacement(accepted,revision);toast(chain?'Flexible line attached.':'Body part attached.');}}
   ]);
@@ -2101,14 +2210,16 @@ function renderObjectInspector(instance,selectedPart){
   const pose={position_mm:[0,0,0],rotation_deg:[0,0,0],...instance.pose}, human=instance.template==='human',chain=instance.template==='chain';
   const parameters=human?{stature_mm:1750,mass_kg:75,strength_scale:1,joint_damping_nms_rad:.08,...instance.parameters}:instance.parameters||{};
   const posture=humanPosture(parameters);
-  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(instance.template)}</div><h2>${esc(instance.label||instance.id)}</h2><div class="object-modes" role="group" aria-label="Object manipulation"><button data-object-mode="whole" aria-pressed="${objectMode(instance)!=='limb'}">${human?'Move whole person':chain?'Move whole chain':'Move whole object'}</button><button data-object-mode="limb" aria-pressed="${objectMode(instance)==='limb'}">${human?'Pose limbs':chain?'Pose links':'Pose parts'}</button></div><p>${objectMode(instance)==='limb'?'Select a body part, then drag or rotate it. Connected joints follow within their limits.':'Drag or rotate any part to move the entire object and keep its pose.'}</p></div><div class="inspect-section">${propertyFields('OBJECT POSITION',pose.position_mm,'position_mm')}${propertyFields('OBJECT ROTATION',pose.rotation_deg,'rotation_deg')}</div><div class="inspect-section"><h3>${chain?'ADVANCED EDITING':'OBJECT PARAMETERS'}</h3>${Object.entries(parameters).filter(([k,v])=>!chain&&typeof v==='number'&&(!human||k!=='grip_diameter_mm')).map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-object-param="${esc(k)}" value="${v}"></div>`).join('')}${human?`
+  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(instance.template)}</div><h2>${esc(instance.label||instance.id)}</h2><div class="object-modes" role="group" aria-label="Object manipulation"><button data-object-mode="whole" aria-pressed="${objectMode(instance)!=='limb'}">${human?'Move whole person':chain?'Move whole chain':'Move whole object'}</button><button data-object-mode="limb" aria-pressed="${objectMode(instance)==='limb'}">${human?'Pose limbs':chain?'Pose links':'Pose parts'}</button></div><p>${objectMode(instance)==='limb'?'Select a body part, then drag or rotate it. Connected joints follow within their limits.':'Drag or rotate any part to move the entire object and keep its pose.'}</p></div><div class="inspect-section">${propertyFields('OBJECT POSITION',pose.position_mm,'position_mm')}${propertyFields('OBJECT ROTATION',pose.rotation_deg,'rotation_deg')}</div><div class="inspect-section"><h3>${chain?'ADVANCED EDITING':'OBJECT PARAMETERS'}</h3>${Object.entries(parameters).filter(([k,v])=>!chain&&typeof v==='number'&&(!human||!['grip_diameter_mm','movement_seed'].includes(k))).map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())} ${human?humanTooltip(k):''}</label><input type="number" data-object-param="${esc(k)}" title="${esc(human?HUMAN_PARAMETER_HELP[k]||'':'')}" value="${v}"></div>`).join('')}${human?`
     ${instance.components?'<p id="object-edited-pose">Edited pose · use Pose limbs to adjust it.</p>':`<div class="single-field"><label for="object-pose">INITIAL POSE</label><select id="object-pose">${humanPoseOptions(parameters.pose)}</select><p id="object-pose-description">${esc(humanPoseDescription(parameters.pose||'standing'))}</p></div>`}
     <div class="single-field"><label for="object-hold">POSTURE CONTROL</label><select id="object-hold">${postureOptions(posture)}</select></div>
+    <p id="object-posture-description">${esc(postureDescription(posture))}</p>
+    <div class="single-field" ${HUMAN_MOTION_MODES.includes(posture)?'':'hidden'}><label for="object-seed">MOVEMENT SEED</label><input id="object-seed" type="number" min="0" step="1" value="${parameters.movement_seed||0}"><p>The same seed repeats the same random muscle inputs.</p></div>
+    <div class="single-field"><label for="object-flexibility">FLEXIBILITY</label><select id="object-flexibility">${flexibilityOptions(parameters.flexibility||'athletic')}</select><p>${esc(flexibilityDescription(parameters.flexibility||'athletic'))}</p></div>
     <div class="single-field" id="object-held-joints-field" ${posture==='custom'?'':'hidden'}><label for="object-held-joints">JOINTS OR GROUPS · COMMA SEPARATED</label><input id="object-held-joints" value="${esc((parameters.hold_joints||[]).join(', '))}" placeholder="left_elbow, right_elbow, torso"></div>
     <p>Mass and stature estimate torso and limb thickness for rendering and fit checks. Body shape varies between people of the same mass.</p>
     <p>Held joints resist motion with finite torque. Upper body leaves hips, knees and ankles free. Strength scale adjusts available torque. Passive damping slows free motion without holding an angle.</p>
-    <div class="single-field"><label for="object-grip">GRIPPED BAR DIAMETER · mm</label><input id="object-grip" type="number" min="8" max="80" step="0.1" placeholder="Open hands" value="${parameters.grip_diameter_mm??''}"></div>
-    <p>Curled hands have a grip port at the palm centre. Connect it to a bar with a revolute joint for a grasp that pivots around the bar. Calibrate limb measurements and initial joint angles in Source or expand the model.</p>`:''}<button class="inspect-action" id="object-expand">Expand into editable parts</button></div>`;
+    <p>Joint ranges and muscle strength are engineering approximations. Use Add connection to attach a hand to a bar.</p>`:''}<button class="inspect-action" id="object-expand">Expand into editable parts</button></div>`;
   if(human){
     const planes=(state.doc.draft_subassemblies||[]).flatMap(group=>(group.mirrors||[])
       .filter(plane=>plane.axis==='x'||plane.axis==='y').map(plane=>({group,plane})));
@@ -2164,7 +2275,9 @@ function renderObjectInspector(instance,selectedPart){
       changeParameters(p=>setHumanPosture(p,mode));
     };
     $('#object-held-joints').onchange=e=>changeParameters(p=>setHumanPosture(p,'custom',e.target.value.split(',').map(s=>s.trim()).filter(Boolean)));
-    $('#object-grip').onchange=e=>changeParameters(p=>{if(e.target.value==='')delete p.grip_diameter_mm;else p.grip_diameter_mm=+e.target.value;});
+    $('#object-flexibility').onchange=e=>changeParameters(p=>{p.flexibility=e.target.value;});
+    $('#object-seed').onchange=e=>changeParameters(p=>{p.movement_seed=+e.target.value;});
+    renderHumanModelControls(instance);
   }
   if(chain)renderChainControls(instance,selectedPart);
   renderObjectAttachments(instance,selectedPart);
@@ -2173,7 +2286,7 @@ function renderObjectInspector(instance,selectedPart){
 }
 
 function renderChecks(){const result=state.checks,analysis=state.analysis;$('#inspector').innerHTML=`<div class="inspect-section"><div class="report-head"><div class="report-symbol ${result&&!result.valid?'error':''}">${result?(result.valid?'✓':'!'):'◇'}</div><div><h2>${result?(result.valid?'Geometry checked':'Review connections'):'Check the design'}</h2><div class="subtle">Sockets · alignment · collisions</div></div></div><button class="inspect-action" data-run="validate">${state.busy?'Working…':'Run validation'}</button>${result?`<div class="metric-cards"><div class="metric"><strong>${result.summary.errors}</strong><span>ERRORS</span></div><div class="metric"><strong>${result.summary.warnings}</strong><span>ADVISORIES</span></div></div>`:''}</div><div class="inspect-section"><h3>STRUCTURAL RESPONSE</h3><p>3D beam analysis of the current load case. Review the material and connector assumptions with the results.</p><button class="inspect-action secondary" data-run="analyse">Calculate stress & deflection</button>${analysis?`<p><b>${esc(analysis.status)}</b></p>${analysis.message?'<p>'+esc(analysis.message)+'</p>':''}${(analysis.members||[]).map(m=>`<button class="issue" data-result-part="${esc(m.part)}"><div class="issue-code">${esc(m.part)}</div><div class="property-row"><span>Peak stress</span><strong>${m.max_von_mises_mpa.toFixed(2)} MPa</strong></div><div class="property-row"><span>Deflection</span><strong>${m.max_displacement_mm.toFixed(3)} mm</strong></div></button>`).join('')}<p>Model results · unverified strength data remains unknown.</p>`:''}</div>${result?'<div class="inspect-section"><h3>FINDINGS</h3>'+result.issues.map((i,index)=>`<button class="issue ${i.severity}" data-result-finding="${index}" data-result-part="${esc(i.parts?.[0]||'')}"><div class="issue-code">${esc(i.code)}</div><p>${esc(i.message)}</p></button>`).join('')+'</div>':''}`;bindOperations();}
-function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label>DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="1" value="${state.simulationOptions?.duration||Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||preferences.simulationSeconds))}"></div><div class="single-field"><label for="sim-chain-links">Chain links per rigid body</label><input id="sim-chain-links" type="number" min="1" max="1000" step="1" value="${state.simulationOptions?.chain_links_per_body||preferences.simulationChainLinks}" ${state.busy?'disabled':''}></div><p>1 keeps full flexibility. Higher values make groups of links rigid for faster simulation. Attachment links stay flexible.</p><button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${r?`<div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(c.id)}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part||e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$('#fit-human').onclick=fitDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;updateSimulationProgress();}
+function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label>DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="1" value="${state.simulationOptions?.duration||Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||preferences.simulationSeconds))}"></div><div class="single-field"><label for="sim-chain-links">Chain links per rigid body</label><input id="sim-chain-links" type="number" min="1" max="1000" step="1" value="${state.simulationOptions?.chain_links_per_body||preferences.simulationChainLinks}" ${state.busy?'disabled':''}></div><p>1 keeps full flexibility. Higher values make groups of links rigid for faster simulation. Attachment links stay flexible.</p><button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${r?`<div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><button class="inspect-action secondary" id="render-recording-video">Render recording as video</button><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(c.id)}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part||e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$('#fit-human').onclick=fitDialog;if($('#render-recording-video'))$('#render-recording-video').onclick=videoRenderDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;updateSimulationProgress();}
 function renderBuild(){const p=state.plan;$('#inspector').innerHTML=`<div class="inspect-section"><h2>A plan you can build.</h2><p>Find an insertion order with clear paths and stable intermediate structures.</p><button class="inspect-action" data-run="plan">${state.busy?'Checking insertion paths…':'Find assembly order'}</button>${p?`<div class="report-head" style="margin-top:17px"><div class="report-symbol ${p.status==='buildable'?'':'warn'}">${p.status==='buildable'?'✓':'?'}</div><div><b>${esc(p.status)}</b><div class="subtle">${p.steps.length} assembly steps</div></div></div>${p.reason?'<p>'+esc(p.reason)+'</p>':''}`:''}</div>${p?.status==='buildable'?`<div class="inspect-section"><h3>STEP ${state.step+1} OF ${p.steps.length}</h3><p>${esc(p.steps[state.step].instruction)}</p>${p.steps[state.step].fasten.map(f=>'<p>↳ '+esc(f.action)+'</p>').join('')}<button class="inspect-action" id="export-build">Export illustrated build book ↗</button></div><div class="inspect-section"><h3>ASSEMBLY ORDER</h3>${p.steps.map((s,i)=>`<button class="build-step ${i===state.step?'active':''}" data-step="${i}"><span>${String(s.number).padStart(2,'0')}</span>${esc(s.part)}</button>`).join('')}</div>`:''}`;bindOperations();$$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));if($('#export-build'))$('#export-build').onclick=()=>exportBuild();}
 function findingReference(button){
   const finding=state.checks?.issues[Number(button.dataset.resultFinding)]||{};
@@ -2418,24 +2531,81 @@ function saveDialog(afterSave=null){
   ]);
   $('#save-path').value=state.path;
 }
-function exportDialog(){modal('Export your creation','<button class="option-row" id="export-book-option">Illustrated build book<small>Printable instructions, bill of materials and a stock cutting plan</small></button><button class="option-row" id="export-image-option">Render an image<small>PNG from the current camera, with configurable lighting</small></button><button class="option-row" id="export-file-option">Download design file<small>Portable JSON with parts, constraints and recorded results</small></button>',[{label:'Close',action:closeModal}]);$('#export-book-option').onclick=()=>{closeModal();exportBuild();};$('#export-image-option').onclick=()=>{closeModal();renderDialog();};$('#export-file-option').onclick=()=>{const blob=new Blob([JSON.stringify(state.doc,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=(state.doc.name||'design').replace(/[^a-z0-9-]/gi,'-')+'.pipe.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};}
+function exportDialog(){modal('Export your creation','<button class="option-row" id="export-book-option">Illustrated build book<small>Printable instructions, bill of materials and a stock cutting plan</small></button><button class="option-row" id="export-image-option">Render an image<small>PNG from the current camera, with configurable lighting</small></button><button class="option-row" id="export-video-option">Render a video<small>MP4 or GIF from a simulation recording or authored animation</small></button><button class="option-row" id="export-file-option">Download design file<small>Portable JSON with parts, constraints and recorded results</small></button>',[{label:'Close',action:closeModal}]);$('#export-book-option').onclick=()=>{closeModal();exportBuild();};$('#export-image-option').onclick=()=>{closeModal();renderDialog();};$('#export-video-option').onclick=()=>{closeModal();videoRenderDialog();};$('#export-file-option').onclick=()=>{const blob=new Blob([JSON.stringify(state.doc,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=(state.doc.name||'design').replace(/[^a-z0-9-]/gi,'-')+'.pipe.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};}
 async function exportBuild(){if(state.busy)return;state.busy=true;status('Generating the illustrated build book…');try{const result=await api('export',{engineering:true});modal('Build book ready',`<p>${result.steps} illustrated assembly steps, ${result.stock_bars} stock lengths, plus the parts list and engineering results.</p><a class="button primary" href="${esc(result.url)}" target="_blank">Open printable instructions ↗</a><p>Saved in ${esc(result.directory)}</p>`,[{label:'Done',action:closeModal}]);status('Build instructions exported');}catch(e){toast(e.message,true);}finally{state.busy=false;}}
-function renderDialog(){modal('Render an image',`<div class="fields"><div class="field"><label>WIDTH px</label><input id="render-width" value="${preferences.renderWidth}" type="number"></div><div class="field"><label>HEIGHT px</label><input id="render-height" value="${preferences.renderHeight}" type="number"></div></div><div class="single-field"><label>LIGHTING</label><select id="render-light"><option>studio</option><option>technical</option><option>flat</option></select></div><div class="single-field"><label>BACKGROUND</label><select id="render-bg"><option value="#edf1f3">Soft grey</option><option value="#ffffff">White</option><option value="transparent">Transparent</option></select></div>`,[{label:'Cancel',action:closeModal},{label:'Render PNG',primary:true,action:async()=>{status('Rendering image…');const result=await api('render',{options:{width:+$('#render-width').value,height:+$('#render-height').value,eye:camera.position.toArray(),target:orbit.target.toArray(),lighting:$('#render-light').value,background:$('#render-bg').value}});closeModal();modal('Image ready',`<a href="${esc(result.url)}" target="_blank"><img src="${esc(result.url)}" style="width:100%" alt="Rendered pipe creation"></a><p>Open the image to save it at full resolution.</p>`,[{label:'Done',action:closeModal}]);status('Image exported');}}]);$('#render-light').value=preferences.renderLighting;$('#render-bg').value=preferences.renderBackground;}
+function renderDialog(){modal('Render an image',`<div class="fields"><div class="field"><label>WIDTH px</label><input id="render-width" value="${preferences.renderWidth}" type="number"></div><div class="field"><label>HEIGHT px</label><input id="render-height" value="${preferences.renderHeight}" type="number"></div></div><div class="single-field"><label>LIGHTING</label><select id="render-light"><option>studio</option><option>technical</option><option>flat</option></select></div><div class="single-field"><label>BACKGROUND</label><select id="render-bg"><option value="#edf1f3">Soft grey</option><option value="#ffffff">White</option><option value="transparent">Transparent</option></select></div>`,[{label:'Cancel',action:closeModal},{label:'Render PNG',primary:true,action:async()=>{status('Rendering image…');const options={width:+$('#render-width').value,height:+$('#render-height').value,eye:camera.position.toArray(),target:orbit.target.toArray(),lighting:$('#render-light').value,background:$('#render-bg').value};const result=(state.scene.humans||[]).some(h=>h.render_model?.enabled!==false)?await renderHumanImage(options):await api('render',{options});closeModal();modal('Image ready',`<img src="${esc(result.url)}" style="width:100%" alt="Rendered pipe creation"><p><a href="${esc(result.url)}" download="pipesim-render.png">Save PNG at full resolution</a></p>`,[{label:'Done',action:closeModal}]);status('Image exported');}}]);$('#render-light').value=preferences.renderLighting;$('#render-bg').value=preferences.renderBackground;}
+function videoRenderDialog(){
+  const recording=state.recording||state.doc.results?.simulate,hasRecording=!!recording?.frames?.length,hasAnimation=!!state.doc.animation?.tracks?.length;
+  modal('Render a video',`<div id="video-render-form"><p>Render the complete motion from the current camera. Human appearance settings apply to every frame.</p>
+    <div class="single-field"><label for="video-source">MOTION</label><select id="video-source"><option value="recording" ${hasRecording?'':'disabled'}>Simulation recording${hasRecording?' · '+recording.frames.length+' frames':''}</option><option value="animation" ${hasAnimation?'':'disabled'}>Authored animation</option></select></div>
+    ${!hasRecording&&!hasAnimation?'<p role="alert">Run a simulation first, or add animation tracks to the design.</p>':''}
+    <div class="fields"><div class="field"><label for="video-format">FORMAT</label><select id="video-format"><option value="mp4">MP4</option><option value="gif">Animated GIF</option></select></div><div class="field"><label for="video-fps">FRAMES / SECOND</label><input id="video-fps" type="number" min="1" max="120" value="30"></div></div>
+    <div class="fields"><div class="field"><label for="video-width">WIDTH px</label><input id="video-width" type="number" min="32" max="8192" step="2" value="1280"></div><div class="field"><label for="video-height">HEIGHT px</label><input id="video-height" type="number" min="32" max="8192" step="2" value="800"></div></div>
+    <div class="single-field"><label for="video-duration">DURATION · SECONDS</label><input id="video-duration" type="number" min="0.1" max="300" step="0.1" value="4"></div>
+    <div class="fields"><div class="field"><label for="video-light">LIGHTING</label><select id="video-light"><option>studio</option><option>technical</option><option>flat</option></select></div><div class="field"><label for="video-bg">BACKGROUND</label><select id="video-bg"><option value="#edf1f3">Soft grey</option><option value="#ffffff">White</option></select></div></div><p id="video-render-status" role="status" aria-live="polite">The server renders the video locally. Large models and long recordings take longer.</p></div>`,[
+    {label:'Close',action:closeModal},{label:'Render video',primary:true,action:async()=>{
+      const form=$('#video-render-form'),message=$('#video-render-status'),source=$('#video-source').value,format=$('#video-format').value;
+      const width=Number($('#video-width').value),height=Number($('#video-height').value),fps=Number($('#video-fps').value),duration=Number($('#video-duration').value);
+      if(!Number.isInteger(width)||!Number.isInteger(height)||width<32||height<32||width>8192||height>8192)throw new Error('Use whole-pixel dimensions between 32 and 8192.');
+      if(format==='mp4'&&(width%2||height%2))throw new Error('MP4 width and height must both be even.');
+      if(source==='animation'&&(!Number.isFinite(duration)||duration<=0||duration>300||!Number.isFinite(fps)||fps<1||fps>120))throw new Error('Use a duration up to 300 seconds and a frame rate from 1 to 120.');
+      const options={width,height,eye:camera.position.toArray(),target:orbit.target.toArray(),lighting:$('#video-light').value,background:$('#video-bg').value};
+      const controls=[...form.querySelectorAll('input,select')],disabled=controls.map(c=>c.disabled);controls.forEach(c=>c.disabled=true);
+      message.textContent='Rendering video… Keep this dialog open for the preview and download link.';status('Rendering video…');
+      try{
+        const result=await api('render-video',{source,format,...(source==='recording'?{recording}:{duration,fps}),options});
+        if($('#video-render-form')!==form||!$('#modal').open)return;
+        closeModal();modal('Video ready',`${format==='mp4'?`<video controls preload="metadata" style="width:100%" src="${esc(result.url)}"></video>`:`<img style="width:100%" alt="Rendered animation" src="${esc(result.url)}">`}<p><a href="${esc(result.url)}" download="pipesim-video.${format}">Save ${format.toUpperCase()} · ${result.frames} frames</a></p>`,[{label:'Done',action:closeModal}]);status('Video exported');
+      }catch(error){message.textContent=error.message;status('Video export needs attention');throw error;}
+      finally{controls.forEach((c,i)=>c.disabled=disabled[i]);}
+    }}]);
+  $('#video-source').value=hasRecording?'recording':'animation';
+  const sync=()=>{const recorded=$('#video-source').value==='recording';$('#video-fps').disabled=recorded;$('#video-duration').disabled=recorded;$('#video-fps').value=recorded?(recording?.fps||30):(state.doc.animation?.fps||30);$('#video-duration').value=recorded?(recording?.duration_s??recording?.frames?.at(-1)?.time_s??0):(state.doc.animation?.duration_s||4);};
+  $('#video-source').onchange=sync;sync();$('#modal-actions .primary').disabled=!hasRecording&&!hasAnimation;
+}
+async function renderHumanImage(options){
+  if(!renderer)throw new Error('A working WebGL viewport is required to render imported models.');
+  await humanModelsReady;
+  for(const human of state.scene.humans||[])if(human.render_model?.enabled!==false&&!humanModels.models.has(human.id))throw new Error(`The imported model for ${human.id} is not ready. Correct its bone mapping or turn off the imported appearance before rendering.`);
+  const {width,height}=options;if(!Number.isInteger(width)||!Number.isInteger(height)||width<64||height<64||width>4096||height>4096)throw new Error('Choose image dimensions from 64 to 4096 pixels.');
+  const background=scene.background;
+  const hidden=[grid,ports,overlays,snapGhost,mirrorGhost,gizmo?.getHelper(),...(options.background==='transparent'?[floor]:[])].filter(Boolean),visibility=hidden.map(o=>o.visible);
+  const intensity=[ambient.intensity,key.intensity,fill.intensity];
+  const capture=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});
+  capture.shadowMap.enabled=renderer.shadowMap.enabled;capture.shadowMap.type=renderer.shadowMap.type;capture.toneMapping=renderer.toneMapping;capture.toneMappingExposure=renderer.toneMappingExposure;capture.outputColorSpace=renderer.outputColorSpace;
+  const view=camera.clone();view.aspect=width/height;view.updateProjectionMatrix();
+  try{
+    hidden.forEach(o=>{o.visible=false;});scene.background=options.background==='transparent'?null:new THREE.Color(options.background);capture.setClearAlpha(options.background==='transparent'?0:1);
+    if(options.lighting==='flat'){ambient.intensity=3;key.intensity=0;fill.intensity=0;}else if(options.lighting==='technical'){ambient.intensity=2.8;key.intensity=1.5;fill.intensity=1;}
+    humanModels.update(state.recording?.frames[state.frame]?.time_s||0);capture.setPixelRatio(1);capture.setSize(width,height,false);capture.render(scene,view);
+    return {url:capture.domElement.toDataURL('image/png')};
+  }finally{
+    scene.background=background;hidden.forEach((o,i)=>{o.visible=visibility[i];});[ambient.intensity,key.intensity,fill.intensity]=intensity;capture.dispose();renderer.render(scene,camera);
+  }
+}
 function humanDialog(){
+  let importedModel=null;
   modal('Add a human model',`<p>A configurable 19-part mannequin with articulated spine, neck, shoulders, arms, hands, hips, knees and ankles. Mass and stature estimate body thickness for fit checks.</p>
     <div class="fields"><div class="field"><label for="human-height">STATURE mm</label><input id="human-height" value="${preferences.defaultHumanHeightMm}" type="number"></div><div class="field"><label for="human-mass">MASS kg</label><input id="human-mass" value="${preferences.defaultHumanMassKg}" type="number"></div></div>
     <div class="single-field"><label for="human-pose">INITIAL POSE</label><select id="human-pose">${humanPoseOptions()}</select><p id="human-pose-description">${esc(humanPoseDescription('standing'))}</p></div>
     <div class="single-field"><label for="human-hold">POSTURE CONTROL</label><select id="human-hold">${HUMAN_POSTURES.filter(([id])=>id!=='custom').map(([id,label])=>`<option value="${id}">${label}</option>`).join('')}</select></div>
-    <div class="fields"><div class="field"><label for="human-strength">STRENGTH SCALE</label><input id="human-strength" type="number" min="0.1" max="10" step="0.1" value="1"></div><div class="field"><label for="human-grip">GRIPPED BAR Ø mm</label><input id="human-grip" type="number" min="8" max="80" step="0.1" placeholder="Open hands"></div></div>
-    <div class="single-field"><label for="human-damping">PASSIVE JOINT DAMPING · N·m·s/rad</label><input id="human-damping" type="number" min="0" step="0.1" value="0.08"></div>
-    <p>Posture control applies finite joint torques. Grip geometry needs a joint to a bar to hold on; the pull-up examples include both hand connections.</p>`,[
+    <p id="human-posture-description">${postureDescription('relaxed')}</p>
+    <div class="single-field" id="human-seed-field" hidden><label for="human-seed">MOVEMENT SEED</label><input id="human-seed" type="number" min="0" step="1" value="0"><p>The same seed repeats the same random muscle inputs.</p></div>
+    <div class="single-field"><label for="human-flexibility">FLEXIBILITY</label><select id="human-flexibility">${flexibilityOptions()}</select><p id="human-flexibility-description">${flexibilityDescription('minimum')}</p></div>
+    <div class="single-field"><label for="human-strength">STRENGTH SCALE ${humanTooltip('strength_scale')}</label><input id="human-strength" title="${esc(HUMAN_PARAMETER_HELP.strength_scale)}" type="number" min="0.1" max="10" step="0.1" value="1"></div>
+    <div class="single-field"><label for="human-damping">PASSIVE JOINT DAMPING · N·m·s/rad ${humanTooltip('joint_damping_nms_rad')}</label><input id="human-damping" title="${esc(HUMAN_PARAMETER_HELP.joint_damping_nms_rad)}" type="number" min="0" step="0.01" value="0.08"></div>
+    ${humanImportFields('human')}
+    <p>Joint ranges and muscle strength are engineering approximations. Use Add connection to attach a hand to a bar.</p>`,[
     {label:'Cancel',action:closeModal},{label:'Add human',primary:true,action:async()=>{
-      const parameters={stature_mm:+$('#human-height').value,mass_kg:+$('#human-mass').value,pose:$('#human-pose').value,strength_scale:+$('#human-strength').value,joint_damping_nms_rad:+$('#human-damping').value};
-      setHumanPosture(parameters,$('#human-hold').value);if($('#human-grip').value!=='')parameters.grip_diameter_mm=+$('#human-grip').value;
-      await mutate(()=>{state.doc.objects||=[];let i=1;while(state.doc.objects.some(o=>o.id==='human-'+i))i++;state.doc.objects.push({id:'human-'+i,template:'human',parameters,pose:{position_mm:[1000,0,0]}});});
+      const parameters={stature_mm:+$('#human-height').value,mass_kg:+$('#human-mass').value,pose:$('#human-pose').value,flexibility:$('#human-flexibility').value,strength_scale:+$('#human-strength').value,joint_damping_nms_rad:+$('#human-damping').value};
+      setHumanPosture(parameters,$('#human-hold').value);if(HUMAN_MOTION_MODES.includes(parameters.posture_control))parameters.movement_seed=+$('#human-seed').value;
+      await mutate(()=>{state.doc.objects||=[];let i=1;while(state.doc.objects.some(o=>o.id==='human-'+i))i++;state.doc.objects.push({id:'human-'+i,template:'human',parameters,...(importedModel?{render_model:importedModel}:{}),pose:{position_mm:[1000,0,0]}});});
       closeModal();fitView();toast('Added a 19-segment human. Use Source to calibrate individual measurements.');
     }}]);
   $('#human-pose').onchange=e=>{$('#human-pose-description').textContent=humanPoseDescription(e.target.value);};
+  $('#human-hold').onchange=e=>{$('#human-posture-description').textContent=postureDescription(e.target.value);$('#human-seed-field').hidden=!HUMAN_MOTION_MODES.includes(e.target.value);};
+  $('#human-flexibility').onchange=e=>{$('#human-flexibility-description').textContent=flexibilityDescription(e.target.value);};
+  bindHumanImport('human',model=>{importedModel=model;});
 }
 let autosaveTimer=null,lastAutosavedRevision=-1;
 async function performAutosave(){
@@ -2584,7 +2754,8 @@ function pickSocket(){
 function pickPart(){
   const hit=raycaster.intersectObjects(objects.children,true).find(h=>{let node=h.object;while(node){if(!node.visible)return false;node=node.parent;}return true;});
   if(!hit)return null;let node=hit.object;while(node&&!node.userData.part)node=node.parent;
-  return node?{id:node.userData.part,point:hit.point}:null;
+  const humanPart=humanModels.partForHit(hit);
+  return humanPart?{id:humanPart,point:hit.point}:node?{id:node.userData.part,point:hit.point}:null;
 }
 function cancelPlacement(){
   const pointerId=pointerDrag?.pointerId;pointerDrag=null;
@@ -2755,7 +2926,7 @@ document.addEventListener('keydown',e=>{
 });
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 let last=performance.now(),accumulator=0;
-function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();syncMirrorPreviews();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}positionResizeLabels();renderer?.render(scene,camera);}requestAnimationFrame(tick);
+function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();humanModels.update(state.recording?.frames[state.frame]?.time_s||0);syncMirrorPreviews();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}positionResizeLabels();renderer?.render(scene,camera);}requestAnimationFrame(tick);
 async function startupDesign(bootstrap){
   if(preferences.startup==='empty'){
     const document={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Untitled creation',parts:[],joints:[],anchors:[]};
