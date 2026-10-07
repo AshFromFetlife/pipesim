@@ -208,6 +208,10 @@ def test_new_grip_uses_limb_ik_and_preserves_the_other_hand(factory,blank):
     pa,pb,_=after.joint_frames(grip);assert np.linalg.norm(pa-pb)<.5
     assert np.allclose(before.parts['person/right_hand'].matrix,after.parts['person/right_hand'].matrix,atol=1e-6,rtol=0)
     assert len(after.doc['objects'])==2
+    person=next(o for o in after.doc['objects'] if o['id']=='person')
+    assert person['parameters']['grip_diameter_mm']==pytest.approx(42.4)
+    assert after.parts['person/left_hand'].shapes[1]['type']=='tube'
+    assert after.parts['person/left_hand'].ports['grip']['diameter_mm']==pytest.approx(42.4)
 
 
 def test_grouping_preserves_short_simulation_of_free_legs_and_hand_grips(load,factory):

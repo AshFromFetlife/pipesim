@@ -24,6 +24,7 @@ from .document import Assembly, DocumentError, joint_kind, fingerprint
 from .math3d import transform, pose_of, point, unit, UnionFind
 from .geometry import collision_primitives, mesh_for_part, shape_mesh
 from .simulation_control import Progress, SimulationCancelled
+from .human_motion import activity_torque, same_human_no_collision
 
 # Bullet's shared-memory state has 128 slots, including the base's seven pose
 # coordinates. Leave room for the base, even for a fixed-root articulation.
@@ -112,6 +113,7 @@ class World:
         self.part_map={}; self.joint_map={}; self.body_ids=[]; self.constraints=[]
         self.events=[]; self.elapsed=0.; self._mesh_number=0
         self.broken=set(); self.reference_coordinates={}
+        self.dislocated={}; self.activity_efforts={}; self._socket_clearances={}
         self._chain_initial=copy.deepcopy(assembly.doc.get('state',{}).get('joints',{}))
         try:
             self._configure()
@@ -313,6 +315,17 @@ class World:
             pb.setPhysicsEngineParameter(numSolverIterations=self.solver_iterations,numSubSteps=self.substeps,physicsClientId=self.client)
         for j in loops: self._loop(j)
         for j in self._chain_joints: self._loop(j,chain=True)
+        humans=[p for p in assembly.parts.values() if p.kind=='human']
+        for i,a in enumerate(humans):
+            for b in humans[i+1:]:
+                if same_human_no_collision(a,b):
+                    aa,bb=self.part_map[a.id],self.part_map[b.id]
+                    pb.setCollisionFilterPair(aa[0],bb[0],aa[1],bb[1],0,physicsClientId=self.client)
+        self._socket_joints=[j for j in assembly.joints if j.get('metadata',{}).get('flexibility')=='full_socket_span' or j.get('metadata',{}).get('dislocated')]
+        for j in self._socket_joints:
+            if j['id'] not in self._socket_clearances:
+                contacts=self._parent_contacts(j)
+                self._socket_clearances[j['id']]=max([0., *[-c[8] for c in contacts]])
         # Distance-only links remain separate bodies and exchange equal/opposite forces.
 
     def _load_articulation(self,robot,root,tree,groups,frames,fixed,joint_specs):
@@ -629,6 +642,64 @@ class World:
         if not schedule: return motor.get('target',0)
         return float(np.interp(t,[k['time_s'] for k in schedule],[k['target'] for k in schedule]))
 
+    def _parent_contacts(self,j):
+        a,b=(self.part_map[j[end]['part']] for end in ('a','b'))
+        return pb.getClosestPoints(a[0],b[0],distance=0,linkIndexA=a[1],linkIndexB=b[1],physicsClientId=self.client)
+
+    def _socket_contact_forces(self):
+        # Joint caps intentionally overlap in this mannequin. Preserve only that
+        # reference overlap; resist deeper parent penetration with a damped
+        # contact force. All nonadjacent contacts remain native Bullet contacts.
+        for j in self._socket_joints:
+            a,b=(j[end]['part'] for end in ('a','b'))
+            allowance=self._socket_clearances[j['id']]+.001
+            for c in self._parent_contacts(j):
+                penetration=-c[8]-allowance
+                if penetration<=0: continue
+                axis=np.array(c[7]);pa=np.array(c[5]);pb_=np.array(c[6])
+                speed=float((self._point_velocity(a,pa)-self._point_velocity(b,pb_))@axis)
+                force=min(20000.,max(0.,50000*penetration-200*speed))
+                self._force(a,axis*force,pa);self._force(b,-axis*force,pb_)
+
+    def _fragile_events(self):
+        released=[]
+        samples=self._joint_samples()
+        for j in self.assembly.joints:
+            metadata=j.get('metadata',{})
+            threshold=metadata.get('fragile_torque_nm')
+            if threshold is None or metadata.get('dislocated'): continue
+            for coordinate in self.joint_map.get(j['id'],{}):
+                if coordinate=='fixed': continue
+                q,_,reaction,motor=self.joint_state(j['id'],coordinate,samples)
+                limits=j.get('limits',{}).get('rotation_deg',[])
+                if coordinate in ('rx','ry','rz'): lo,hi=limits[('rx','ry','rz').index(coordinate)]
+                elif coordinate=='angle': lo,hi=j['limits']['angle_deg']
+                else: continue
+                angle=math.degrees(q)
+                if min(abs(angle-lo),abs(angle-hi))>2.: continue
+                # Sensor moments include passive stop reactions and impacts;
+                # the commanded torque also captures an actuator loading a stop.
+                commanded=(self.activity_efforts.get(j['id'],{}).get(coordinate,0.)
+                           if metadata.get('human_activity',{}).get('mode')=='fidget' else 0.)
+                torque=max(float(np.linalg.norm(reaction[3:])),abs(motor+commanded))
+                if torque < threshold: continue
+                released.append((j,torque));break
+        if not released: return
+        # Copy before changing limits; simulating never mutates the authored doc.
+        updated=copy.deepcopy(self.assembly)
+        by_id={j['id']:j for j in updated.joints}
+        for old,torque in released:
+            j=by_id[old['id']]
+            self._socket_clearances[j['id']]=max([0., *[-c[8] for c in self._parent_contacts(old)]])
+            j['type']='spherical';j['limits']={'rotation_deg':[[-1e8,1e8] for _ in range(3)]}
+            j['metadata']['dislocated']=True
+            self.dislocated[j['id']]={'torque_nm':torque,'time_s':self.elapsed}
+            self.events.append({'time_s':self.elapsed,'type':'human_joint_dislocation','joint':j['id'],
+                                'torque_nm':torque,'continued_as':'full_socket_span',
+                                'note':'Engineering limit release; not a clinical injury prediction'})
+        self.assembly=updated
+        self._detach(set())
+
     def _force(self,pid,force,world_point):
         body,link,_=self.part_map[pid]
         pb.applyExternalForce(body,link,force,world_point,pb.WORLD_FRAME,physicsClientId=self.client)
@@ -654,6 +725,7 @@ class World:
 
     def step(self):
         torques={key:0. for mapping in self.joint_map.values() for key in mapping.values()}
+        self.activity_efforts={}
         # A scalar query transfers a body's entire state. Batch both reads and
         # passive motor updates so long chains do not repeat that per axis.
         samples=self._joint_samples(); passive={}
@@ -669,6 +741,25 @@ class World:
                 targetVelocities=[0.]*len(values),forces=[v[1] for v in values],physicsClientId=self.client)
         for j in self.assembly.joints:
             if j['id'] not in self.joint_map: continue
+            activity=j.get('metadata',{}).get('human_activity')
+            if activity:
+                vector=activity_torque(activity['mode'],activity['seed'],j['id'],self.elapsed,activity['max_torque_nm'])
+                mapping=self.joint_map[j['id']]
+                for axis,coordinate in enumerate(('rx','ry','rz') if 'rx' in mapping else ('angle',)):
+                    if coordinate not in mapping: continue
+                    effort=float(vector[axis])
+                    if activity['mode']=='fidget': torques[mapping[coordinate]]+=effort
+                    else:
+                        # Bounded velocity constraints deliver torque up to the
+                        # sampled effort and prevent tiny Euler helper inertias
+                        # from gaining unphysical speed through explicit impulses.
+                        # A muscle stops accelerating once its shortening speed
+                        # is reached; it still exerts its full torque at a stop.
+                        speed={'struggle':1.5,'random_spasms':8.,'destructive':6.}[activity['mode']]
+                        body,index=mapping[coordinate]
+                        pb.setJointMotorControl2(body,index,pb.VELOCITY_CONTROL,targetVelocity=math.copysign(speed,effort),
+                                                 force=abs(effort),physicsClientId=self.client)
+                    self.activity_efforts.setdefault(j['id'],{})[coordinate]=effort
             motor=j.get('motor')
             if motor:
                 if 'rotation_deg' in motor:
@@ -742,9 +833,11 @@ class World:
             force=max(0.,stiffness*(length-rest)+500*speed)
             for jid in path_joints: self._span_tensions[jid]=max(self._span_tensions.get(jid,0.),force)
             self._force(a,axis*force,pa); self._force(b,-axis*force,pb_)
+        self._socket_contact_forces()
         pb.stepSimulation(physicsClientId=self.client)
         self.elapsed+=self.dt
         self._break_events()
+        self._fragile_events()
 
     def snapshot(self):
         state={}
@@ -778,7 +871,7 @@ class World:
             if c[9]<=0: continue
             force=np.array(c[7])*c[9]+np.array(c[11])*c[10]+np.array(c[13])*c[12]
             contacts.append({'a':bylink.get((c[1],c[3]),['world']),'b':bylink.get((c[2],c[4]),['world']),'position_a_mm':(np.array(c[5])*1000).tolist(),'position_b_mm':(np.array(c[6])*1000).tolist(),'force_on_a_n':force.tolist()})
-        return {'time_s':round(self.elapsed,8),'parts':{pid:pose_of(self.part_matrix(pid)) for pid in self.part_map},'joints':state,'reactions':reactions,'motor_efforts':motor_efforts,'contacts':contacts,'broken_joints':sorted(self.broken)}
+        return {'time_s':round(self.elapsed,8),'parts':{pid:pose_of(self.part_matrix(pid)) for pid in self.part_map},'joints':state,'reactions':reactions,'motor_efforts':motor_efforts,'activity_efforts':copy.deepcopy(self.activity_efforts),'contacts':contacts,'broken_joints':sorted(self.broken),'dislocated_joints':copy.deepcopy(self.dislocated)}
 
     def close(self):
         if pb.isConnected(self.client): pb.disconnect(self.client)
@@ -888,6 +981,12 @@ def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=1,progre
         result={'engine':'PyBullet articulated rigid bodies','input_sha256':assembly.input_hash,'duration_s':world.elapsed,'dt_s':dt,'solver_iterations':world.solver_iterations,'substeps':world.substeps,'fps':fps,'settled':bool(maximum_speed<.02 and max(spins,default=0)<.05),'final_max_speed_m_s':maximum_speed,'final_max_angular_speed_rad_s':max(spins,default=0),'frames':frames,'events':world.events+warnings,'chain_simplification':{'links_per_body':chain_links_per_body,'frozen_joints':frozen},'limitations':['Rigid materials; deformation is computed separately by frame FEA','Spherical joints use bounded XYZ rotational coordinates; Euler singularities and transient solver limit errors are possible','Topology changes preserve current poses and velocities; angular axes rebase at the break pose','Unknown strength data is not assigned a fracture threshold']}
         if world._chain_joints:
             result['limitations'].append('Flexible segments use ball constraints without angular stops; two-ended lines carry tension through an approximate end-to-end spring, and individual segment reactions are unavailable')
+        if any(j.get('metadata',{}).get('human_activity') for j in world.assembly.joints):
+            result['limitations'].append('Human activities use seeded bounded joint torques; strength, sustained effort and timing are engineering assumptions without fatigue or medical behavior modelling')
+        if any(j.get('metadata',{}).get('fragile_torque_nm') for j in world.assembly.joints):
+            result['limitations'].append('Fragile joints release angular stops at assumed torque thresholds; this represents dislocation only and does not predict fractures or clinical injury')
+        if world._socket_joints:
+            result['limitations'].append('Full socket span preserves neutral joint-cap overlap and uses damped contact resistance against deeper parent penetration; it is not an exact anatomical socket surface')
         if frozen: result['limitations'].append('Chain simplification freezes internal joints at the starting pose: bending, contact attribution and joint reactions are approximate; frozen joints have no reaction measurement')
         reporter.update('complete','Simulation complete',force=True,simulated_s=duration,duration_s=duration,percent=100)
         return result

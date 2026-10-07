@@ -35,7 +35,7 @@ motor['properties']['rotation_deg']=v3
 # A regrouped object keeps its edited local parts and joints as authoritative
 # components. Parameters describe the editable human controls around that pose.
 components=obj({'parts':arr(ref('part'),minItems=1),'joints':arr(ref('joint')),'anchors':arr(anchor),'parameter_reference':kv},['parts'])
-instance=obj({'id':string,'label':string,'template':string,'parameters':kv,'pose':pose,'components':components,'layout_mode':{'enum':['rigid','posable']}},['id','template'])
+instance=obj({'id':string,'label':string,'template':string,'parameters':kv,'pose':pose,'components':components,'layout_mode':{'enum':['rigid','posable']},'render_model':kv},['id','template'])
 expanded=obj({'instance':instance,'reference_part':string,'reference_pose':pose,'index':{'type':'integer','minimum':0}},['instance','reference_part','reference_pose'])
 design['$defs']={'part':part,'joint':joint}
 design['properties']['objects']=arr(instance)

@@ -31,7 +31,7 @@ def _movement_coordinates(before, after):
         pid=anchor['part']
         if not np.allclose(before.parts[pid].matrix,after.parts[pid].matrix,atol=1e-5,rtol=0):
             raise DocumentError(f'{pid} is fixed to the world')
-    coordinates={}
+    coordinates={};socket_contacts=[]
     for joint in before.joints:
         aid,bid=joint['a']['part'],joint['b']['part']
         a0,b0=before.parts[aid],before.parts[bid]; a1,b1=after.parts[aid],after.parts[bid]
@@ -69,6 +69,22 @@ def _movement_coordinates(before, after):
             else: outside=value<limits[0]-1e-5 or value>limits[1]+1e-5
             if outside: raise DocumentError(f'{name} would exceed its {coordinate} limits')
         coordinates[name]=values
+        if joint.get('metadata',{}).get('flexibility')=='full_socket_span' or joint.get('metadata',{}).get('dislocated'):
+            socket_contacts.append((aid,bid,name))
+    if socket_contacts:
+        # Unrestricted sockets retain geometry stops. Ignore only the overlap
+        # already present at the joint caps in the reference mannequin.
+        from .validation import CollisionWorld
+        members={pid for a,b,_ in socket_contacts for pid in (a,b)}
+        def subset(assembly):
+            result=copy.copy(assembly);result.parts={pid:assembly.parts[pid] for pid in members}
+            return result
+        with CollisionWorld(subset(before)) as old, CollisionWorld(subset(after)) as new:
+            for a,b,name in socket_contacts:
+                allowance=max([0., *[-c[8]*1000 for c in old.contacts(a,b)]])
+                depth=max([0., *[-c[8]*1000 for c in new.contacts(a,b)]])
+                if depth>allowance+1.:
+                    raise DocumentError(f'{name}: socket movement would intersect its parent body')
     return coordinates
 
 

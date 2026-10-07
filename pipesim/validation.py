@@ -24,6 +24,8 @@ class CollisionWorld:
         body=self.world.part_map[pid][0]; pos,quat=self.positions[pid]
         pb.resetBasePositionAndOrientation(body,np.array(pos)+np.array(delta)/1000,quat,physicsClientId=self.world.client)
     def contacts(self,a,b,tolerance_mm=.5,delta=None):
+        from .human_motion import same_human_no_collision
+        if same_human_no_collision(self.assembly.parts[a],self.assembly.parts[b]): return []
         ba=self.boxes[a]+(np.array(delta) if delta is not None else 0); bb=self.boxes[b]
         if np.any(ba[1]<bb[0]-tolerance_mm) or np.any(bb[1]<ba[0]-tolerance_mm): return []
         aa=self.world.part_map[a][0]; ab=self.world.part_map[b][0]

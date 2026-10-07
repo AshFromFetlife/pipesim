@@ -79,6 +79,10 @@ def relocate_design(doc,old_base,new_base):
     result=copy.deepcopy(doc); library=Library.load(doc.get('libraries',[]),old_base)
     def relative(path): return reference_path(old_base/path,new_base)
     result['libraries']=[relative(ref) for ref in doc.get('libraries',[])]
+    instances=list(result.get('objects',[]))+[entry['instance'] for entry in result.get('expanded_objects',[])]
+    for instance in instances:
+        if instance.get('render_model'):
+            instance['render_model']['file']=relative(instance['render_model']['file'])
     for name,definition in result.get('definitions',{}).items():
         if name in library.parts: continue  # Overrides retain their source library's asset base.
         for shape in definition.get('geometry',[]):
@@ -104,6 +108,14 @@ def snapshot_design(assembly,frame):
     doc['joints']=[j for j in doc['joints'] if j['id'] not in broken]
     for j in doc['joints']:
         q=frame.get('joints',{}).get(j['id'],{})
+        if j['id'] in frame.get('dislocated_joints',{}):
+            j['type']='spherical'
+            j['limits']={'rotation_deg':[[-1e8,1e8] for _ in range(3)]}
+            j.setdefault('metadata',{})['dislocated']=True
+        if j.get('metadata',{}).get('anatomical'):
+            reference=j['metadata'].get('reference_anatomical_angles_deg',[0,0,0])
+            delta=q.get('rotation_deg',[q.get('angle_deg',0),0,0])
+            j['metadata']['reference_anatomical_angles_deg']=(np.array(reference)+np.array(delta)).tolist()
         for coordinate,limit in j.get('limits',{}).items():
             value=q.get(coordinate,0)
             if coordinate=='rotation_deg':
@@ -114,6 +126,8 @@ def snapshot_design(assembly,frame):
             offset=q.get('slide_mm',q.get('angle_deg',0))
             if 'target' in motor: motor['target']-=offset
             for key in motor.get('schedule',[]): key['target']-=offset
+            if 'rotation_deg' in motor:
+                motor['rotation_deg']=(np.array(motor['rotation_deg'])-np.array(q.get('rotation_deg',[0,0,0]))).tolist()
         if j['type']=='socket':
             a=assembly.parts[j['a']['part']]; b=assembly.parts[j['b']['part']]
             ma=transform(frame['parts'][a.id]); mb=transform(frame['parts'][b.id]); port=a.ports[j['a']['port']]
