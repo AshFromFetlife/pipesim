@@ -1,0 +1,2382 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Untitled creation
+parts:
+- id: padded-panel-1
+  catalog: generic.padded-panel
+  parameters:
+    width_mm: 400
+    depth_mm: 150
+    thickness_mm: 60
+    padding_mm: 45
+    edge_inset_mm: 5
+  pose:
+    position_mm:
+    - 0
+    - -780
+    - 270
+    rotation_deg:
+    - 54
+    - 0
+    - 0
+- id: padded-panel-1-copy
+  catalog: generic.padded-panel
+  parameters:
+    width_mm: 400
+    depth_mm: 150
+    thickness_mm: 60
+    padding_mm: 45
+    edge_inset_mm: 5
+  pose:
+    position_mm:
+    - -1.0e-08
+    - -650.08090154
+    - 429.94122153
+    rotation_deg:
+    - 36
+    - -1.0e-08
+    - -2.0e-08
+- id: padded-panel-1-copy-2
+  catalog: generic.padded-panel
+  parameters:
+    width_mm: 400
+    depth_mm: 150
+    thickness_mm: 60
+    padding_mm: 45
+    edge_inset_mm: 5
+  pose:
+    position_mm:
+    - 2.22e-06
+    - -460.10000975
+    - 484.49999962
+    rotation_deg:
+    - 0
+    - 0
+    - 0
+- id: padded-panel-1-copy-3
+  catalog: generic.padded-panel
+  parameters:
+    width_mm: 400
+    depth_mm: 150
+    thickness_mm: 60
+    padding_mm: 45
+    edge_inset_mm: 5
+  pose:
+    position_mm:
+    - -5.0e-08
+    - -292.31661308
+    - 431.18037293
+    rotation_deg:
+    - -27.00000008
+    - -2.9e-07
+    - -3.7e-07
+- id: tc173mc-1
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230
+    - -777.02858284
+    - 206.03774019
+    rotation_deg:
+    - 36
+    - 0
+    - 180
+- id: tc173mc-1-copy
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230
+    - -718.25005761
+    - 286.93943963
+    rotation_deg:
+    - 36
+    - 0
+    - 180
+- id: tc173mc-1-copy-2
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 229.99999999
+    - -667.02034125
+    - 368.19127917
+    rotation_deg:
+    - 54
+    - 1.0e-08
+    - 179.99999998
+- id: tc173mc-1-copy-3
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230.00000001
+    - -586.11864181
+    - 426.9698044
+    rotation_deg:
+    - 54
+    - 1.0e-08
+    - 179.99999998
+- id: tc173mc-1-copy-4
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230.00000221
+    - -510.10000977
+    - 444.49999962
+    rotation_deg:
+    - 90
+    - 0
+    - 180
+- id: tc173mc-1-copy-5
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230.00000222
+    - -410.10000977
+    - 444.49999961
+    rotation_deg:
+    - 90
+    - 0
+    - 180
+- id: tc173mc-1-copy-6
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 229.99999961
+    - -355.02656079
+    - 418.23963819
+    rotation_deg:
+    - 117.00000008
+    - 2.9e-07
+    - 179.99999963
+- id: tc173mc-1-copy-7
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230.00000041
+    - -265.92590844
+    - 372.84058809
+    rotation_deg:
+    - 117.00000008
+    - 2.9e-07
+    - 179.99999963
+- id: tc173mc-1-copy-8
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 380
+    - -970
+    - 50
+    rotation_deg:
+    - 90
+    - 0
+    - 180
+- id: tc173mc-1-copy-9
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230
+    - 30
+    - 0
+    rotation_deg:
+    - 90
+    - 0
+    - 180
+- id: tc173mc-1-copy-10
+  catalog: tubeclamp.TC173MC
+  parameters: {}
+  pose:
+    position_mm:
+    - 230
+    - 130
+    - 0
+    rotation_deg:
+    - 90
+    - 0
+    - 180
+- id: tc161c-1
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 230
+    - -457.5
+    - 444.5
+    rotation_deg:
+    - -90
+    - 0
+    - 0
+- id: tc101c-1
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 329.9999954
+    - -499.90025416
+    - 74.49999999
+    rotation_deg:
+    - -89.97903288
+    - -89.81419384
+    - 179.97903277
+- id: tc101c-1-copy
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 330.00243226
+    - -323.5125978
+    - 74.52974349
+    rotation_deg:
+    - -90.88402932
+    - -89.52876007
+    - -179.11594082
+- id: tc161c-2
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 328.93760614
+    - -499.89993396
+    - 402.10005034
+    rotation_deg:
+    - -6.8e-05
+    - -0.09290303
+    - 1.1e-07
+- id: tc101c-1-copy-2
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 330.00544934
+    - -720.00000169
+    - 74.49999835
+    rotation_deg:
+    - 89.99886761
+    - -89.98280541
+    - 0.00113239
+- id: tc101c-1-copy-3
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 330
+    - -620
+    - 74.5
+    rotation_deg:
+    - 90
+    - -89.99999999
+    - 0
+- id: tc161c-3
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 230.39133613
+    - -323.95589991
+    - 354.82371984
+    rotation_deg:
+    - 89.47116595
+    - 26.99999988
+    - 89.99998541
+- id: tc101c-2
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 327.69074342
+    - -323.54824062
+    - 355.62392429
+    rotation_deg:
+    - -0.00529655
+    - 0.47119894
+    - -179.75993493
+- id: tc101c-3
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 330.04310876
+    - -720.00000088
+    - 199.9999953
+    rotation_deg:
+    - 3.7e-07
+    - -0.01719443
+    - 180
+- id: tc101c-3-copy
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 330
+    - -620
+    - 360
+    rotation_deg:
+    - 0
+    - 0
+    - 180
+- id: tc161c-4
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 328.36068653
+    - -499.8995863
+    - 579.99992439
+    rotation_deg:
+    - -6.8e-05
+    - -0.27869803
+    - -1.1e-07
+- id: tc161c-5
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 529.01015457
+    - -677.59998823
+    - 349.99995041
+    rotation_deg:
+    - 90.00000515
+    - 13.31748636
+    - -89.9999777
+- id: tc161c-5-copy
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 326.60974435
+    - -323.5650323
+    - 487.39552375
+    rotation_deg:
+    - 0.01449695
+    - -0.47752681
+    - -0.00064941
+- id: tc161c-5-copy-2
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 740
+    - -380
+    - 50
+    rotation_deg:
+    - 0
+    - 0
+    - 180
+- id: tc161c-5-copy-3
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 330.09455516
+    - -677.59999997
+    - 350.00000165
+    rotation_deg:
+    - 0.00643254
+    - 89.99140272
+    - -179.99489109
+- id: tc161c-5-copy-4
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 798.22956632
+    - -687.36650405
+    - 391.2603007
+    rotation_deg:
+    - -103.31700398
+    - -1.788e-05
+    - 179.99992046
+- id: tc161c-5-copy-5
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 798.23047914
+    - -457.49995187
+    - 402.09985056
+    rotation_deg:
+    - 90.00001646
+    - 13.31699164
+    - -90.00008378
+- id: tc161c-5-copy-6
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 1100
+    - -380
+    - 50
+    rotation_deg:
+    - 0
+    - 0
+    - 180
+- id: tc161c-5-copy-7
+  catalog: tubeclamp.TC161C
+  parameters: {}
+  pose:
+    position_mm:
+    - 529.00998326
+    - -457.50002935
+    - 402.10012408
+    rotation_deg:
+    - 90.00000516
+    - 13.31748636
+    - -89.9999777
+joints:
+- id: padded-panel-1-screw-1
+  type: fixed
+  a:
+    part: tc173mc-1
+    port: hinge
+  b:
+    part: padded-panel-1
+    frame:
+      position_mm:
+      - 180
+      - -50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1 backing at local X 180.0, Y -50.0 mm into tc173mc-1/hinge; specify length
+      for backing thickness and gap
+    snapshot_reference_coordinates: {}
+- id: padded-panel-1-screw-2
+  type: fixed
+  a:
+    part: tc173mc-1-copy
+    port: hinge
+  b:
+    part: padded-panel-1
+    frame:
+      position_mm:
+      - 180
+      - 50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1 backing at local X 180.0, Y 50.0 mm into tc173mc-1-copy/hinge; specify
+      length for backing thickness and gap
+    snapshot_reference_coordinates: {}
+- id: padded-panel-1-copy-screw-1
+  type: fixed
+  a:
+    part: tc173mc-1-copy-2
+    port: hinge
+  b:
+    part: padded-panel-1-copy
+    frame:
+      position_mm:
+      - 180
+      - -50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1-copy backing at local X 180.0, Y -50.0 mm into tc173mc-1-copy-2/hinge;
+      specify length for backing thickness and gap
+    snapshot_reference_coordinates: {}
+- id: padded-panel-1-copy-screw-2
+  type: fixed
+  a:
+    part: tc173mc-1-copy-3
+    port: hinge
+  b:
+    part: padded-panel-1-copy
+    frame:
+      position_mm:
+      - 180
+      - 50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1-copy backing at local X 180.0, Y 50.0 mm into tc173mc-1-copy-3/hinge;
+      specify length for backing thickness and gap
+    snapshot_reference_coordinates: {}
+- id: padded-panel-1-copy-2-screw-1
+  type: fixed
+  a:
+    part: tc173mc-1-copy-4
+    port: hinge
+  b:
+    part: padded-panel-1-copy-2
+    frame:
+      position_mm:
+      - 180
+      - -50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1-copy-2 backing at local X 180.0, Y -50.0 mm into tc173mc-1-copy-4/hinge;
+      specify length for backing thickness and gap
+    snapshot_reference_coordinates: {}
+- id: padded-panel-1-copy-2-screw-2
+  type: fixed
+  a:
+    part: tc173mc-1-copy-5
+    port: hinge
+  b:
+    part: padded-panel-1-copy-2
+    frame:
+      position_mm:
+      - 180
+      - 50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1-copy-2 backing at local X 180.0, Y 50.0 mm into tc173mc-1-copy-5/hinge;
+      specify length for backing thickness and gap
+    snapshot_reference_coordinates: {}
+- id: padded-panel-1-copy-3-screw-1
+  type: fixed
+  a:
+    part: tc173mc-1-copy-6
+    port: hinge
+  b:
+    part: padded-panel-1-copy-3
+    frame:
+      position_mm:
+      - 180
+      - -50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1-copy-3 backing at local X 180.0, Y -50.0 mm into tc173mc-1-copy-6/hinge;
+      specify length for backing thickness and gap
+    snapshot_reference_coordinates: {}
+- id: padded-panel-1-copy-3-screw-2
+  type: fixed
+  a:
+    part: tc173mc-1-copy-7
+    port: hinge
+  b:
+    part: padded-panel-1-copy-3
+    frame:
+      position_mm:
+      - 180
+      - 50
+      - -40
+      axis:
+      - -2.465190328815662e-32
+      - -2.220446049250313e-16
+      - 1
+  metadata:
+    hardware: Screw through padded-panel-1-copy-3 backing at local X 180.0, Y 50.0 mm into tc173mc-1-copy-7/hinge;
+      specify length for backing thickness and gap
+    snapshot_reference_coordinates: {}
+anchors: []
+draft_subassemblies:
+- id: draft-1
+  runs:
+  - id: tube-c-1
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 329.9999999999999
+    - -490
+    - 110
+    end_mm:
+    - 330
+    - -490
+    - 610
+    attachments:
+    - connector: tc101c-1
+      port: branch
+      end: start
+      insertion_mm: 24
+    - connector: tc161c-2
+      port: through
+    - connector: tc161c-4
+      port: through
+    roll_deg: 0
+  - id: tube-c-1-copy
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 230
+    - -537.5
+    - 444.5
+    end_mm:
+    - 230
+    - -387.5
+    - 444.5
+    attachments:
+    - connector: tc173mc-1-copy-5
+      port: through
+    - connector: tc173mc-1-copy-4
+      port: through
+    - connector: tc161c-1
+      port: through
+    roll_deg: -270
+  - id: tube-c-1-copy-2
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 229.99999999999997
+    - -689.1874069728059
+    - 352.08596317270957
+    end_mm:
+    - 229.99999999999997
+    - -567.8348578165638
+    - 440.25375101658057
+    attachments:
+    - connector: tc173mc-1-copy-3
+      port: through
+    - connector: tc173mc-1-copy-2
+      port: through
+    roll_deg: 2.892391053232611e-15
+  - id: tube-c-1-copy-3
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 230
+    - -793.1926772772903
+    - 183.7897728471943
+    end_mm:
+    - 230
+    - -705.0248894334194
+    - 305.14232200343645
+    attachments:
+    - connector: tc173mc-1-copy
+      port: through
+    - connector: tc173mc-1
+      port: through
+    roll_deg: 1.340072231431444e-15
+  - id: tube-c-1-copy-4
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 230.00000000000003
+    - -245.78916329739582
+    - 362.5804040512544
+    end_mm:
+    - 230.00000000000003
+    - -379.440141925651
+    - 430.67897901218635
+    attachments:
+    - connector: tc173mc-1-copy-6
+      port: through
+    - connector: tc173mc-1-copy-7
+      port: through
+    - connector: tc161c-3
+      port: cross
+    roll_deg: 3.831189937565904e-15
+  - id: tube-c-1-copy-5
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 1150
+    - -260
+    - 20
+    end_mm:
+    - 1150
+    - -260
+    - 170
+    attachments: []
+    roll_deg: 0
+  - id: tube-c-1-copy-6
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 1250
+    - -260
+    - 20
+    end_mm:
+    - 1250
+    - -260
+    - 170
+    attachments: []
+    roll_deg: 0
+  - id: tube-c-1-copy-7
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -850.21
+    - -457.5
+    - 402.1
+    end_mm:
+    - 850.21
+    - -457.5
+    - 402.1
+    attachments:
+    - connector: tc161c-1
+      port: cross
+    - connector: tc161c-2
+      port: cross
+    - connector: tc161c-5-copy-7
+      port: through
+    - connector: tc161c-5-copy-5
+      port: through
+    roll_deg: 0
+  - id: tube-c-1-copy-8
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 329.99999999999983
+    - -930
+    - 74.49999999999994
+    end_mm:
+    - 329.99999999999994
+    - 70
+    - 74.50000000000017
+    attachments:
+    - connector: tc101c-1
+      port: through
+    - connector: tc101c-1-copy
+      port: through
+    - connector: tc101c-1-copy-3
+      port: through
+    - connector: tc101c-1-copy-2
+      port: through
+    roll_deg: 270
+  - id: tube-c-1-copy-9
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 329.9999999999999
+    - -340
+    - 110
+    end_mm:
+    - 330
+    - -340
+    - 510
+    attachments:
+    - connector: tc101c-1-copy
+      port: branch
+      end: start
+      insertion_mm: 24
+    - connector: tc101c-2
+      port: through
+    - connector: tc161c-5-copy
+      port: through
+    roll_deg: 0
+  - id: tube-c-1-copy-10
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 330
+    - -640
+    - 130
+    end_mm:
+    - 330
+    - -640
+    - 530
+    attachments:
+    - connector: tc101c-1-copy-3
+      port: branch
+      end: start
+      insertion_mm: 24
+    - connector: tc101c-3-copy
+      port: through
+    roll_deg: 0
+  - id: tube-c-1-copy-11
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 320
+    - -780
+    - 104.5
+    end_mm:
+    - 320
+    - -780
+    - 404.5
+    attachments:
+    - connector: tc101c-1-copy-2
+      port: branch
+      end: start
+      insertion_mm: 24
+    - connector: tc101c-3
+      port: through
+    - connector: tc161c-5-copy-3
+      port: cross
+    roll_deg: 0
+  - id: tube-c-1-copy-12
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 294.5
+    - -620
+    - 360
+    end_mm:
+    - -294.5
+    - -619.9999999999999
+    - 360
+    attachments:
+    - connector: tc101c-3-copy
+      port: branch
+      end: start
+      insertion_mm: 24
+    roll_deg: 0
+  - id: tube-c-1-copy-13
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 304.0730750074768
+    - -457.4995200001653
+    - 579.8423552993603
+    end_mm:
+    - 854.281503561667
+    - -457.4995200001653
+    - 583.4107650191976
+    attachments:
+    - connector: tc161c-4
+      port: cross
+    roll_deg: -3.0737312119560837e-25
+  - id: tube-c-1-copy-14
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -300.11
+    - -327.5
+    - 357.6
+    end_mm:
+    - 300.11
+    - -327.5
+    - 357.6
+    attachments:
+    - connector: tc161c-3
+      port: through
+    - connector: tc101c-2
+      port: branch
+      end: start
+      insertion_mm: 24
+    roll_deg: 0
+  - id: tube-c-1-copy-15
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - -300.11
+    - -720
+    - 200
+    end_mm:
+    - 300.11
+    - -720
+    - 200
+    attachments: []
+    roll_deg: 0
+  - id: tube-c-1-copy-16
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 303.96337512960815
+    - -281.16508000016535
+    - 487.24471630385557
+    end_mm:
+    - 854.1637458132642
+    - -281.16508000016535
+    - 491.89133748405067
+    attachments:
+    - connector: tc161c-5-copy
+      port: cross
+    roll_deg: -2.1449728120524443e-25
+  - id: tube-c-1-copy-17
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 307.4499999999998
+    - -677.6000000000001
+    - 350
+    end_mm:
+    - 857.6699907542084
+    - -677.6000000000001
+    - 350.0000000000001
+    attachments:
+    - connector: tc161c-5-copy-3
+      port: through
+    - connector: tc161c-5
+      port: through
+    - connector: tc161c-5-copy-4
+      port: cross
+    roll_deg: 2.962866108074155e-17
+  - id: tube-c-2
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 529.010265839189
+    - -830.3690866253854
+    - 357.40922873649697
+    end_mm:
+    - 529.0098870181822
+    - -343.81477786995237
+    - 472.5825964539474
+    attachments:
+    - connector: tc161c-5-copy-7
+      port: cross
+    - connector: tc161c-5
+      port: cross
+    roll_deg: 90.00000000000001
+  - id: tube-c-2-copy
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 1440
+    - -600
+    - 0
+    end_mm:
+    - 1440
+    - -600
+    - 300
+    attachments: []
+    roll_deg: 0
+  - id: tube-c-2-copy-2
+    catalog: tubeclamp.tube-C
+    parameters:
+      wall_mm: 3.2
+    start_mm:
+    - 798.2292328260665
+    - -836.1473255709652
+    - 356.04332657178503
+    end_mm:
+    - 798.2306526410847
+    - -349.59226212529796
+    - 471.2135135571527
+    attachments:
+    - connector: tc161c-5-copy-4
+      port: through
+    - connector: tc161c-5-copy-5
+      port: cross
+    roll_deg: -270.00000508355237
+  mirrors:
+  - id: mirror-1
+    axis: x
+    offset_mm: 0
+    scope: scene
+    run_modes:
+      tube-c-1-copy-7: centered
+      tube-c-1-copy-14: free
+      tube-c-1-copy-12: centered
+      tube-c-1-copy-15: centered
+      tube-c-2: free
+  mirror_parts:
+  - padded-panel-1-copy
+  - padded-panel-1-copy-2
+  - padded-panel-1-copy-3
+  - tc101c-1-copy
+  - tc101c-1-copy-2
+  - tc101c-1-copy-3
+  - tc101c-3-copy
+  - tc161c-5-copy
+  - tc161c-5-copy-2
+  - tc161c-5-copy-3
+  - tc161c-5-copy-4
+  - tc161c-5-copy-5
+  - tc161c-5-copy-6
+  - tc161c-5-copy-7
+  - tc173mc-1-copy
+  - tc173mc-1-copy-10
+  - tc173mc-1-copy-2
+  - tc173mc-1-copy-3
+  - tc173mc-1-copy-4
+  - tc173mc-1-copy-5
+  - tc173mc-1-copy-6
+  - tc173mc-1-copy-7
+  - tc173mc-1-copy-8
+  - tc173mc-1-copy-9
+objects:
+- id: human-1
+  template: human
+  parameters:
+    stature_mm: 1650
+    mass_kg: 50
+    pose: arms-spread
+    strength_scale: 1
+    joint_damping_nms_rad: 0.08
+    hold_pose: false
+  pose:
+    position_mm:
+    - 0
+    - 433.88681
+    - 205.49446
+    rotation_deg:
+    - 63
+    - 0
+    - 0
+  symmetry:
+    axis: x
+    offset_mm: 0
+    line_offset_mm: 433.88681
+    rotation_deg:
+    - 63
+    - 0
+    - 0
+  components:
+    parts:
+    - id: pelvis
+      pose:
+        position_mm:
+        - 0
+        - 0
+        - 891
+        rotation_deg:
+        - 0
+        - 0
+        - 0
+      body:
+        name: Pelvis
+        kind: human
+        geometry:
+        - type: box
+          size_mm:
+          - 260.9240294830614
+          - 173.9493529887076
+          - 181.5
+        material: human-tissue
+        mass_kg: 6.733687405159332
+        color: '#648b91'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: lumbar
+      pose:
+        position_mm:
+        - 0
+        - -38.95188762
+        - 1032.30783289
+        rotation_deg:
+        - 30.15102148
+        - 0
+        - 0
+      body:
+        name: Lumbar
+        kind: human
+        geometry:
+        - type: box
+          size_mm:
+          - 194.36682918145
+          - 159.6584668276196
+          - 165
+        material: human-tissue
+        mass_kg: 5.690440060698028
+        color: '#648b91'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: thorax
+      pose:
+        position_mm:
+        - 0
+        - -177.61554685
+        - 1148.39980418
+        rotation_deg:
+        - 59.99999999
+        - 0
+        - 0
+      body:
+        name: Thorax
+        kind: human
+        geometry:
+        - type: box
+          size_mm:
+          - 298.3801117982387
+          - 193.94707266885516
+          - 280.5
+        material: human-tissue
+        mass_kg: 9.484066767830045
+        color: '#648b91'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: neck
+      pose:
+        position_mm:
+        - 0
+        - -336.22809953
+        - 1239.97480419
+        rotation_deg:
+        - 59.99999999
+        - 0
+        - 0
+      body:
+        name: Neck
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 39.6
+          length_mm: 57.75000000000001
+        material: human-tissue
+        mass_kg: 0.5216236722306524
+        color: '#ddb087'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: head
+      pose:
+        position_mm:
+        - 0
+        - -456.25922048
+        - 1309.27480421
+        rotation_deg:
+        - 59.99999999
+        - 0
+        - 0
+      body:
+        name: Head
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 74.25
+          length_mm: 49.5
+        material: human-tissue
+        mass_kg: 3.290971168437026
+        color: '#ddb087'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: left_clavicle
+      pose:
+        position_mm:
+        - -137.79856303
+        - -260.20015877
+        - 1196.0806523
+        rotation_deg:
+        - 91.50368918
+        - -30.10242007
+        - -93.0091508
+      body:
+        name: Left Clavicle
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 31.349999999999998
+          length_mm: 103.83248781296265
+        material: human-tissue
+        mass_kg: 0.37936267071320184
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: left_upper_arm
+      pose:
+        position_mm:
+        - -362.22212604
+        - -257.04966459
+        - 1194.25905504
+        rotation_deg:
+        - 90.00194092
+        - 60.00014997
+        - -89.99776
+      body:
+        name: Left Upper Arm
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 40.28131509276222
+          length_mm: 216.24363283302802
+        material: human-tissue
+        mass_kg: 1.285091047040971
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: left_forearm
+      pose:
+        position_mm:
+        - -626.22212599
+        - -257.05224077
+        - 1194.25458347
+        rotation_deg:
+        - 90.00194092
+        - 60.00014997
+        - -89.99776
+      body:
+        name: Left Forearm
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 33.78009468126967
+          length_mm: 178.4458295737146
+        material: human-tissue
+        mass_kg: 0.7682094081942337
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: left_hand
+      pose:
+        position_mm:
+        - -832.47212595
+        - -257.05425341
+        - 1194.25109007
+        rotation_deg:
+        - 90.00194092
+        - 60.00014997
+        - -89.99776
+      body:
+        name: Left Hand
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 37.95
+          length_mm: 104.94
+        material: human-tissue
+        mass_kg: 0.2892640364188164
+        color: '#ddb087'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+        ports:
+          grip:
+            type: mount
+            label: Palm grip centre
+            position_mm:
+            - 0
+            - 0
+            - 0
+            axis:
+            - 1
+            - 0
+            - 0
+            assembly: hook
+            capacity: 1
+    - id: left_thigh
+      pose:
+        position_mm:
+        - -90.75005891
+        - 4.257e-05
+        - 664.125
+        rotation_deg:
+        - -179.99997879
+        - 3.42e-06
+        - 45
+      body:
+        name: Left Thigh
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 54.411719210896464
+          length_mm: 289.8089054203864
+        material: human-tissue
+        mass_kg: 6.7147192716236725
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: left_shin
+      pose:
+        position_mm:
+        - -90.75017676
+        - 0.00012771
+        - 276.37499999
+        rotation_deg:
+        - -179.99997879
+        - 3.42e-06
+        - 45
+      body:
+        name: Left Shin
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 41.45738892701277
+          length_mm: 313.126699931377
+        material: human-tissue
+        mass_kg: 2.0533004552352048
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: left_foot
+      pose:
+        position_mm:
+        - -133.04407382
+        - 42.29400459
+        - 37.12502213
+        rotation_deg:
+        - 2.121e-05
+        - 3.42e-06
+        - 45
+      body:
+        name: Left Foot
+        kind: human
+        geometry:
+        - type: box
+          size_mm:
+          - 90.75
+          - 239.24999999999997
+          - 74.25
+        material: human-tissue
+        mass_kg: 0.6496585735963581
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: right_clavicle
+      pose:
+        position_mm:
+        - 137.79856303
+        - -260.20015877
+        - 1196.0806523
+        rotation_deg:
+        - 91.50368918
+        - 30.10242007
+        - 93.0091508
+      body:
+        name: Right Clavicle
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 31.349999999999998
+          length_mm: 103.83248781296265
+        material: human-tissue
+        mass_kg: 0.37936267071320184
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: right_upper_arm
+      pose:
+        position_mm:
+        - 362.22212604
+        - -257.04966459
+        - 1194.25905504
+        rotation_deg:
+        - 90.00194092
+        - -60.00014997
+        - 89.99776
+      body:
+        name: Right Upper Arm
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 40.28131509276222
+          length_mm: 216.24363283302802
+        material: human-tissue
+        mass_kg: 1.285091047040971
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: right_forearm
+      pose:
+        position_mm:
+        - 626.22212599
+        - -257.05224077
+        - 1194.25458347
+        rotation_deg:
+        - 90.00194092
+        - -60.00014997
+        - 89.99776
+      body:
+        name: Right Forearm
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 33.78009468126967
+          length_mm: 178.4458295737146
+        material: human-tissue
+        mass_kg: 0.7682094081942337
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: right_hand
+      pose:
+        position_mm:
+        - 832.47212595
+        - -257.05425341
+        - 1194.25109007
+        rotation_deg:
+        - 90.00194092
+        - -60.00014997
+        - 89.99776
+      body:
+        name: Right Hand
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 37.95
+          length_mm: 104.94
+        material: human-tissue
+        mass_kg: 0.2892640364188164
+        color: '#ddb087'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+        ports:
+          grip:
+            type: mount
+            label: Palm grip centre
+            position_mm:
+            - 0
+            - 0
+            - 0
+            axis:
+            - 1
+            - 0
+            - 0
+            assembly: hook
+            capacity: 1
+    - id: right_thigh
+      pose:
+        position_mm:
+        - 90.75005891
+        - 4.257e-05
+        - 664.125
+        rotation_deg:
+        - -179.99997879
+        - -3.42e-06
+        - -45
+      body:
+        name: Right Thigh
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 54.411719210896464
+          length_mm: 289.8089054203864
+        material: human-tissue
+        mass_kg: 6.7147192716236725
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: right_shin
+      pose:
+        position_mm:
+        - 90.75017676
+        - 0.00012771
+        - 276.37499999
+        rotation_deg:
+        - -179.99997879
+        - -3.42e-06
+        - -45
+      body:
+        name: Right Shin
+        kind: human
+        geometry:
+        - type: capsule
+          radius_mm: 41.45738892701277
+          length_mm: 313.126699931377
+        material: human-tissue
+        mass_kg: 2.0533004552352048
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    - id: right_foot
+      pose:
+        position_mm:
+        - 133.04407382
+        - 42.29400459
+        - 37.12502213
+        rotation_deg:
+        - 2.121e-05
+        - -3.42e-06
+        - -45
+      body:
+        name: Right Foot
+        kind: human
+        geometry:
+        - type: box
+          size_mm:
+          - 90.75
+          - 239.24999999999997
+          - 74.25
+        material: human-tissue
+        mass_kg: 0.6496585735963581
+        color: '#7fa2a5'
+        friction: 0.7
+        restitution: 0.01
+        source:
+          geometry_status: anthropometric mannequin approximation
+          mass_basis: Normalised engineering segment fractions; individual calibration required
+    joints:
+    - id: lumbar_flex
+      type: spherical
+      a:
+        part: pelvis
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - 74.24999999999977
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: lumbar
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - -77.55000000000007
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -60.151021480000004
+          - 14.848978520000003
+        - - -20
+          - 20
+        - - -30
+          - 30
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: thoracic_flex
+      type: spherical
+      a:
+        part: lumbar
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - 62.700000000000045
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: thorax
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - -123.75
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -49.848978509999995
+          - 5.151021490000005
+        - - -20
+          - 20
+        - - -35
+          - 35
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: neck_base
+      type: spherical
+      a:
+        part: thorax
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - 135.29999999999995
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: neck
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - -47.84999999999991
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -35
+          - 40
+        - - -25
+          - 25
+        - - -40
+          - 40
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: neck_head
+      type: spherical
+      a:
+        part: neck
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - 56.100000000000136
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: head
+        frame:
+          position_mm:
+          - 0
+          - 0
+          - -82.5
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -25
+          - 30
+        - - -20
+          - 20
+        - - -40
+          - 40
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: left_clavicle_joint
+      type: spherical
+      a:
+        part: thorax
+        frame:
+          position_mm:
+          - -57.75000000000001
+          - 0
+          - 99
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: left_clavicle
+        frame:
+          position_mm:
+          - -1.3897079043090343e-09
+          - 1.961348314635351e-14
+          - -80.13124390648132
+          axis:
+          - -0.05147804776626201
+          - 2.4476698713469413e-16
+          - -0.9986741263285909
+          rotation_deg:
+          - 180
+          - 87.04922089
+          - 180
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -14.863571074428295
+          - 15.136428925571705
+        - - -15.347773535049297
+          - 14.652226464950703
+        - - -19.993429653061053
+          - 20.006570346938947
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: left_shoulder
+      type: spherical
+      a:
+        part: left_clavicle
+        frame:
+          position_mm:
+          - 1.3897079043090343e-09
+          - -1.9613483146353516e-14
+          - 80.13124390648132
+          axis:
+          - -0.05147804776626201
+          - 2.4476698713469413e-16
+          - -0.9986741263285909
+          rotation_deg:
+          - 180
+          - 87.04922089
+          - 180
+      b:
+        part: left_upper_arm
+        frame:
+          position_mm:
+          - 0
+          - 1.7680838162689922e-14
+          - -144.375
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -60.13440577996466
+          - 179.86559422003532
+        - - -199.65224306232093
+          - 20.34775693767906
+        - - -0.007673327466403901
+          - 179.9923266725336
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        reference_anatomical_angles_deg:
+        - 0
+        - 0
+        - -90
+        snapshot_reference_coordinates: {}
+    - id: left_elbow
+      type: revolute
+      a:
+        part: left_upper_arm
+        frame:
+          position_mm:
+          - 0
+          - -1.7680838162689896e-14
+          - 144.375
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: left_forearm
+        frame:
+          position_mm:
+          - 0
+          - 1.464983733480022e-14
+          - -119.625
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        angle_deg:
+        - 0
+        - 150
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: left_wrist
+      type: spherical
+      a:
+        part: left_forearm
+        frame:
+          position_mm:
+          - 0
+          - -1.4649837334800208e-14
+          - 119.625
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: left_hand
+        frame:
+          position_mm:
+          - 0
+          - 1.0608502897613948e-14
+          - -86.625
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -70
+          - 80
+        - - -25
+          - 35
+        - - -75
+          - 75
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: left_hip
+      type: spherical
+      a:
+        part: pelvis
+        frame:
+          position_mm:
+          - -90.75
+          - 0
+          - -33.000000000000114
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: left_thigh
+        frame:
+          position_mm:
+          - 0
+          - 2.374283981846931e-14
+          - -193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -25.00001258452688
+          - 124.99998741547313
+        - - -45.000017417572245
+          - 44.999982582427755
+        - - -89.99999999725422
+          - 2.745782615609405e-09
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates:
+          rotation_deg:
+          - 1.1396801627554746e-05
+          - 1.026470394201533e-05
+          - 1.5483571086257864e-05
+    - id: left_knee
+      type: revolute
+      a:
+        part: left_thigh
+        frame:
+          position_mm:
+          - 0
+          - -2.374283981846931e-14
+          - 193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: left_shin
+        frame:
+          position_mm:
+          - 0
+          - 2.374283981846931e-14
+          - -193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        angle_deg:
+        - -155
+        - 0
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: left_ankle
+      type: spherical
+      a:
+        part: left_shin
+        frame:
+          position_mm:
+          - 0
+          - -2.374283981846931e-14
+          - 193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: left_foot
+        frame:
+          position_mm:
+          - 0
+          - -59.81249999999999
+          - 45.375
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -45
+          - 25
+        - - -20
+          - 20
+        - - -15
+          - 15
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: right_clavicle_joint
+      type: spherical
+      a:
+        part: thorax
+        frame:
+          position_mm:
+          - 57.75000000000001
+          - 0
+          - 99
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: right_clavicle
+        frame:
+          position_mm:
+          - 1.3897079043090343e-09
+          - 1.3011126000125333e-17
+          - -80.13124390648132
+          axis:
+          - -0.05147804776626201
+          - 1.623726947764838e-19
+          - 0.9986741263285909
+          rotation_deg:
+          - 180
+          - -87.04922089
+          - 180
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -14.863571074428295
+          - 15.136428925571705
+        - - -14.652226464950727
+          - 15.347773535049273
+        - - -20.00657034693896
+          - 19.99342965306104
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: right_shoulder
+      type: spherical
+      a:
+        part: right_clavicle
+        frame:
+          position_mm:
+          - -1.3897079043090343e-09
+          - -1.301112600012691e-17
+          - 80.13124390648132
+          axis:
+          - -0.05147804776626201
+          - 1.623726947764838e-19
+          - 0.9986741263285909
+          rotation_deg:
+          - 180
+          - -87.04922089
+          - 180
+      b:
+        part: right_upper_arm
+        frame:
+          position_mm:
+          - 0
+          - 1.7680838162689922e-14
+          - -144.375
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -60.134405779964645
+          - 179.86559422003538
+        - - -20.347756937679083
+          - 199.6522430623209
+        - - -179.99232667253355
+          - 0.0076733274664502246
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        reference_anatomical_angles_deg:
+        - 0
+        - 0
+        - 90
+        snapshot_reference_coordinates: {}
+    - id: right_elbow
+      type: revolute
+      a:
+        part: right_upper_arm
+        frame:
+          position_mm:
+          - 0
+          - -1.7680838162689896e-14
+          - 144.375
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: right_forearm
+        frame:
+          position_mm:
+          - 0
+          - 1.464983733480022e-14
+          - -119.625
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        angle_deg:
+        - 0
+        - 150
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: right_wrist
+      type: spherical
+      a:
+        part: right_forearm
+        frame:
+          position_mm:
+          - 0
+          - -1.4649837334800208e-14
+          - 119.625
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: right_hand
+        frame:
+          position_mm:
+          - 0
+          - 1.0608502897613948e-14
+          - -86.625
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -70
+          - 80
+        - - -25
+          - 35
+        - - -75
+          - 75
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: right_hip
+      type: spherical
+      a:
+        part: pelvis
+        frame:
+          position_mm:
+          - 90.75
+          - 0
+          - -33.000000000000114
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      b:
+        part: right_thigh
+        frame:
+          position_mm:
+          - 0
+          - 2.374283981846931e-14
+          - -193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -25.00001258452688
+          - 124.99998741547313
+        - - -44.999982582427755
+          - 45.000017417572245
+        - - -2.745782615609405e-09
+          - 89.99999999725422
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates:
+          rotation_deg:
+          - 1.1396801627554746e-05
+          - -1.026470394201533e-05
+          - -1.5483571086257864e-05
+    - id: right_knee
+      type: revolute
+      a:
+        part: right_thigh
+        frame:
+          position_mm:
+          - 0
+          - -2.374283981846931e-14
+          - 193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: right_shin
+        frame:
+          position_mm:
+          - 0
+          - 2.374283981846931e-14
+          - -193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        angle_deg:
+        - -155
+        - 0
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    - id: right_ankle
+      type: spherical
+      a:
+        part: right_shin
+        frame:
+          position_mm:
+          - 0
+          - -2.374283981846931e-14
+          - 193.875
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - -180
+          - 0
+          - 0
+      b:
+        part: right_foot
+        frame:
+          position_mm:
+          - 0
+          - -59.81249999999999
+          - 45.375
+          axis:
+          - 1
+          - 0
+          - 0
+          rotation_deg:
+          - 0
+          - 0
+          - 0
+      damping: 0.08
+      limits:
+        rotation_deg:
+        - - -45
+          - 25
+        - - -20
+          - 20
+        - - -15
+          - 15
+      metadata:
+        anatomical: true
+        limits_status: engineering default, not person-specific
+        snapshot_reference_coordinates: {}
+    parameter_reference:
+      stature_mm: 1650
+      mass_kg: 50
+      pose: arms-spread
+      strength_scale: 1
+      joint_damping_nms_rad: 0.08
+      hold_pose: false
+results: {}

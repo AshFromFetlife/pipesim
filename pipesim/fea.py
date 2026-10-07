@@ -43,7 +43,12 @@ def analyse(assembly,include_self_weight=True):
     members={pid:p for pid,p in assembly.parts.items() if p.kind=='member'}
     if not members:
         return {'status':'no_members','input_sha256':assembly.input_hash,'members':[],'message':'Add a structural member with a material and section definition'}
-    stations={pid:{0.,float(p.length)} for pid,p in members.items()}
+    # Internal nodes are required for distributed self weight on a span with
+    # restrained ends. End nodes alone report zero displacement even though
+    # the pipe sags between them.
+    stations={pid:{float(p.length*i/max(1,math.ceil(p.length/1000)))
+                   for i in range(max(1,math.ceil(p.length/1000))+1)}
+              for pid,p in members.items()}
     for j in assembly.joints:
         for end in ('a','b'):
             e=j[end]; pid=e['part']

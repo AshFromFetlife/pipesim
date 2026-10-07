@@ -26,7 +26,7 @@ def _component(assembly,member):
         if len(connected)==previous: return connected,objects
 
 
-def _translations(before,after,member):
+def _translations(before,after,member,fixed_end=None):
     connected,objects=_component(after,member)
     names=sorted(connected); index={pid:i*3 for i,pid in enumerate(names)}; size=len(names)*3
     rows=[]; targets=[]; labels=[]; inequalities=[]; lower=[]; upper=[]; bounds_labels=[]
@@ -72,7 +72,12 @@ def _translations(before,after,member):
     anchors=[a for a in after.anchors if a['part'] in connected]
     for anchor in anchors:
         for axis in identity: equal(None,anchor['part'],axis,0,'anchor:'+anchor['part'])
-    if not anchors:
+    if fixed_end is not None:
+        direction=before.parts[member].matrix[:3,2]
+        movement=(after.parts[member].length-before.parts[member].length)/2
+        reference=direction*(movement if fixed_end=='start' else -movement)
+        for axis in identity: equal(None,member,axis,axis@reference,'fixed-end:'+member)
+    elif not anchors:
         for axis in identity: equal(None,member,axis,0,'reference:'+member)
     A=np.array(rows);b=np.array(targets);x=np.linalg.lstsq(A,b,rcond=None)[0]
     residual=np.abs(A@x-b)
@@ -158,14 +163,14 @@ def _check(before,after,relevant,collisions):
     return None
 
 
-def _attempt(assembly,member,length,releases=(),collisions=True):
+def _attempt(assembly,member,length,releases=(),collisions=True,fixed_end=None):
     doc=_release(assembly,releases)
     baseline=Assembly.from_doc(doc,assembly.base,assembly.library) if releases else assembly
     next(p for p in doc['parts'] if p['id']==member).setdefault('parameters',{})['length_mm']=length
     resized=Assembly.from_doc(doc,assembly.base,assembly.library)
     if abs(resized.parts[member].length-length)>TOL or (abs(baseline.parts[member].length-length)>TOL and resized.parts[member].shapes==baseline.parts[member].shapes):
         raise DocumentError('This part definition fixes its geometry length; make its geometry use $length_mm before resizing')
-    moves,conflicts,reason=_translations(baseline,resized,member)
+    moves,conflicts,reason=_translations(baseline,resized,member,fixed_end)
     if moves is None:
         return {'status':'blocked','reason':reason,'conflicts':conflicts,'parts':[member]}
     for spec in doc['parts']:
@@ -186,16 +191,17 @@ def _attempt(assembly,member,length,releases=(),collisions=True):
     return {'status':'resized','document':doc,'moved':moved,'member':member,'length_mm':length,'releases':list(releases)}
 
 
-def resize_member(assembly,member,length_mm,releases=None,collisions=True,suggest=True):
+def resize_member(assembly,member,length_mm,releases=None,collisions=True,suggest=True,fixed_end=None):
     """Return a complete edit or a diagnostic; never modify the input assembly."""
     if member not in assembly.parts or assembly.parts[member].kind!='member': raise DocumentError('Select a pipe, dowel or extrusion')
     if not any(p['id']==member for p in assembly.doc['parts']): raise DocumentError('Expand the object before changing an internal member length')
     if isinstance(length_mm,bool) or not isinstance(length_mm,(int,float)) or not math.isfinite(length_mm) or length_mm<=0: raise DocumentError('Pipe length must be a finite positive number')
+    if fixed_end is not None and fixed_end not in ('start','end'): raise DocumentError('Choose a pipe endpoint')
     if assembly.doc.get('state',{}).get('joints'): raise DocumentError('Capture the motion frame before resizing a member in this pose')
     connected,_=_component(assembly,member);releases=releases or []
     allowed={j['id'] for j in assembly.joints if j['a']['part'] in connected}
     if any(not isinstance(r,dict) or r.get('joint') not in allowed for r in releases): raise DocumentError('Release a connection in this member’s connected structure')
-    result=_attempt(assembly,member,float(length_mm),releases,collisions)
+    result=_attempt(assembly,member,float(length_mm),releases,collisions,fixed_end)
     if result['status']=='resized': return result
     editable={j['id']:j for j in assembly.doc.get('joints',[])}
     conflicts=set(result.pop('conflicts',[]));blockers=[]
@@ -214,16 +220,16 @@ def resize_member(assembly,member,length_mm,releases=None,collisions=True,sugges
     choices=[[j] for j in locked]+list(itertools.combinations(locked[:6],2))
     for joints in choices:
         actions=[{'joint':j['id'],'action':'loosen'} for j in joints]
-        trial=_attempt(assembly,member,float(length_mm),actions,False)
-        if trial['status']=='resized' and (not collisions or _attempt(assembly,member,float(length_mm),actions,True)['status']=='resized'):
+        trial=_attempt(assembly,member,float(length_mm),actions,False,fixed_end)
+        if trial['status']=='resized' and (not collisions or _attempt(assembly,member,float(length_mm),actions,True,fixed_end)['status']=='resized'):
             result['suggestions'].append({'action':'loosen','joints':[j['id'] for j in joints],
                                           'releases':actions,'message':'Loosen these sockets, then resize while keeping every connection engaged.'})
             if len(result['suggestions'])>=2: break
     if not result['suggestions']:
         for j in candidates[:6]:
             actions=[{'joint':j['id'],'action':'detach'}]
-            trial=_attempt(assembly,member,float(length_mm),actions,False)
-            if trial['status']=='resized' and (not collisions or _attempt(assembly,member,float(length_mm),actions,True)['status']=='resized'):
+            trial=_attempt(assembly,member,float(length_mm),actions,False,fixed_end)
+            if trial['status']=='resized' and (not collisions or _attempt(assembly,member,float(length_mm),actions,True,fixed_end)['status']=='resized'):
                 result['suggestions'].append({'action':'detach','joints':[j['id']],'releases':actions,
                     'message':'Loosening alone does not provide enough travel. Disconnect this socket to open the frame, then resize.'})
                 if len(result['suggestions'])>=2: break

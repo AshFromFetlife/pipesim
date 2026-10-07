@@ -1,14 +1,15 @@
 import copy
+import math
 
 import numpy as np
 import pytest
 
-from pipesim.chain import dimensions
+from pipesim.chain import dimensions, generate
 from pipesim.document import Assembly, DocumentError, write
 from pipesim.editing import expand_objects
 from pipesim.grouping import (attach_part, detach_attachment, move_object, regroup_object,
                               set_object_layout, update_object_parameters)
-from pipesim.math3d import pose_of, transform
+from pipesim.math3d import align_axis, pose_of, transform
 from pipesim.posing import Mechanism, transform_part
 from pipesim.snapping import _movement_coordinates
 from pipesim.validation import validate
@@ -209,6 +210,64 @@ def test_chain_end_attachments_pose_the_chain_and_detach_reconnect(factory,blank
     detached=factory(detach_attachment(after,'chain',second['joint']['id']))
     restored=factory(attach_part(detached,'chain',reconnect=second['joint']['id'])['document'])
     aligned(restored);assert len(restored.joints)==len(after.joints)
+
+
+@pytest.mark.parametrize('human_foot', [False, True])
+def test_ball_jointed_900mm_chain_can_pivot_first_link_to_reach_final_11mm(
+        factory, blank, library, human_foot):
+    doc = copy.deepcopy(blank)
+    target = {'part': 'foot', 'port': 'eye'}
+    foot_point = np.zeros(3)
+    if human_foot:
+        from pipesim.geometry import mesh_for_part
+        from pipesim.math3d import point
+        from trimesh.proximity import closest_point_naive
+        human = {'id': 'person', 'template': 'human', 'parameters': {}}
+        person = factory({**copy.deepcopy(blank), 'objects': [human]})
+        foot = person.parts['person/left_foot']
+        hint = [21.4, 127.3, -31.7]
+        nearest, _, _ = closest_point_naive(mesh_for_part(foot),
+                                             np.asarray(hint)[None, :])
+        foot_point = point(foot.matrix, nearest[0])
+        target = {'part': foot.id, 'surface_hint_mm': hint}
+        doc['objects'] = [human]
+    parameters = {'length_mm': 900, 'link_catalog': 'generic.chain-link'}
+    components = generate(parameters, library)
+    nodes = [np.zeros(3)]
+    nodes.append(np.array([11., 0., -math.sqrt(20**2-11**2)]))
+    for _ in range(44):
+        nodes.append(nodes[-1]+[0, 0, -20])
+    for part, first, last in zip(components['parts'], nodes, nodes[1:]):
+        matrix = np.eye(4)
+        matrix[:3, :3] = align_axis([0, 0, 1], first-last)
+        matrix[:3, 3] = (first+last)/2
+        part['pose'] = pose_of(matrix)
+    doc.setdefault('objects', []).append(
+        {'id': 'chain', 'template': 'chain', 'parameters': parameters,
+         'layout_mode': 'posable',
+         'pose': {'position_mm': (foot_point+[0, 0, 900]).tolist()},
+         'components': components})
+    doc['parts'] = [
+        {'id': pid, 'body': {'kind': 'rigid', 'mass_kg': 1,
+         'geometry': [{'type': 'sphere', 'radius_mm': 5}],
+         'ports': {'eye': {'type': 'eye', 'position_mm': [0, 0, 0]}}},
+         'pose': {'position_mm': (foot_point+[0, 0, z]).tolist()}}
+        for pid, z in ([('top', 900)] if human_foot
+                       else [('top', 900), ('foot', 0)])]
+    doc['joints'] = [{'id': 'top-attachment', 'type': 'spherical',
+                      'a': {'part': 'top', 'port': 'eye'},
+                      'b': {'part': 'chain/link-1',
+                            'frame': {'position_mm': [0, 0, 10]}}}]
+    doc['anchors'] = [{'part': 'top', 'surface': 'fixture'}]
+    before = factory(doc)
+    end = before.parts['chain/link-45'].frame({'port': 'a'})[0]
+    assert np.linalg.norm(end-foot_point) == pytest.approx(11.47, abs=.1)
+    attached = attach_part(before, 'chain', 'chain/link-45', target, 'spherical',
+                           part_port='a')
+    after = factory(attached['document'])
+    aligned(after)
+    assert np.linalg.norm(after.parts['chain/link-1'].matrix[:3, :3]
+                          - before.parts['chain/link-1'].matrix[:3, :3]) > .1
 
 
 def test_flexible_link_attaches_to_human_surface_without_moving_the_person(factory,blank):

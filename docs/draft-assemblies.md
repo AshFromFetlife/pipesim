@@ -2,11 +2,15 @@
 
 New member profiles in the editor begin as draft runs. Their displayed span is a
 working value. Connecting an end to a socket or passing a run through a fitting
-records a graph relation and updates only that run's preview. The editor does
+records a graph relation and updates the draft preview. The editor does
 not run the exact connection search, collision world, or cut-length solver for
 each draft click. Connected end sockets determine the displayed span; with one
 end free, the preview length field changes it directly. **Lock cut length** makes
 that value a constraint for finalization.
+When a new socket is close to the pipe, an isolated free fitting aligns as the
+connection is added. If the fitting already belongs to a connected draft graph,
+the editor closes the new draft fit automatically and keeps the connection and
+alignment in one Undo step. Anchors and existing rigid joints remain fixed.
 Through-fittings follow their current position along a draft pipe. Moving one
 along the pipe does not leave a stale fit error, and Repair preserves that
 position while correcting sideways or angular misalignment. Finalization
@@ -33,10 +37,11 @@ draft_subassemblies:
 
 Select a draft pipe and use **Symmetry** in Properties to add up to three mirror
 planes, one each for X, Y, and Z. The offset is measured from the scene origin;
-X = 0, Y = 0, and Z at a chosen height are common. Reflected pipes and their
-attached connectors update as the source is edited. They are translucent,
-unselectable previews while the plane is active. A new connector added to a
-design with one mirrored draft group also joins that group's previews.
+X = 0, Y = 0, and Z at a chosen height are common. New planes mirror all scene
+parts and draft runs, including those already present in other draft groups,
+standalone connectors, and expanded object parts. New parts also join the
+preview. Reflections are translucent and unselectable until kept or finalized.
+Older saved planes without `scope: scene` continue to mirror their draft group.
 
 For a pipe that crosses a plane, **Centered, perpendicular** pins its midpoint
 to the plane. Changing its working span extends both sides equally; only one
@@ -57,18 +62,22 @@ draft_subassemblies:
       - id: left-right
         axis: y
         offset_mm: 0
+        scope: scene
         run_modes: {crossbar: centered, spine: in_plane}
     runs: [...]
 ```
 
-A grouped reference human can use a vertical X or Y draft mirror as a pose
-guide. Select the human, then choose the plane under **Mirror-line pose** in
-Properties. The current horizontal position fixes a vertical centerline in
-that plane. The whole person can slide up and down that line; moving an arm or
-leg poses its opposite partner as a reflected copy. The back and head can
-flex within the plane, while torso twists and head turns are held at zero.
-Choose **Free pose** to remove the constraint. The saved line remains available
-after the draft mirror is turned off or the draft is finalized.
+A vertical X or Y scene mirror automatically fixes each grouped reference human
+to a mirror line. A human already in the scene keeps its more deliberately posed
+arm and leg when the mirror is added; the opposite limbs adopt that pose through
+their actual joints. The current horizontal position fixes a vertical centerline
+in the plane. The whole person can slide up and down that line; the back and head
+can flex within the plane while their centres stay on the line. Torso twists and
+head turns are held at zero. A scene mirror never previews or bakes a second
+human. Select the human and choose **Free pose** under **Mirror-line pose** to
+deliberately remove the constraint, or choose a different vertical draft plane.
+The saved line remains available after the draft mirror is turned off or the
+draft is finalized.
 
 **Turn off** offers **Discard copies**, which removes the reflected previews, or
 **Keep copies**, which turns them into independent draft pipes and exact
@@ -99,11 +108,16 @@ unchanged and lists the offending sockets and residuals. Finalization is one
 Undo step and can be cancelled without committing a partial edit. Validation,
 physics, structural analysis, build planning, and build
 book export require draft subassemblies to be finalized first.
-Dragging a draft pipe through several aligned, unused through sockets records
-each fit. Finalization also recovers an aligned through fit missing from an
+Dragging a draft pipe through several aligned, unused through sockets on
+different connectors records each fit. A pipe can occupy only one socket per
+connector. Finalization also recovers an aligned through fit missing from an
 older draft, including when it joins runs stored in different draft groups.
 A close but misaligned unused socket is reported as a conflict rather than
 silently finalizing only part of the visible structure.
+Mirror alignment conflicts likewise remain visible on editable draft pipes.
+Save and autosave preserve the authored document even when a draft or other
+part cannot currently be resolved; the conflict must be fixed before
+finalization or validation.
 
 To edit a finished pipe quickly again, open its part menu or its Body menu in
 the tree and choose **Return pipe(s) to draft**. A Body action converts its

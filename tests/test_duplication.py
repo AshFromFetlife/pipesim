@@ -166,6 +166,22 @@ def test_multiple_copies_are_independent_unique_and_spaced_on_the_grid(blank, fa
     assert result['document']['parts'][9]['body']['mass_kg'] == 2
 
 
+def test_duplicated_connectors_join_the_active_draft_mirror(factory):
+    from pipesim.symmetry import materialize_mirror
+
+    doc = draft_graph()
+    doc['draft_subassemblies'][0]['mirrors'] = [
+        {'id': 'side', 'axis': 'y', 'offset_mm': -500}]
+    source = factory(doc)
+    result = duplicate(source, 'unrelated', count=2, offset_mm=[250, 0, 0])
+    group = result['document']['draft_subassemblies'][0]
+    assert set(group['mirror_parts']) == {'unrelated-copy', 'unrelated-copy-2'}
+    assert 'mirror_parts' not in source.doc['draft_subassemblies'][0]
+    baked = materialize_mirror(factory(result['document']), 'frame', 'side')
+    ids = {part['id'] for part in baked['parts']}
+    assert {'unrelated-copy-mirror-side', 'unrelated-copy-2-mirror-side'} <= ids
+
+
 def test_duplicate_uses_signed_xyz_step_for_each_copy(blank, factory):
     source = graph(blank, factory)
     result = duplicate(source, 'c', 'subassembly', count=3, offset_mm=[0, -250, 75])

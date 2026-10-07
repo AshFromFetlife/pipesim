@@ -42,6 +42,9 @@ export function connectionCandidates(scene, matrices, movingIds, camera, width, 
     const axis=new THREE.Vector3(...(socket.axis||[0,0,1])).transformDirection(fm);
     for(const member of members) {
       if(moving.has(member.id)===moving.has(fitting.id)||groups.get(member.id)===groups.get(fitting.id)||!fits(member,socket))continue;
+      if(scene.joints.some(j=>j.type==='socket'&&[j.a.part,j.b.part].includes(member.id)&&
+        [j.a.part,j.b.part].includes(fitting.id))||
+        (scene.draft_attachments||[]).some(a=>a.run===member.id&&a.connector===fitting.id))continue;
       const mm=matrices.get(member.id), length=member.length_mm;
       if(!mm)continue;
       const start=new THREE.Vector3(0,0,-length/2).applyMatrix4(mm), end=new THREE.Vector3(0,0,length/2).applyMatrix4(mm);
@@ -77,6 +80,44 @@ export function connectionCandidates(scene, matrices, movingIds, camera, width, 
   }
   candidates.sort((a,b)=>a.score-b.score||a.connector.localeCompare(b.connector)||a.port.localeCompare(b.port));
   return candidates.slice(0,6);
+}
+
+export function hingeCandidates(scene, matrices, movingIds, camera, width, height, settings={}) {
+  const moving=new Set(movingIds),candidates=[];
+  const groups=new Map(scene.groups.flatMap((g,i)=>g.map(id=>[id,i])));
+  const capture=Math.max(65,(settings.connectionPixels??30)*2);
+  camera.updateMatrixWorld();
+  for(const part of scene.parts){
+    if(!moving.has(part.id)||!matrices.has(part.id))continue;
+    for(const [portName,port] of Object.entries(part.ports||{})){
+      if(!['eye','clevis'].includes(port.type)||port.assembly!=='bolt'||socketOccupied(scene,part.id,portName))continue;
+      const source=new THREE.Vector3(...port.position_mm).applyMatrix4(matrices.get(part.id));
+      const sourceAxis=new THREE.Vector3(...port.axis).transformDirection(matrices.get(part.id));
+      for(const other of scene.parts){
+        if(moving.has(other.id)||(groups.has(part.id)&&groups.get(other.id)===groups.get(part.id))||!matrices.has(other.id))continue;
+        for(const [otherName,otherPort] of Object.entries(other.ports||{})){
+          if(otherPort.type===(port.type)||!['eye','clevis'].includes(otherPort.type)||otherPort.assembly!=='bolt'||socketOccupied(scene,other.id,otherName)||
+            Math.abs((port.diameter_mm||0)-(otherPort.diameter_mm||0))>1)continue;
+          const target=new THREE.Vector3(...otherPort.position_mm).applyMatrix4(matrices.get(other.id));
+          const gap=source.distanceTo(target);
+          if(gap>100)continue;
+          const axis=new THREE.Vector3(...otherPort.axis).transformDirection(matrices.get(other.id));
+          const angle=THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(Math.abs(sourceAxis.dot(axis)),-1,1)));
+          if(angle>35)continue;
+          const a=source.clone().project(camera),b=target.clone().project(camera);
+          if(Math.abs(a.z)>1||Math.abs(b.z)>1)continue;
+          const distance=Math.hypot((a.x-b.x)*width/2,(a.y-b.y)*height/2);
+          if(distance>capture)continue;
+          const male=port.type==='eye'?{part:part.id,port:portName}:{part:other.id,port:otherName};
+          const female=port.type==='clevis'?{part:part.id,port:portName}:{part:other.id,port:otherName};
+          candidates.push({kind:'hinge',male,female,moving:part.id,
+            distance,angle,gap_mm:gap,score:distance+gap*.1+angle*.15,
+            point:target.toArray(),label:`${male.part} / ${male.port} ↔ ${female.part} / ${female.port} · hinge bolt`});
+        }
+      }
+    }
+  }
+  return candidates.sort((a,b)=>a.score-b.score||a.label.localeCompare(b.label)).slice(0,6);
 }
 
 export function clearConnectionIntent(candidates) {

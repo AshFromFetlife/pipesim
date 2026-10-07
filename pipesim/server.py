@@ -2,12 +2,16 @@
 from __future__ import annotations
 import base64
 import copy
+import errno
+import hashlib
 import json
 import mimetypes
 import os
 import re
 import secrets
+import socket
 import threading
+import time
 import traceback
 import urllib.parse
 from pathlib import Path
@@ -17,7 +21,7 @@ from .document import Assembly,Library,DocumentError,read,write,parse,plain,DATA
 WEB=Path(__file__).parent/'web'
 BUNDLED_MESHES=(DATA/'libraries'/'meshes').resolve()
 DESIGN_SUFFIXES={'.yaml','.yml','.json'}
-EDITOR_API_VERSION=23
+EDITOR_API_VERSION=25
 
 def bundled_mesh(relative):
     path=(BUNDLED_MESHES/relative).resolve()
@@ -27,6 +31,17 @@ def bundled_mesh(relative):
 
 class EditorServer(ThreadingHTTPServer):
     daemon_threads=True
+    allow_reuse_address=False
+    # A scene may request many mesh assets while an edit POST is in flight.
+    # The HTTPServer default backlog of five refuses otherwise valid local
+    # connections on Windows during those short bursts.
+    request_queue_size=128
+    def server_bind(self):
+        # Windows SO_REUSEADDR permits a second process to listen on the same
+        # address. Requests can then reach either version after a "restart".
+        if hasattr(socket,'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+        super().server_bind()
     def __init__(self,root,design,port):
         self.root=Path(root).resolve(); self.design=design; self.token=secrets.token_urlsafe(32)
         from .preview import PreviewCache
@@ -34,6 +49,7 @@ class EditorServer(ThreadingHTTPServer):
         from .simulation_jobs import SimulationJobs
         self.simulations=SimulationJobs()
         self.draft_jobs={}; self.draft_jobs_lock=threading.Lock()
+        self.autosave_lock=threading.Lock()
         super().__init__(('127.0.0.1',port),Handler)
     def server_close(self):
         with self.draft_jobs_lock:
@@ -66,6 +82,21 @@ class EditorServer(ThreadingHTTPServer):
                 except (ValueError,OSError): continue
         return sorted(result,key=lambda item:item['path'].casefold())
 
+    def autosave_directory(self,relative):
+        if not isinstance(relative,str): raise DocumentError('Choose an autosave folder')
+        pieces=relative.replace('\\','/').split('/')
+        if Path(relative).is_absolute() or not pieces or any(p.casefold() in ('','.','..','.git','.agents','.codex') for p in pieces):
+            raise DocumentError('Autosaves must stay in a workspace folder')
+        path=self.path(relative)
+        if path==self.root: raise DocumentError('Choose an autosave folder')
+        return path
+
+    def autosaves(self,relative):
+        directory=self.autosave_directory(relative)
+        if not directory.exists(): return []
+        return sorted((p for p in directory.glob('*.autosave.json') if p.is_file() and not p.is_symlink()),
+                      key=lambda p:p.stat().st_mtime_ns,reverse=True)
+
 class Handler(BaseHTTPRequestHandler):
     server: EditorServer
     def log_message(self,format,*args): pass
@@ -94,7 +125,8 @@ class Handler(BaseHTTPRequestHandler):
         drafts=preview(assembly)
         result['parts'].extend(drafts)
         result['groups'].extend([[p['id']] for p in drafts])
-        result['draft_attachments']=[a for run in runs(assembly.doc) for a in run.get('attachments',[])]
+        result['draft_attachments']=[{**a,'run':run['id']} for run in runs(assembly.doc)
+                                     for a in run.get('attachments',[])]
         for part in result['parts']:
             for shape in part['geometry']:
                 if shape['type']=='mesh':
@@ -104,9 +136,10 @@ class Handler(BaseHTTPRequestHandler):
                     elif path.is_relative_to(BUNDLED_MESHES): shape['url']='/builtin-mesh?path='+urllib.parse.quote(path.relative_to(BUNDLED_MESHES).as_posix())
         self.server.previews.remember(assembly)
         return result
-    def assembly(self,doc,base):
+    def assembly(self,doc,base,*,validate_mirror_geometry=True):
         for ref in doc.get('libraries',[]): self.server.path(str((base/ref).resolve()))
-        assembly=Assembly.from_doc(doc,base,self.server.previews.library(doc,base))
+        assembly=Assembly.from_doc(doc,base,self.server.previews.library(doc,base),
+                                   validate_mirror_geometry=validate_mirror_geometry)
         for part in assembly.parts.values():
             for shape in part.shapes:
                 if shape['type']=='mesh':
@@ -115,10 +148,25 @@ class Handler(BaseHTTPRequestHandler):
                     else: self.server.path(str(path))
                     if not path.is_file(): raise FileNotFoundError(f'Mesh file not found: {shape["file"]}')
         return assembly
+    def scene_human_document(self,assembly):
+        from .human_symmetry import sync_scene_humans
+        errors=[]
+        try:
+            document=sync_scene_humans(assembly,errors=errors)
+        except DocumentError as exc:
+            # An existing attachment can prevent moving the person onto the
+            # line. Keep the design open and report the unresolved constraint.
+            return assembly.doc,assembly,False,str(exc)
+        error=' '.join(errors) if errors else None
+        if document is assembly.doc:
+            return document,assembly,False,error
+        return document,self.assembly(document,assembly.base,validate_mirror_geometry=False),True,error
     def opened_design(self,doc,path):
-        assembly=self.assembly(doc,path.parent)
+        assembly=self.assembly(doc,path.parent,validate_mirror_geometry=False)
+        doc,assembly,updated,error=self.scene_human_document(assembly)
         return {'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts,
-                'path':path.relative_to(self.server.root).as_posix()}
+                'path':path.relative_to(self.server.root).as_posix(),'auto_symmetry':updated,
+                'mirror_pose_error':error}
     def do_GET(self):
         if not self.trusted_host(): self.send_data(403,{'error':'Untrusted host'}); return
         request=urllib.parse.urlparse(self.path); query=urllib.parse.parse_qs(request.query)
@@ -127,14 +175,37 @@ class Handler(BaseHTTPRequestHandler):
                 path=self.server.path(self.server.design)
                 if path.exists(): doc=read(path)
                 else: doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','name':'Untitled creation','parts':[],'joints':[]}
-                assembly=self.assembly(doc,path.parent)
-                self.send_data(200,{'token':self.server.token,'api_version':EDITOR_API_VERSION,'path':path.relative_to(self.server.root).as_posix(),'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts,'examples':[p.relative_to(self.server.root).as_posix() for p in sorted((self.server.root/'examples').glob('*.pipe.yaml'))]})
+                assembly=self.assembly(doc,path.parent,validate_mirror_geometry=False)
+                doc,assembly,updated,error=self.scene_human_document(assembly)
+                self.send_data(200,{'token':self.server.token,'api_version':EDITOR_API_VERSION,'path':path.relative_to(self.server.root).as_posix(),'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts,'auto_symmetry':updated,'mirror_pose_error':error,'examples':[p.relative_to(self.server.root).as_posix() for p in sorted((self.server.root/'examples').glob('*.pipe.yaml'))]})
             elif request.path=='/api/open':
                 path=self.server.path(query['path'][0])
                 if path.suffix.lower() not in DESIGN_SUFFIXES: raise DocumentError('Open a .yaml, .yml or .json design')
                 self.send_data(200,self.opened_design(read(path),path))
             elif request.path=='/api/designs':
                 self.send_data(200,{'designs':self.server.designs()})
+            elif request.path=='/api/autosaves':
+                directory=query.get('directory',['designs/.autosaves'])[0]
+                records=[]
+                for path in self.server.autosaves(directory):
+                    try:
+                        payload=json.loads(path.read_text(encoding='utf-8'))
+                        records.append({'path':path.relative_to(self.server.root).as_posix(),
+                                        'source_path':payload['source_path'],'saved_at':path.stat().st_mtime})
+                    except (ValueError,KeyError,OSError): continue
+                self.send_data(200,{'autosaves':records})
+            elif request.path=='/api/autosave':
+                directory=self.server.autosave_directory(query.get('directory',['designs/.autosaves'])[0])
+                path=self.server.path(query['path'][0])
+                if path.parent!=directory or not path.name.endswith('.autosave.json'):
+                    raise DocumentError('Choose an autosave from the configured folder')
+                payload=json.loads(path.read_text(encoding='utf-8'))
+                source=self.server.path(payload['source_path'])
+                assembly=self.assembly(payload['document'],source.parent,validate_mirror_geometry=False)
+                document,assembly,updated,error=self.scene_human_document(assembly)
+                self.send_data(200,{'document':document,'scene':self.scene(assembly),
+                                    'library':assembly.library.parts,'path':payload['source_path'],'autosaved':True,
+                                    'auto_symmetry':updated,'mirror_pose_error':error})
             elif request.path=='/asset': self.file(self.server.path(query['path'][0]))
             elif request.path=='/builtin-mesh': self.file(bundled_mesh(query['path'][0]))
             elif request.path.startswith('/files/'):
@@ -175,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
                         if job_id in self.server.draft_jobs: raise DocumentError('Draft job id already running')
                         self.server.draft_jobs[job_id]=event
                 try:
-                    assembly=self.assembly(data['document'],base)
+                    assembly=self.assembly(data['document'],base,validate_mirror_geometry=False)
                     _check_cancelled(event.is_set)
                     operation=repair if route.startswith('/api/draft-repair') else finalize
                     selected=route.endswith('-selected')
@@ -184,29 +255,50 @@ class Handler(BaseHTTPRequestHandler):
                     if not selected and data.get('subassembly') is not None:
                         raise DocumentError('This editor tab is out of date. Save your work and refresh before finalizing a selected draft structure')
                     include_run_ids=()
+                    blocking=None
                     if operation is finalize and any(g.get('mirrors') for g in assembly.doc.get('draft_subassemblies', [])):
                         from .symmetry import materialize_all
+                        # A draft mirror is only a preview. Close recoverable
+                        # mirror residuals while the original run is still
+                        # editable, before materializing its reflected copies.
+                        preflight=repair(assembly,cancelled=event.is_set,
+                                         run_id=run_id if selected else None)
+                        if preflight['status']=='conflict':
+                            blocking=preflight
+                        elif preflight['status']=='repaired':
+                            assembly=self.assembly(preflight['document'],base,
+                                                   validate_mirror_geometry=False)
                         owner=next((g['id'] for g in assembly.doc['draft_subassemblies'] if any(r['id']==run_id for r in g['runs'])),None) if selected else None
                         if selected:
                             from .drafting import _scope, runs
                             selected_before={r['id'] for g in _scope(assembly,run_id=run_id) for r in g['runs']}
                             existing={r['id'] for r in runs(assembly.doc)}
-                        document=materialize_all(assembly,{owner} if selected else None)
-                        if selected:
-                            include_run_ids=tuple(r['id'] for r in runs(document) if r['id'] not in existing and
-                                any(r['id'].startswith(source+'-mirror-') for source in selected_before))
-                        assembly=self.assembly(document,base)
-                    result=operation(assembly,data.get('subassembly'),cancelled=event.is_set,
-                                     run_id=run_id if selected else None,
-                                     **({'include_run_ids':include_run_ids} if operation is finalize else {}))
+                        if blocking is None:
+                            try:
+                                document=materialize_all(assembly,{owner} if selected else None)
+                            except DocumentError as exc:
+                                blocking={'status':'conflict','conflicts':[{
+                                    'code':'MIRROR_BAKE','message':str(exc)}]}
+                            else:
+                                if selected:
+                                    include_run_ids=tuple(r['id'] for r in runs(document) if r['id'] not in existing and
+                                        any(r['id'].startswith(source+'-mirror-') for source in selected_before))
+                                assembly=self.assembly(document,base,validate_mirror_geometry=False)
+                    result=blocking if blocking is not None else operation(
+                        assembly,data.get('subassembly'),cancelled=event.is_set,
+                        run_id=run_id if selected else None,
+                        **({'include_run_ids':include_run_ids} if operation is finalize else {}))
                     if result['status'] in ('finalized','repaired'):
-                        result['scene']=self.scene(self.assembly(result['document'],base))
+                        result['scene']=self.scene(self.assembly(result['document'],base,
+                                                               validate_mirror_geometry=False))
                 finally:
                     if job_id:
                         with self.server.draft_jobs_lock: self.server.draft_jobs.pop(job_id,None)
             elif route=='/api/parse':
-                doc=parse(data['text']); assembly=self.assembly(doc,base)
-                result={'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts}
+                doc=parse(data['text']); assembly=self.assembly(doc,base,validate_mirror_geometry=False)
+                doc,assembly,_,error=self.scene_human_document(assembly)
+                result={'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts,
+                        'mirror_pose_error':error}
             elif route=='/api/open-file':
                 # A browser supplies contents and a basename, never its original
                 # OS directory. Resolve companion assets relative to designs/.
@@ -226,11 +318,35 @@ class Handler(BaseHTTPRequestHandler):
                 path=self.server.path(data['path'])
                 if path.suffix.lower() not in DESIGN_SUFFIXES: raise DocumentError('Save a .yaml, .yml or .json design')
                 from .editing import relocate_design
+                from .document import check_values
                 source=self.server.path(data.get('source_path',data['path'])).parent
-                self.assembly(data['document'],source)
+                if not isinstance(data['document'],dict): raise DocumentError('The design must be a mapping')
+                check_values(data['document'])
                 document=relocate_design(data['document'],source,path.parent)
-                self.assembly(document,path.parent)
                 write(path,document); result={'saved':path.relative_to(self.server.root).as_posix(),'document':document}
+            elif route=='/api/autosave':
+                directory=self.server.autosave_directory(data['directory'])
+                source=self.server.path(data['source_path'])
+                from .document import check_values
+                if not isinstance(data['document'],dict): raise DocumentError('The design must be a mapping')
+                check_values(data['document'])
+                keep=data['keep']
+                if isinstance(keep,bool) or not isinstance(keep,int) or not 1<=keep<=100:
+                    raise DocumentError('Keep between 1 and 100 autosaves')
+                digest=hashlib.sha256(data['source_path'].encode()).hexdigest()[:16]
+                with self.server.autosave_lock:
+                    directory.mkdir(parents=True,exist_ok=True)
+                    path=directory/f'{digest}-{time.time_ns()}.autosave.json'
+                    temp=directory/f'.{path.name}.{secrets.token_hex(4)}.tmp'
+                    try:
+                        temp.write_text(json.dumps({'source_path':data['source_path'],
+                                                    'document':plain(data['document'])},allow_nan=False),encoding='utf-8')
+                        temp.replace(path)
+                    finally:
+                        if temp.exists(): temp.unlink()
+                    files=sorted(directory.glob(f'{digest}-*.autosave.json'),key=lambda p:p.stat().st_mtime_ns,reverse=True)
+                    for old in files[keep:]: old.unlink()
+                result={'saved':path.relative_to(self.server.root).as_posix()}
             elif route=='/api/import-mesh':
                 name=re.sub(r'[^A-Za-z0-9_.-]','_',data['filename'])
                 directory=self.server.root/'.pipesim'/'imports'/secrets.token_hex(6); directory.mkdir(parents=True)
@@ -245,10 +361,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 doc=data['document']; prepared=None
                 if route in ('/api/move-object','/api/drop-to-floor') or (route=='/api/move' and data.get('selected')):
-                    prepared=self.server.previews.prepared(doc,base,lambda:self.assembly(doc,base))
+                    prepared=self.server.previews.prepared(doc,base,lambda:self.assembly(
+                        doc,base,validate_mirror_geometry=route=='/api/drop-to-floor'))
                     assembly=prepared.assembly
-                else: assembly=self.assembly(doc,base)
-                if route=='/api/resolve': result=self.scene(assembly)
+                else: assembly=self.assembly(doc,base,validate_mirror_geometry=route not in ('/api/resolve','/api/move','/api/resize-drag'))
+                if route=='/api/resolve':
+                    document,assembly,updated,error=self.scene_human_document(assembly)
+                    result=self.scene(assembly)
+                    if updated: result['document']=document
+                    if error: result['mirror_pose_error']=error
                 elif route=='/api/draft-connect':
                     from .drafting import connect
                     document=connect(assembly,data['run'],data['connector'],data['port'],data.get('end','start'),data.get('insertion_mm'),data.get('at_mm'))
@@ -256,7 +377,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif route=='/api/draft-reopen':
                     from .drafting import reopen
                     result=reopen(assembly,data.get('members'))
-                    result['scene']=self.scene(self.assembly(result['document'],base))
+                    result['scene']=self.scene(self.assembly(result['document'],base,validate_mirror_geometry=False))
                 elif route=='/api/draft-mirror-bake':
                     from .symmetry import materialize_mirror
                     document=materialize_mirror(assembly,data['group'],data['plane'])
@@ -307,7 +428,8 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         from .snapping import move_document
                         result=move_document(assembly,data['poses'])
-                        result={'document':result,'scene':self.scene(self.assembly(result,base))}
+                        result={'document':result,'scene':self.scene(self.assembly(
+                            result,base,validate_mirror_geometry=False))}
                 elif route=='/api/drop-to-floor':
                     from .posing import drop_to_floor
                     result=drop_to_floor(assembly,data['selected'],data.get('object'),prepared=prepared)
@@ -316,6 +438,12 @@ class Handler(BaseHTTPRequestHandler):
                     from .resizing import resize_member
                     result=resize_member(assembly,data['member'],data['length_mm'],data.get('releases'))
                     if result['status']=='resized': result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/resize-drag':
+                    from .resize_drag import resize_drag
+                    result=resize_drag(assembly,data['member'],data['length_mm'],data['endpoint'],
+                                       data.get('behavior','follow'),data.get('capture_mm',40),
+                                       data.get('capture_deg',15),data.get('locked',True),data.get('auto_connect',True))
+                    result['scene']=self.scene(self.assembly(result['document'],base,validate_mirror_geometry=False))
                 elif route=='/api/move-object':
                     from .grouping import move_object
                     result=move_object(assembly,data['object'],data['target'],preview=bool(data.get('preview') and data.get('pose_only')))
@@ -348,6 +476,22 @@ class Handler(BaseHTTPRequestHandler):
                     from .grouping import attach_part
                     result=attach_part(assembly,data['object'],data.get('part'),data.get('target'),data.get('type','revolute'),data.get('reconnect'),data.get('part_port'))
                     if not data.get('preview'): result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/connect-ports':
+                    from .port_connections import connect_ports
+                    result=connect_ports(assembly,data.get('a'),data.get('b'),
+                        data.get('type','revolute'),data.get('move','auto'),
+                        data.get('poses'),bool(data.get('preview')))
+                    if not data.get('preview'):
+                        result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/add-wheel':
+                    from .wheels import add_wheel
+                    result=add_wheel(assembly,data.get('catalog','generic.wheel'),
+                        data.get('parameters'),data.get('target'),data.get('pose'))
+                    result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/mount-wheel':
+                    from .wheels import mount_wheel
+                    result=mount_wheel(assembly,data.get('wheel'),data.get('target'))
+                    result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/snap-options':
                     from .snapping import connection_options
                     result=connection_options(assembly,data['member'],data['connector'],data['port'],
@@ -366,7 +510,8 @@ class Handler(BaseHTTPRequestHandler):
                     duration=float(data.get('duration',3))
                     if duration>30: raise DocumentError('Editor simulations are limited to 30 seconds; use the CLI for longer runs')
                     result=self.server.simulations.start(assembly,duration=duration,fps=30,
-                        chain_links_per_body=data.get('chain_links_per_body',1))
+                        chain_links_per_body=data.get('chain_links_per_body',1),
+                        deflection_warning_mm=float(data.get('deflection_warning_mm',10)))
                 elif route=='/api/plan':
                     if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before build planning')
                     from .planning import plan_build
@@ -411,7 +556,13 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc(); self.send_data(500,{'error':f'Operation failed: {exc}'})
 
 def serve(root,design,port=8765,open_browser=False):
-    with EditorServer(root,design,port) as server:
+    try:
+        editor_server=EditorServer(root,design,port)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE or getattr(exc,'winerror',None) == 10048:
+            raise OSError(f'Port {port} is already in use. Stop the PipeSim server using that port before starting another one.') from exc
+        raise
+    with editor_server as server:
         url=f'http://127.0.0.1:{server.server_port}'
         print(f'PipeSim editor: {url}\nWorkspace: {server.root}\nPress Ctrl+C to stop.',flush=True)
         if open_browser:

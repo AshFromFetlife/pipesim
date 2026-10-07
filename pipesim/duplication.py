@@ -215,6 +215,10 @@ def duplicate(assembly, selected, scope='part', count=1, grid_mm=1, offset_mm=No
         step = np.array(offset_mm, dtype=float)
     doc = copy.deepcopy(assembly.doc)
     direct = {p['id'] for p in doc['parts']}
+    mirrored_groups = [group for group in assembly.doc.get('draft_subassemblies', []) if group.get('mirrors')]
+    if mirrored_groups:
+        from .symmetry import _source_parts
+        mirror_sources = {group['id']: _source_parts(assembly, group) for group in mirrored_groups}
     objects = {}
     for instance in doc.get('objects', []):
         owned = {pid for pid in assembly.parts if pid not in direct and pid.startswith(instance['id']+'/')}
@@ -327,6 +331,15 @@ def duplicate(assembly, selected, scope='part', count=1, grid_mm=1, offset_mm=No
             if set(record['parts'])<=part_ids.keys():
                 doc.setdefault('metadata',{}).setdefault('body_labels',[]).append({
                     'parts':sorted(part_ids[p] for p in record['parts']),'label':record['label']})
+        for group in mirrored_groups:
+            # A new standalone fitting belongs to the sole active mirror just
+            # like one added from the catalogue. With several draft mirrors,
+            # preserve the source part's existing mirror ownership.
+            sources = direct if len(mirrored_groups) == 1 else mirror_sources[group['id']]
+            added = {part_ids[pid] for pid in members & sources & direct}
+            if added:
+                target = next(item for item in doc['draft_subassemblies'] if item['id'] == group['id'])
+                target['mirror_parts'] = sorted(set(target.get('mirror_parts', [])) | added)
         copies.append({'parts': part_ids, 'joints': joint_ids, 'objects': object_ids, 'offset_mm': offset})
     doc.pop('results', None)
     doc.pop('build_plan', None)

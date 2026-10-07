@@ -464,8 +464,8 @@ parts:
     flexible_profile: rope
     color: '#b49a70'
     mass_kg: 0.0006
-    break_force_n: 350
-    axial_rigidity_n: 30000
+    break_force_n: 1800
+    axial_rigidity_n: 60000
     geometry:
     - {type: cylinder, diameter_mm: 6, length_mm: 20}
     ports:
@@ -473,7 +473,9 @@ parts:
       b: {type: eye, position_mm: [0, 0, 10], axis: [0, 0, 1]}
     source:
       geometry_status: round segment proxy
-      strength_status: illustrative simulation threshold; replace with a verified rope rating
+      strength_status: representative dry straight-rope rating; knots, wear and moisture need design-specific derating
+      strength_reference: https://axoncorporation.com.au/blogs/latest/6mm-jute-rope-datasheet
+      rigidity_status: estimated from about 3 percent elongation at the representative break load
   generic.rope-nylon-10:
     name: "Nylon rope · 10 mm"
     kind: chain

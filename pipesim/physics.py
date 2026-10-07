@@ -112,6 +112,7 @@ class World:
         self.part_map={}; self.joint_map={}; self.body_ids=[]; self.constraints=[]
         self.events=[]; self.elapsed=0.; self._mesh_number=0
         self.broken=set(); self.reference_coordinates={}
+        self._beam_rest_angles={}; self._beam_yielded=set()
         self._chain_initial=copy.deepcopy(assembly.doc.get('state',{}).get('joints',{}))
         try:
             self._configure()
@@ -199,6 +200,8 @@ class World:
         self._chain_joints=[j for j in assembly.joints if j.get('metadata',{}).get('chain_link')
             and joint_kind(j)=='spherical' and not (j.get('motor') or j.get('break_torque_nm')
                 or j['id'] in driven)]
+        self._beam_joints=[j for j in assembly.joints if j.get('metadata',{}).get('beam_hinge')]
+        self._beam_segment_ids={j[end]['part'] for j in self._beam_joints for end in ('a','b')}
         chain_ids={j['id'] for j in self._chain_joints}
         self._chain_spans=self._chain_support_spans(assembly,self._chain_joints)
         for anchor in assembly.anchors:
@@ -311,6 +314,15 @@ class World:
             # extension stops, avoiding energy injection at the limit.
             self.solver_iterations=1000; self.substeps=max(1,math.ceil(self.dt*480-1e-9))
             pb.setPhysicsEngineParameter(numSolverIterations=self.solver_iterations,numSubSteps=self.substeps,physicsClientId=self.client)
+        elif self._chain_joints or self._beam_joints:
+            # A light chain between a fixed support and a heavy payload gives
+            # Bullet's separate ball constraints a severe mass ratio. At one
+            # 240 Hz solve they can drift far enough to look disconnected,
+            # particularly when the line folds and several rings make contact.
+            self.solver_iterations=240; self.substeps=max(2,math.ceil(self.dt*1920-1e-9))
+            pb.setPhysicsEngineParameter(numSolverIterations=self.solver_iterations,
+                                         numSubSteps=self.substeps,
+                                         physicsClientId=self.client)
         for j in loops: self._loop(j)
         for j in self._chain_joints: self._loop(j,chain=True)
         # Distance-only links remain separate bodies and exchange equal/opposite forces.
@@ -375,7 +387,9 @@ class World:
                             self.part_map[pid]=(body,link,np.linalg.inv(frames[group])@self.assembly.parts[pid].matrix)
                 friction=np.mean([self.assembly.parts[pid].definition.get('friction',.6) for pid in groups[group]])
                 restitution=max(self.assembly.parts[pid].definition.get('restitution',.02) for pid in groups[group])
-                pb.changeDynamics(body,link,lateralFriction=float(friction),restitution=restitution,linearDamping=.015,angularDamping=.015,physicsClientId=self.client)
+                beam_segment=any(pid in self._beam_segment_ids for pid in groups[group])
+                pb.changeDynamics(body,link,lateralFriction=float(friction),restitution=restitution,linearDamping=.015,
+                                  angularDamping=1.0 if beam_segment else .015,physicsClientId=self.client)
                 if group in fixed and group!=chunk_root:
                     pos,quat=self.link_pose(body,link)
                     self.constraints.append(pb.createConstraint(body,link,-1,-1,pb.JOINT_FIXED,[0,0,0],[0,0,0],pos,parentFrameOrientation=[0,0,0,1],childFrameOrientation=quat,physicsClientId=self.client))
@@ -593,6 +607,7 @@ class World:
 
     def _break_events(self):
         detach=[]
+        chain_failures=[]
         for j in self.assembly.joints:
             if j['id'] in self.broken: continue
             mapping=self.joint_map.get(j['id'],{})
@@ -602,10 +617,8 @@ class World:
                 force=max([self._span_tensions.get(j['id'],0.),
                            *(float(np.linalg.norm(reaction[:3])) for reaction in reactions)])
                 if force>j['break_force_n']:
-                    detach.append(j['id'])
-                    self.events.append({'time_s':self.elapsed,'type':'joint_break','joint':j['id'],
-                                        'force_n':float(force)})
-                    continue
+                    chain_failures.append((j,force))
+                continue
             if j.get('type')=='socket' and joint_kind(j)!='fixed':
                 connector=self.assembly.parts[j['a']['part']]; member=self.assembly.parts[j['b']['part']]
                 port=connector.ports[j['a']['port']]
@@ -622,6 +635,26 @@ class World:
                 torque=max(np.linalg.norm(s[2][3:])+abs(s[3]) for s in reactions)
                 if force>j.get('break_force_n',math.inf) or torque>j.get('break_torque_nm',math.inf):
                     detach.append(j['id']); self.events.append({'time_s':self.elapsed,'type':'joint_break','joint':j['id'],'force_n':float(force),'torque_nm':float(torque)})
+        if chain_failures:
+            # A continuous line loses tension as soon as its first section
+            # fails. The end-to-end spring gives every link the same tension;
+            # breaking every section in one solver frame turns one snapped
+            # rope into a spray of unrelated pieces.
+            chain_parts={end['part'] for j in self._chain_joints
+                         for end in (j['a'],j['b'])}
+            connected=UnionFind(chain_parts)
+            for j in self._chain_joints:
+                connected.union(j['a']['part'],j['b']['part'])
+            weakest={}
+            for j,force in chain_failures:
+                group=connected.find(j['a']['part'])
+                utilisation=force/j['break_force_n']
+                if group not in weakest or utilisation>weakest[group][0]:
+                    weakest[group]=(utilisation,j,force)
+            for _,j,force in weakest.values():
+                detach.append(j['id'])
+                self.events.append({'time_s':self.elapsed,'type':'joint_break',
+                                    'joint':j['id'],'force_n':float(force)})
         if detach: self._detach(set(detach))
 
     def _target(self,motor,t):
@@ -667,6 +700,28 @@ class World:
         for body,values in passive.items():
             pb.setJointMotorControlArray(body,[v[0] for v in values],pb.VELOCITY_CONTROL,
                 targetVelocities=[0.]*len(values),forces=[v[1] for v in values],physicsClientId=self.client)
+        for j in self._beam_joints:
+            if j['id'] in self.broken: continue
+            beam=j['metadata']
+            key=self.joint_map.get(j['id'],{}).get('angle')
+            if key is None: continue
+            angle,velocity,*_=self.joint_state(j['id'],'angle',samples)
+            rest=self._beam_rest_angles.get(j['id'],0.)
+            elastic=angle-rest
+            yield_angle=beam.get('yield_angle_rad')
+            if yield_angle and abs(elastic)>yield_angle:
+                if j['id'] not in self._beam_yielded:
+                    self._beam_yielded.add(j['id'])
+                    self.events.append({'time_s':self.elapsed,'type':'beam_yield',
+                                        'joint':j['id'],'part':beam['source_part']})
+                self._beam_rest_angles[j['id']]=angle-math.copysign(yield_angle,elastic)
+                elastic=math.copysign(yield_angle,elastic)
+            stiffness=beam['stiffness_nm_rad']
+            damping=beam['damping_nm_s_rad']
+            self._joint_effort(key,-stiffness*elastic)
+            pb.setJointMotorControl2(key[0],key[1],pb.VELOCITY_CONTROL,
+                                     targetVelocity=0,force=damping*abs(velocity),
+                                     physicsClientId=self.client)
         for j in self.assembly.joints:
             if j['id'] not in self.joint_map: continue
             motor=j.get('motor')
@@ -786,12 +841,14 @@ class World:
     def __enter__(self): return self
     def __exit__(self,*args): self.close()
 
-def validate_simulation_options(duration=3,fps=30,dt=1/240,chain_links_per_body=1):
+def validate_simulation_options(duration=3,fps=30,dt=1/240,chain_links_per_body=1,deflection_warning_mm=10):
     if not all(math.isfinite(v) for v in (duration,fps,dt)) or duration<=0 or duration>3600 or fps<=0 or fps>240 or dt<=0 or dt>1/60:
         raise ValueError('Require 0 < duration ≤ 3600 s, 0 < fps ≤ 240 and 0 < dt ≤ 1/60 s')
 
     if isinstance(chain_links_per_body,bool) or not isinstance(chain_links_per_body,int) or not 1<=chain_links_per_body<=1000:
         raise ValueError('chain_links_per_body must be an integer from 1 to 1000')
+    if not math.isfinite(deflection_warning_mm) or not .01<=deflection_warning_mm<=100000:
+        raise ValueError('deflection_warning_mm must be between 0.01 and 100000')
 
 
 def simplify_chains(assembly,links_per_body):
@@ -828,13 +885,20 @@ def simplify_chains(assembly,links_per_body):
     return result,frozen
 
 
-def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=1,progress=None,cancelled=None):
+def _beam_deflection_mm(reference, current):
+    """Measure bending after removing the first element's rigid movement."""
+    rigid=current[0]@np.linalg.inv(reference[0])
+    return float(max(np.linalg.norm(actual[:3,3]-(rigid@original)[:3,3])
+                     for original,actual in zip(reference,current)))
+
+
+def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=1,deflection_warning_mm=10,progress=None,cancelled=None):
     """Record dynamics; progress receives dictionaries, cancelled is a predicate.
 
     Use console_progress for flushed Python stdout. Cancellation raises
     SimulationCancelled and releases the Bullet client and temporary files.
     """
-    validate_simulation_options(duration,fps,dt,chain_links_per_body)
+    validate_simulation_options(duration,fps,dt,chain_links_per_body,deflection_warning_mm)
     reporter=Progress(progress,cancelled)
     reporter.update('preparing','Preparing simulation',force=True)
     doc=copy.deepcopy(assembly.doc); initial=doc.pop('state',{}).get('joints',{})
@@ -851,17 +915,40 @@ def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=1,progre
         neutral=simplified
     chain_initial={jid:values for jid,values in chain_initial.items() if jid not in frozen}
     if chain_initial: neutral.apply_coordinates(chain_initial)
-    with World(neutral,dt,progress=reporter) as world:
+    from .beam_dynamics import prepare_beams
+    neutral,beam_model,beam_analysis=prepare_beams(neutral)
+    effective_dt=min(dt,1/4000) if beam_model else dt
+    with World(neutral,effective_dt,progress=reporter) as world:
         world.set_coordinates(initial)
         def snapshot():
             reporter.check()
             frame=world.snapshot()
             for jid in frozen: frame['joints'][jid]=copy.deepcopy(initial.get(jid,{'rotation_deg':[0,0,0]}))
+            if beam_model:
+                frame['beam_status']={}
+                for source,model in beam_model.items():
+                    first=world.part_matrix(model['segments'][0]).copy()
+                    first[:3,3]+=first[:3,2]*(model['length_mm']-model['segment_length_mm'])/2
+                    frame['parts'][source]=pose_of(first)
+                    maximum=0.
+                    for index in range(len(model['segments'])-1):
+                        joint=f'{source}~bend-{index + 1}'
+                        maximum=max(maximum,abs(math.radians(frame['joints'].get(joint,{}).get('angle_deg',0))))
+                    threshold=model['yield_angle_rad']
+                    yielded=any(f'{source}~bend-{i + 1}' in world._beam_yielded
+                                for i in range(len(model['segments'])-1))
+                    displacement=_beam_deflection_mm(
+                        [neutral.parts[segment].matrix for segment in model['segments']],
+                        [world.part_matrix(segment) for segment in model['segments']])
+                    frame['beam_status'][source]={'deflection_mm':float(displacement),
+                        'yielded':yielded,
+                        'possible_fracture':bool(threshold and maximum>2*threshold),
+                        'max_joint_angle_deg':math.degrees(maximum)}
             return frame
         reporter.update('recording','Recording initial pose',force=True)
         frames=[snapshot()]; next_sample=1/fps
         maximum_speed=0.; warnings=[]
-        steps=math.ceil(duration/dt); started=time.monotonic()
+        steps=math.ceil(duration/effective_dt); started=time.monotonic()
         reporter.update('simulating',f'Integrating physics: {len(world.joint_map)} joints, {world.solver_iterations} solver iterations',
                         force=True,simulated_s=0,duration_s=duration,percent=0,completed_steps=0,total_steps=steps)
         for step in range(steps):
@@ -885,7 +972,9 @@ def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=1,progre
             original=p.matrix[:3,2]; final=world.part_matrix(pid)[:3,2]
             angle=math.degrees(math.acos(float(np.clip(original@final,-1,1))))
             if angle>20: warnings.append({'type':'tipped_or_rotated','part':pid,'rotation_deg':angle})
-        result={'engine':'PyBullet articulated rigid bodies','input_sha256':assembly.input_hash,'duration_s':world.elapsed,'dt_s':dt,'solver_iterations':world.solver_iterations,'substeps':world.substeps,'fps':fps,'settled':bool(maximum_speed<.02 and max(spins,default=0)<.05),'final_max_speed_m_s':maximum_speed,'final_max_angular_speed_rad_s':max(spins,default=0),'frames':frames,'events':world.events+warnings,'chain_simplification':{'links_per_body':chain_links_per_body,'frozen_joints':frozen},'limitations':['Rigid materials; deformation is computed separately by frame FEA','Spherical joints use bounded XYZ rotational coordinates; Euler singularities and transient solver limit errors are possible','Topology changes preserve current poses and velocities; angular axes rebase at the break pose','Unknown strength data is not assigned a fracture threshold']}
+        result={'engine':'PyBullet articulated rigid bodies with segmented beam bending','input_sha256':assembly.input_hash,'duration_s':world.elapsed,'dt_s':effective_dt,'solver_iterations':world.solver_iterations,'substeps':world.substeps,'fps':fps,'settled':bool(maximum_speed<.02 and max(spins,default=0)<.05),'final_max_speed_m_s':maximum_speed,'final_max_angular_speed_rad_s':max(spins,default=0),'frames':frames,'events':world.events+warnings,'beam_model':beam_model,'beam_elements':[part for part in neutral.scene()['parts'] if any(part['id'] in model['segments'] for model in beam_model.values())],'beam_analysis':beam_analysis,'deflection_warning_mm':deflection_warning_mm,'chain_simplification':{'links_per_body':chain_links_per_body,'frozen_joints':frozen},'limitations':['Segmented beams approximate bending and ground contact; their joints do not model shell buckling or detailed plastic fracture','Spherical joints use bounded XYZ rotational coordinates; Euler singularities and transient solver limit errors are possible','Topology changes preserve current poses and velocities; angular axes rebase at the break pose','Unknown strength data is not assigned a fracture threshold']}
+        if beam_analysis['status']=='beam_model_too_large':
+            result['limitations'].append(beam_analysis['message'])
         if world._chain_joints:
             result['limitations'].append('Flexible segments use ball constraints without angular stops; two-ended lines carry tension through an approximate end-to-end spring, and individual segment reactions are unavailable')
         if frozen: result['limitations'].append('Chain simplification freezes internal joints at the starting pose: bending, contact attribution and joint reactions are approximate; frozen joints have no reaction measurement')

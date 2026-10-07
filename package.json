@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "vendor": "node scripts/vendor.mjs",
-    "check": "node --check pipesim/web/app.js && node --test tests/editor-snapping.test.mjs tests/editor-interactions.test.mjs"
+    "check": "node --check pipesim/web/app.js && node --test tests/editor-snapping.test.mjs tests/editor-interactions.test.mjs tests/preferences.test.mjs tests/resize-shortcuts.test.mjs"
   },
   "dependencies": {
     "three": "0.180.0"

@@ -56,6 +56,33 @@ def test_bake_creates_reflected_chiral_connectors_and_draft_links(tmp_path):
                               np.unique(reflected_vertices.round(3), axis=0))
 
 
+def test_scene_mirror_bakes_unconnected_parts_and_other_draft_groups(tmp_path):
+    doc = design()
+    doc['draft_subassemblies'][0]['mirrors'][0]['scope'] = 'scene'
+    doc['parts'].append({'id': 'loose', 'body': {'kind': 'rigid', 'mass_kg': 1,
+        'geometry': [{'type': 'box', 'size_mm': [20, 10, 15]}]},
+        'pose': {'position_mm': [1500, 300, 100]}})
+    library = tmp_path / 'library'; library.mkdir()
+    (library / 'parts.yaml').write_text(json.dumps({'format': 'pipesim-library/1',
+        'name': 'Test objects', 'objects': {'panel': {'parts': [{'id': 'body',
+            'body': {'kind': 'rigid', 'mass_kg': 1,
+                'geometry': [{'type': 'box', 'size_mm': [40, 20, 5]}]}}]}}}))
+    doc['libraries'] = ['library/parts.yaml']
+    doc['objects'] = [{'id': 'assembly-panel', 'template': 'panel',
+        'pose': {'position_mm': [1200, 250, 100]}}]
+    doc['draft_subassemblies'].append({'id': 'other', 'runs': [{
+        'id': 'other-tube', 'catalog': 'tubeclamp.tube-C',
+        'start_mm': [0, 300, 100], 'end_mm': [1000, 300, 100],
+        'attachments': []}]})
+    result = materialize_mirror(Assembly.from_doc(doc, tmp_path), 'frame', 'y-zero')
+    assert any(part['id'] == 'loose-mirror-y-zero' for part in result['parts'])
+    assert any(part['id'] == 'assembly-panel/body-mirror-y-zero' for part in result['parts'])
+    other = next(group for group in result['draft_subassemblies'] if group['id'] == 'other')
+    mirrored = next(run for run in other['runs'] if run['id'] == 'other-tube-mirror-y-zero')
+    assert mirrored['start_mm'] == [0, -300, 100]
+    assert mirrored['end_mm'] == [1000, -300, 100]
+
+
 def test_declared_chiral_counterpart_uses_catalog_when_socket_frames_match(tmp_path):
     doc = design()
     source = doc['parts'][0]
@@ -113,6 +140,35 @@ def test_moving_attached_fitting_resizes_unlocked_centered_draft(tmp_path):
     assert run['end_mm'] == [503, 0, 100]
     resolved = Assembly.from_doc(moved, tmp_path)
     assert _layout(resolved, run)['length'] == pytest.approx(1006)
+
+
+def test_moving_connector_of_centered_copied_pipe_follows_effective_direction(tmp_path):
+    from pipesim.drafting import _layout
+    from pipesim.snapping import move_document
+
+    doc = {'format': 'pipesim/1', 'units': 'mm-kg-s-N-deg', 'name': 'Copied pipe',
+           'parts': [{'id': 'tee', 'catalog': 'tubeclamp.TC101C',
+                      'pose': {'position_mm': [330, -620, 360],
+                               'rotation_deg': [0, 0, 180]}}],
+           'joints': [], 'draft_subassemblies': [{'id': 'frame', 'runs': [{
+               'id': 'tube-c-1-copy-12', 'catalog': 'tubeclamp.tube-C',
+               'start_mm': [-300.11, -610, 350], 'end_mm': [300.11, -610, 350],
+               'attachments': [{'connector': 'tee', 'port': 'branch',
+                                'end': 'start', 'insertion_mm': 24}]}],
+               'mirrors': [{'id': 'mirror', 'axis': 'x', 'offset_mm': 0,
+                            'run_modes': {'tube-c-1-copy-12': 'centered'}}]}]}
+    # The saved endpoints look centered, but the attached socket shifts the
+    # effective midpoint several millimetres off the plane. Keep it editable.
+    original = Assembly.from_doc(doc, tmp_path, validate_mirror_geometry=False)
+    assert _layout(original, doc['draft_subassemblies'][0]['runs'][0])['pose']['position_mm'][0] != pytest.approx(0)
+    moved = move_document(original, {'tee': {'position_mm': [334, -620, 360],
+                                              'rotation_deg': [0, 0, 180]}})
+    restored = Assembly.from_doc(moved, tmp_path, validate_mirror_geometry=False)
+    run = moved['draft_subassemblies'][0]['runs'][0]
+    layout = _layout(restored, run)
+    assert layout['pose']['position_mm'][0] == pytest.approx(0), (run, layout)
+    assert layout['length'] == pytest.approx(597)
+    Assembly.from_doc(moved, tmp_path)
 
 
 def test_new_second_end_uses_insertion_slack_to_keep_draft_centered(tmp_path):

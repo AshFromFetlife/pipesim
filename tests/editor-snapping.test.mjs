@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {connectionCandidates,clearConnectionIntent,alignmentDelta,projectedStation,socketOccupied,rotationAlignment} from '../pipesim/web/snapping.js';
+import {connectionCandidates,hingeCandidates,clearConnectionIntent,alignmentDelta,projectedStation,socketOccupied,rotationAlignment} from '../pipesim/web/snapping.js';
 import {DEFAULT_SNAP_SETTINGS,loadSnapDefaults,saveSnapDefaults,validateSnapSettings} from '../pipesim/web/snap-settings.js';
 
 function setup(through=true){
@@ -49,6 +49,25 @@ test('occupied bores and incompatible tube sizes are excluded',()=>{
 
 test('a fitting cannot snap to a pipe in its own rigid body',()=>{
   const s=setup();s.scene.groups=[['pipe','tee']];assert.equal(s.candidates().length,0);
+});
+
+test('dragging an eye near a clevis captures hinge bolt ports despite a small hole offset',()=>{
+  const {camera}=setup();
+  const eye={type:'eye',assembly:'bolt',position_mm:[0,0,0],axis:[0,-1,0]};
+  const clevis={type:'clevis',assembly:'bolt',position_mm:[0,0,0],axis:[0,-1,0]};
+  const scene={parts:[{id:'male',kind:'connector',ports:{hinge:eye}},
+    {id:'female',kind:'connector',ports:{hinge:clevis}}],groups:[['male'],['female']],joints:[]};
+  const matrices=new Map([['male',new THREE.Matrix4().makeTranslation(0,0,500)],
+    ['female',new THREE.Matrix4().makeTranslation(12,0,500)]]);
+  const matches=()=>hingeCandidates(scene,matrices,['male'],camera,900,600);
+  assert.equal(matches().length,1);assert.equal(matches()[0].kind,'hinge');
+  assert.deepEqual(matches()[0].male,{part:'male',port:'hinge'});
+  assert.deepEqual(matches()[0].female,{part:'female',port:'hinge'});
+  scene.joints.push({id:'used',a:{part:'female',port:'hinge'},b:{part:'other',port:'eye'}});
+  assert.equal(matches().length,0);
+  scene.joints=[];scene.groups=[['male','female']];assert.equal(matches().length,0);
+  scene.groups=[['male'],['female']];clevis.diameter_mm=12;eye.diameter_mm=8;
+  assert.equal(matches().length,0,'incompatible bolt bores must not capture');
 });
 
 test('through station keeps the full socket on the pipe',()=>{

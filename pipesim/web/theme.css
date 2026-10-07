@@ -137,3 +137,15 @@
     scrollbar-color: #4a616d transparent;
   }
 }
+html[data-viewport-theme="dark"] {
+  --viewport-background: #151e26;
+  --viewport-floor: #111b23;
+  --viewport-grid-major: #49616c;
+  --viewport-grid-minor: #30414d;
+}
+html[data-viewport-theme="light"] {
+  --viewport-background: #eef3f5;
+  --viewport-floor: #f0f4f5;
+  --viewport-grid-major: #c6d3d8;
+  --viewport-grid-minor: #dce5e9;
+}

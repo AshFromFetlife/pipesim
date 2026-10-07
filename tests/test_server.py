@@ -1,8 +1,10 @@
 import copy
 import json
+import socket
 import threading
 import urllib.request
 import urllib.error
+import urllib.parse
 import pytest
 from pipesim.server import EditorServer,EDITOR_API_VERSION
 from pipesim.document import write
@@ -28,6 +30,132 @@ def test_bootstrap_serves_real_library_and_offline_editor(editor):
     assert data['api_version']==EDITOR_API_VERSION
     assert 'porta.DOW-19' in data['library']
     assert request(editor,'/vendor/three.module.js')[0]==200
+
+
+def test_editor_port_cannot_be_shared_by_another_server(editor):
+    with pytest.raises(OSError):
+        EditorServer(editor.root,editor.design,editor.server_port)
+
+
+def test_editor_accepts_scene_asset_burst_while_editing(editor):
+    # Hold accept briefly while a scene's asset requests and an edit queue up.
+    # With the HTTPServer default backlog of five, the excess connections are
+    # refused even though the server is still running.
+    entered=threading.Event()
+    release=threading.Event()
+    original=editor.get_request
+
+    def held_accept():
+        entered.set()
+        release.wait(timeout=10)
+        return original()
+
+    editor.get_request=held_accept
+    clients=[]
+    address=('127.0.0.1',editor.server_port)
+    get=f'GET /index.html HTTP/1.0\r\nHost: 127.0.0.1:{editor.server_port}\r\n\r\n'.encode()
+    try:
+        first=socket.create_connection(address,timeout=2)
+        first.settimeout(10)
+        clients.append(first)
+        assert entered.wait(timeout=2)
+        for _ in range(24):
+            client=socket.create_connection(address,timeout=2)
+            client.settimeout(10)
+            clients.append(client)
+        release.set()
+        for client in clients: client.sendall(get)
+        for client in clients:
+            response=b''
+            while chunk:=client.recv(65536): response+=chunk
+            assert response.startswith(b'HTTP/1.0 200')
+    finally:
+        release.set()
+        editor.get_request=original
+        for client in clients: client.close()
+    assert request(editor,'/api/bootstrap')[0]==200
+
+
+def test_autosave_keeps_bounded_recovery_copies_without_replacing_design(editor,blank):
+    directory='designs/.autosaves'
+    source='designs/work.pipe.yaml'
+    for number in range(3):
+        doc={**blank,'name':f'Revision {number}'}
+        request(editor,'/api/autosave',{'document':doc,'path':source,'source_path':source,
+                                       'directory':directory,'keep':2})
+    records=json.loads(request(editor,'/api/autosaves?directory=designs%2F.autosaves')[1])['autosaves']
+    assert len(records)==2
+    assert not (editor.root/source).exists()
+    latest=json.loads(request(editor,'/api/autosave?directory=designs%2F.autosaves&path='+
+                               urllib.parse.quote(records[0]['path']))[1])
+    assert latest['document']['name']=='Revision 2'
+    assert latest['path']==source and latest['autosaved'] is True
+    with pytest.raises(urllib.error.HTTPError) as error:
+        request(editor,'/api/autosave',{'document':blank,'path':source,'source_path':source,
+                                       'directory':'../outside','keep':2})
+    assert error.value.code==400
+
+
+def test_misaligned_mirror_draft_can_be_saved_reopened_and_moved_into_alignment(editor):
+    from pipesim.document import Assembly, DocumentError
+    doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','name':'Recoverable draft',
+         'parts':[{'id':'connector','body':{'kind':'connector','mass_kg':.2,
+             'geometry':[{'type':'sphere','radius_mm':5,'position_mm':[0,-80,0]}],
+             'ports':{'socket':{'type':'socket','profile':'round','diameter_mm':42.4,
+                 'position_mm':[0,0,0],'axis':[1,0,0],
+                 'engagement_mm':40,'min_engagement_mm':15}}},
+             'pose':{'position_mm':[300,0,100]}}],
+         'joints':[],'draft_subassemblies':[{'id':'frame','runs':[{
+             'id':'pipe','catalog':'tubeclamp.tube-C','start_mm':[-300,0,100],
+             'end_mm':[300,0,100],
+             'attachments':[{'connector':'connector','port':'socket',
+                             'end':'start','insertion_mm':20}]}],
+             'mirrors':[{'id':'middle','axis':'x','offset_mm':0,
+                         'run_modes':{'pipe':'centered'}}]}]}
+    with pytest.raises(DocumentError,match='centre the perpendicular pipe'):
+        Assembly.from_doc(doc)
+    scene=json.loads(request(editor,'/api/resolve',{'document':doc})[1])
+    pipe=next(part for part in scene['parts'] if part['id']=='pipe')
+    assert any(conflict['code']=='MIRROR_ALIGNMENT' for conflict in pipe['conflicts'])
+
+    path='designs/recover.pipe.yaml'
+    request(editor,'/api/save',{'document':doc,'path':path})
+    opened=json.loads(request(editor,'/api/open?path='+path)[1])
+    assert opened['document']['name']=='Recoverable draft'
+    assert next(part for part in opened['scene']['parts'] if part['id']=='pipe')['conflicts']
+    request(editor,'/api/autosave',{'document':doc,'path':path,'source_path':path,
+                                   'directory':'designs/.autosaves','keep':2})
+    autosaves=json.loads(request(editor,'/api/autosaves?directory=designs%2F.autosaves')[1])['autosaves']
+    recovered=json.loads(request(editor,'/api/autosave?directory=designs%2F.autosaves&path='+
+                                 urllib.parse.quote(autosaves[0]['path']))[1])
+    assert recovered['document']['name']=='Recoverable draft'
+    assert next(part for part in recovered['scene']['parts'] if part['id']=='pipe')['conflicts']
+    request(editor,'/api/save',{'document':doc,'path':'design.pipe.yaml'})
+    restarted=json.loads(request(editor,'/api/bootstrap')[1])
+    assert next(part for part in restarted['scene']['parts'] if part['id']=='pipe')['conflicts']
+
+    intermediate=json.loads(request(editor,'/api/move',{'document':doc,
+        'poses':{'connector':{'position_mm':[250,0,100]}}})[1])
+    assert next(part for part in intermediate['scene']['parts'] if part['id']=='pipe')['conflicts']
+    corrected=json.loads(request(editor,'/api/move',{'document':intermediate['document'],
+        'poses':{'connector':{'position_mm':[0,0,100]}}})[1])
+    assert not next(part for part in corrected['scene']['parts'] if part['id']=='pipe')['conflicts']
+    Assembly.from_doc(corrected['document'])
+
+
+def test_save_and_autosave_preserve_a_document_even_when_it_cannot_be_resolved(editor,blank):
+    doc=copy.deepcopy(blank)
+    doc['parts']=[{'id':'unresolved','catalog':'missing.catalog',
+                   'pose':{'position_mm':[12,34,56]}}]
+    path='designs/unresolved.pipe.yaml'
+    with pytest.raises(urllib.error.HTTPError):
+        request(editor,'/api/resolve',{'document':doc})
+    assert request(editor,'/api/save',{'document':doc,'path':path})[0]==200
+    from pipesim.document import read
+    assert read(editor.root/path)==doc
+    request(editor,'/api/autosave',{'document':doc,'path':path,'source_path':path,
+                                   'directory':'designs/.autosaves','keep':2})
+    assert json.loads(request(editor,'/api/autosaves?directory=designs%2F.autosaves')[1])['autosaves']
 
 
 def test_chain_snapshot_keeps_grouping_length_controls_and_physical_joints(editor,blank):

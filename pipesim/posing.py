@@ -54,7 +54,16 @@ class Mechanism:
         self.component=component;self.parts={p for g in component for p in self.groups[g]}
         anchored={self.group_of[a['part']] for a in assembly.anchors}&component
         pelvis=[g for g in component if any(assembly.parts[p].kind=='human' and p.split('/')[-1]=='pelvis' for p in self.groups[g])]
-        self.root=min(anchored) if anchored else pelvis[0] if pelvis else max(component,key=lambda g:(len(self.groups[g]),sum(assembly.parts[p].length or 0 for p in self.groups[g]),-g))
+        # A compact chain is one large editor group, but its links are a
+        # dangling load rather than a structural base. Root an unanchored
+        # mechanism at its non-chain host so moving that host carries the
+        # attached chain instead of merely swinging the host around it.
+        chain_parts={p for instance in assembly.doc.get('objects',[]) if instance['template']=='chain'
+                     for p in assembly.parts if p.startswith(instance['id']+'/')}
+        hosts=[g for g in component if any(p not in chain_parts for p in self.groups[g])]
+        candidates=hosts or component
+        score=lambda g:(len(self.groups[g]),sum(assembly.parts[p].length or 0 for p in self.groups[g]),-g)
+        self.root=min(anchored) if anchored else pelvis[0] if pelvis else max(candidates,key=score)
         if not anchored and not pelvis and assembly.parts[selected].kind=='connector':
             hosts={self.group_of[j['b']['part']] for j in assembly.joints if j['type']=='socket' and not j.get('locked',False)
                    and self.group_of[j['a']['part']]==self.selected and self.group_of[j['b']['part']]!=self.selected}
@@ -142,6 +151,9 @@ class Mechanism:
 def commit_transform(assembly, poses):
     """Revalidate and save a solved pose once, when a drag is accepted."""
     if not poses: return copy.deepcopy(assembly.doc)
+    from .snapping import rigid_draft_follow
+
+    poses,_=rigid_draft_follow(assembly,poses)
     editable=_editable(assembly,set(poses))
     document=move_document(editable,poses)
     from .grouping import restore_objects
@@ -242,6 +254,17 @@ def transform_part(assembly, selected, target, mode='translate', seed=None, *, p
     except DocumentError as exc:
         blocked=str(exc);posed=assembly;q=np.zeros(len(mechanism.lower))
     poses={p:pose_of(v.matrix) for p,v in posed.parts.items() if not np.allclose(v.matrix,assembly.parts[p].matrix,atol=1e-7,rtol=0)}
+    if poses and assembly.doc.get('draft_subassemblies'):
+        from .snapping import apply_rigid_draft_follow, check_rigid_draft_follow, rigid_draft_follow
+
+        poses,run_transforms=rigid_draft_follow(assembly,poses)
+        if run_transforms:
+            for pid,pose in poses.items(): posed.parts[pid].matrix=transform(pose)
+            candidate=copy.deepcopy(assembly.doc)
+            apply_rigid_draft_follow(candidate,run_transforms)
+            try: check_rigid_draft_follow(assembly,posed,candidate,run_transforms)
+            except DocumentError as exc:
+                blocked=str(exc);posed=assembly;poses={};q=np.zeros(len(mechanism.lower))
     actual=posed.parts[selected].matrix
     position_error=float(np.linalg.norm(actual[:3,3]-desired[:3,3]))
     angle_error=float(np.rad2deg(Rotation.from_matrix(actual[:3,:3]@desired[:3,:3].T).magnitude()))

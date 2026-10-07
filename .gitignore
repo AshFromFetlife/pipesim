@@ -10,4 +10,6 @@ build/
 output/
 .pipesim/
 *.log
+fuzz-runs/
+fuzz-repro/
 sources/inspiration/page.html

@@ -1,0 +1,54 @@
+format: pipesim/1
+units: mm-kg-s-N-deg
+name: Crossed through-socket draft repair
+parts:
+- id: cross0
+  catalog: tubeclamp.TC161C
+  pose:
+    position_mm: [0, 0, 0]
+    rotation_deg: [90, 18, -90]
+- id: anchor0
+  catalog: tubeclamp.TC161C
+  pose:
+    position_mm: [-100, 0, 0]
+    rotation_deg: [90, 18, -90]
+- id: cross1
+  catalog: tubeclamp.TC161C
+  pose:
+    position_mm: [0, 220.1, 52.1]
+    rotation_deg: [90, 18, -90]
+- id: anchor1
+  catalog: tubeclamp.TC161C
+  pose:
+    position_mm: [-100, 220.1, 52.1]
+    rotation_deg: [90, 18, -90]
+joints: []
+anchors:
+- part: anchor0
+  surface: fixture
+- part: anchor1
+  surface: fixture
+draft_subassemblies:
+- id: frame
+  runs:
+  - id: rail0
+    catalog: tubeclamp.tube-C
+    start_mm: [-150, 0, 0]
+    end_mm: [150, 0, 0]
+    attachments:
+    - {connector: cross0, port: through}
+    - {connector: anchor0, port: through}
+  - id: rail1
+    catalog: tubeclamp.tube-C
+    start_mm: [-150, 220.1, 52.1]
+    end_mm: [150, 220.1, 52.1]
+    attachments:
+    - {connector: cross1, port: through}
+    - {connector: anchor1, port: through}
+  - id: bridge
+    catalog: tubeclamp.tube-C
+    start_mm: [0, -78.3192755, -0.280302]
+    end_mm: [0, 397.208983, 154.228195]
+    attachments:
+    - {connector: cross0, port: cross}
+    - {connector: cross1, port: cross}

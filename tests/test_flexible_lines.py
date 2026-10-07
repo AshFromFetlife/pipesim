@@ -14,7 +14,7 @@ from pipesim.validation import validate
 
 @pytest.mark.parametrize('catalog,profile,shape,width,mass,strength', [
     ('generic.chain-heavy-100', 'chain', 'tube', 100, 1.2, 60000),
-    ('generic.rope-jute-6', 'rope', 'cylinder', 6, .0006, 350),
+    ('generic.rope-jute-6', 'rope', 'cylinder', 6, .0006, 1800),
     ('generic.rope-nylon-10', 'rope', 'cylinder', 10, .0018, 2000),
     ('generic.rope-polypropylene-12', 'rope', 'cylinder', 12, .0025, 1200),
     ('generic.strap-ratchet-25', 'strap', 'box', 25, .001, 5000),
@@ -94,7 +94,7 @@ def test_light_rope_hangs_without_diverging(factory, blank):
 
 
 @pytest.mark.parametrize('catalog,length,rigidity', [
-    ('generic.rope-jute-6', 160, 30000),
+    ('generic.rope-jute-6', 160, 60000),
     ('generic.strap-ratchet-25', 200, 150000),
 ])
 def test_two_ended_line_transfers_profile_tension_and_breaks(factory, blank, catalog, length, rigidity):

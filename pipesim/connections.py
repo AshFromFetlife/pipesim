@@ -18,6 +18,9 @@ def socket_attachment(assembly, member, connector, port, end='start', insertion_
     if tube.kind!='member': raise DocumentError('Select a pipe, dowel or extrusion to connect')
     socket=fitting.ports.get(port,{})
     if socket.get('type')!='socket': raise DocumentError('Target must be a socket')
+    if any(j['id']!=ignore and j.get('type')=='socket' and
+           {j['a']['part'],j['b']['part']}=={member,connector} for j in assembly.joints):
+        raise DocumentError('This connector is already occupied by this pipe; one pipe cannot occupy two sockets of the same connector')
     if socket_blockers(assembly,connector,port,ignore): raise DocumentError('This socket or its shared bore is occupied')
     section=tube.section
     profile='round' if section.get('type') in ('tube','round','circle') else section.get('profile',section.get('type'))

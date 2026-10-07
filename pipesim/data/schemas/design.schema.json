@@ -44,6 +44,7 @@
                 "id": {"type": "string", "minLength": 1},
                 "axis": {"enum": ["x", "y", "z"]},
                 "offset_mm": {"type": "number"},
+                "scope": {"enum": ["scene"]},
                 "run_modes": {"type": "object", "additionalProperties": {"enum": ["centered", "in_plane", "free"]}}
               },
               "required": ["id", "axis", "offset_mm"],
@@ -691,6 +692,7 @@
             "required": ["axis", "offset_mm", "line_offset_mm", "rotation_deg"],
             "additionalProperties": false
           },
+          "mirror_pose_free": {"type": "boolean"},
           "parameters": {
             "type": "object"
           },
@@ -1286,6 +1288,7 @@
                 "required": ["axis", "offset_mm", "line_offset_mm", "rotation_deg"],
                 "additionalProperties": false
               },
+              "mirror_pose_free": {"type": "boolean"},
               "parameters": {
                 "type": "object"
               },

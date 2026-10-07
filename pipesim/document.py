@@ -268,7 +268,7 @@ class Assembly:
         path=Path(path).resolve()
         return cls.from_doc(read(path),path.parent)
     @classmethod
-    def from_doc(cls,doc,base=None,library=None):
+    def from_doc(cls,doc,base=None,library=None,*,validate_mirror_geometry=True):
         check_schema(doc)
         base=Path(base or ".").resolve()
         library = library or Library.load(doc.get("libraries",[]),base)
@@ -345,7 +345,7 @@ class Assembly:
         result.apply_coordinates(doc.get("state",{}).get("joints",{}))
         if doc.get('draft_subassemblies'):
             from .drafting import validate_drafts
-            validate_drafts(result)
+            validate_drafts(result,validate_mirror_geometry=validate_mirror_geometry)
         if any(instance.get('symmetry') for instance in doc.get('objects', [])):
             from .human_symmetry import validate_human_symmetry
             validate_human_symmetry(result)

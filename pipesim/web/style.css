@@ -36,3 +36,5 @@
 .duplicate-menu button:hover,.duplicate-menu button:focus-visible{background:var(--teal-light)}
 .draft-connection-card:hover,.draft-connection-card:focus-visible,.draft-connection-card:focus-within{border-color:#e3ae5b;background:#fff8ea;outline:none}
 .duplicate-menu small{display:block;margin-top:4px;font-size:9px;font-weight:400;color:var(--muted)}
+.preferences-sections{display:grid;gap:16px;margin-top:24px}.preferences-sections section{padding:15px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}.preferences-sections h3{margin:0 0 10px;color:#526d76;font-size:10px;letter-spacing:.7px}.preferences-sections .fields{grid-template-columns:repeat(3,minmax(0,1fr))}.preferences-sections .field select{height:30px;width:100%;min-width:0;border:1px solid #dbe3e7;border-radius:4px;background:var(--field,#fafcfc);color:var(--ink);font-size:10px}.preferences-sections p{margin-bottom:0}
+.resize-label{position:absolute;z-index:4;padding:3px 5px;border-radius:4px;background:#f4bb65;color:#2b3437;font-size:9px;font-weight:700;pointer-events:none;box-shadow:0 1px 5px #0004}

@@ -9,7 +9,7 @@ import numpy as np
 import pybullet as pb
 from PIL import Image, ImageColor, ImageDraw
 from scipy.spatial.transform import Rotation
-from .document import Assembly, DocumentError
+from .document import Assembly, DocumentError, Part
 from .physics import World, _matrix
 from .geometry import assembly_bounds
 from .math3d import transform, pose_of
@@ -45,7 +45,7 @@ class Renderer:
         clip/=clip[3]
         return [(clip[0]+1)*self.width/2,(1-clip[1])*self.height/2]
 
-    def frame(self,poses=None,visible=None,highlight=None,arrow=None):
+    def frame(self,poses=None,visible=None,highlight=None,arrow=None,*,beam_status=None,beam_source=None,warning_mm=10):
         visible=set(self.initial) if visible is None else set(visible)
         for pid,(body,link,local) in self.world.part_map.items():
             matrix=transform(poses[pid]) if poses and pid in poses else self.initial[pid].copy()
@@ -55,6 +55,11 @@ class Renderer:
             pb.resetBasePositionAndOrientation(body,center[:3,3]/1000,Rotation.from_matrix(center[:3,:3]).as_quat(),physicsClientId=self.world.client)
             color='#eea24c' if pid==highlight else self.assembly.parts[pid].definition.get('color','#8d9ba5')
             if highlight and pid!=highlight: color='#b4c0c7'
+            source=(beam_source or {}).get(pid)
+            if source and beam_status and source in beam_status:
+                status=beam_status[source]
+                if status.get('yielded') or status.get('possible_fracture'): color='#e45b55'
+                elif status.get('deflection_mm',0)>warning_mm: color='#efb849'
             rgb=np.array(ImageColor.getrgb(color))/255
             pb.changeVisualShape(body,-1,rgbaColor=[*rgb,1],physicsClientId=self.world.client)
         modes={'studio':(.5,.75,.2,1),'flat':(1,0,0,0),'technical':(.7,.5,0,0)}
@@ -120,14 +125,31 @@ def render_video(assembly,path,recording=None,**options):
     recording=recording or animation_frames(assembly)
     frames=recording['frames']; fps=recording.get('fps',30)
     if not frames: raise ValueError('Recording has no frames')
-    with Renderer(assembly,**options) as renderer:
+    beam_source={element:source for source,model in recording.get('beam_model',{}).items()
+                 for element in model['segments']}
+    render_assembly=assembly
+    if beam_source:
+        render_assembly=copy.copy(assembly)
+        render_assembly.parts=dict(assembly.parts)
+        for source in recording['beam_model']:
+            render_assembly.parts.pop(source,None)
+        for element in recording.get('beam_elements',[]):
+            source=beam_source[element['id']]
+            definition={key:copy.deepcopy(element[key]) for key in ('kind','color','length_mm','geometry','mass_kg')}
+            render_assembly.parts[element['id']]=Part(element['id'],{'id':element['id']},definition,
+                                                       transform(element['pose']),assembly.parts[source].base)
+        render_assembly.joints=[];render_assembly.anchors=[]
+    with Renderer(render_assembly,**options) as renderer:
+        def image(frame):
+            return renderer.frame(frame['parts'],beam_status=frame.get('beam_status'),
+                                  beam_source=beam_source,warning_mm=recording.get('deflection_warning_mm',10))
         if path.suffix.lower()=='.gif':
-            images=[renderer.frame(f['parts']).convert('RGB').quantize(colors=128) for f in frames]
+            images=[image(f).convert('RGB').quantize(colors=128) for f in frames]
             images[0].save(path,save_all=True,append_images=images[1:],duration=1000/fps,loop=0)
         elif path.suffix.lower()=='.png' or not path.suffix:
             directory=path if not path.suffix else path.parent/path.stem
             directory.mkdir(parents=True,exist_ok=True)
-            for i,frame in enumerate(frames): renderer.frame(frame['parts']).save(directory/f'frame-{i:05}.png')
+            for i,frame in enumerate(frames): image(frame).save(directory/f'frame-{i:05}.png')
         else:
             ffmpeg=shutil.which('ffmpeg')
             if not ffmpeg: raise DocumentError('FFmpeg is required for video. Install it or export .gif / a PNG frame directory.')
@@ -135,7 +157,7 @@ def render_video(assembly,path,recording=None,**options):
             command=[ffmpeg,'-hide_banner','-loglevel','error','-y','-f','rawvideo','-pixel_format','rgb24','-video_size',f'{renderer.width}x{renderer.height}','-framerate',str(fps),'-i','-','-an','-c:v','libx264','-pix_fmt','yuv420p',str(path)]
             with subprocess.Popen(command,stdin=subprocess.PIPE,stderr=subprocess.PIPE) as process:
                 try:
-                    for frame in frames: process.stdin.write(renderer.frame(frame['parts']).convert('RGB').tobytes())
+                    for frame in frames: process.stdin.write(image(frame).convert('RGB').tobytes())
                     process.stdin.close(); process.stdin=None
                     _,error=process.communicate(timeout=60)
                 except Exception:

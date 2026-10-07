@@ -28,6 +28,12 @@ export function draftPreview(run,scene,library){
   }
   for(const a of run.attachments||[]){const frame=socketFrame(a);if(frame.socket.through){through.push({a,...frame});continue;}
     bound[a.end]={point:frame.mouth.clone().addScaledVector(frame.axis,-a.insertion_mm),axis:frame.axis,a};}
+  const seenConnectors=new Set();
+  for(const attachment of run.attachments||[]){
+    if(seenConnectors.has(attachment.connector))conflicts.push({code:'DUPLICATE_CONNECTOR',
+      connector:attachment.connector,message:`${run.id} occupies two sockets of ${attachment.connector}; detach one connection`});
+    seenConnectors.add(attachment.connector);
+  }
   let start=originalStart,end=originalEnd;
   if(bound.start&&bound.end){start=bound.start.point;end=bound.end.point;}
   else if(bound.start){start=bound.start.point;end=start.clone().addScaledVector(bound.start.axis,displayLength);}

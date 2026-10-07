@@ -12,6 +12,8 @@ import * as Three from 'three';
 import {STLLoader as ThreeSTLLoader} from 'three/addons/loaders/STLLoader.js';
 import * as snapping from '../pipesim/web/snapping.js';
 import * as settings from '../pipesim/web/snap-settings.js';
+import * as preferences from '../pipesim/web/preferences.js';
+import {nextFlexibleShortcutLength} from '../pipesim/web/resize-shortcuts.js';
 import * as drafting from '../pipesim/web/drafting.js';
 import {HUMAN_POSES} from '../pipesim/web/human-poses.js';
 
@@ -67,6 +69,23 @@ const draftDuplicateGraph=()=>{
       {connector:'hub',port:'branch',end:'start',insertion_mm:20}]},
     {id:'spare',catalog:'tubeclamp.tube-C',start_mm:[2000,0,100],end_mm:[2400,0,100],attachments:[]}]}];
   return doc;
+};
+
+const crossedRepairDraft=()=>{
+  const rotation_deg=[90,18,-90];
+  return {format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Crossed through fit',
+    parts:[['cross0',[0,0,0]],['anchor0',[-100,0,0]],
+      ['cross1',[0,220.1,52.1]],['anchor1',[-100,220.1,52.1]]]
+      .map(([id,position_mm])=>({id,catalog:'tubeclamp.TC161C',pose:{position_mm,rotation_deg}})),
+    joints:[],anchors:[{part:'anchor0',surface:'fixture'},{part:'anchor1',surface:'fixture'}],
+    draft_subassemblies:[{id:'frame',runs:[
+      {id:'rail0',catalog:'tubeclamp.tube-C',start_mm:[-150,0,0],end_mm:[150,0,0],
+        attachments:[{connector:'cross0',port:'through'},{connector:'anchor0',port:'through'}]},
+      {id:'rail1',catalog:'tubeclamp.tube-C',start_mm:[-150,220.1,52.1],end_mm:[150,220.1,52.1],
+        attachments:[{connector:'cross1',port:'through'},{connector:'anchor1',port:'through'}]},
+      {id:'bridge',catalog:'tubeclamp.tube-C',start_mm:[0,-89.18684,15.60344],
+        end_mm:[0,462.42594,194.83329],attachments:[{connector:'cross0',port:'cross'}]}
+    ]}]};
 };
 
 const largeDraftFixture=()=>{
@@ -190,6 +209,39 @@ test('draft mirror previews pipes and connectors, then discards or keeps the cop
   }finally{await ui.close();}
 });
 
+test('a new draft mirror includes parts already elsewhere in the scene',async()=>{
+  const doc=draftFixture();for(const part of doc.parts)part.pose.position_mm[1]=200;
+  const loose=structuredClone(doc.parts[0]);loose.id='loose';loose.pose.position_mm=[1400,200,100];
+  doc.parts.push(loose,{id:'panel',body:{kind:'rigid',mass_kg:1,
+    geometry:[{type:'box',size_mm:[80,40,10]}]},pose:{position_mm:[700,200,100]}});
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,200,100],end_mm:[1000,200,100],attachments:[]}]},
+    {id:'other',runs:[{id:'other-run',catalog:'tubeclamp.tube-C',
+      start_mm:[0,300,100],end_mm:[1000,300,100],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');ui.document.querySelector('#draft-mirror-add').click();
+    ui.document.querySelector('#mirror-axis').value='y';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors?.length===1&&ui.document.querySelector('[data-mirror-remove]'));
+    assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].scope,'scene');
+    ui.tick();assert.equal(ui.mirrorCopies.size,6);
+    for(const id of ['left','right','loose','panel','other-run']){
+      const preview=[...ui.mirrorCopies.values()].find(record=>record.source===ui.partObjects.get(id));
+      assert.ok(preview,`${id} has a mirror preview`);
+      assert.equal(new Three.Vector3().setFromMatrixPosition(preview.clone.matrix).y,id==='other-run'?-300:-200);
+    }
+    ui.select('other-run');
+    assert.match(ui.document.querySelector('#inspector').textContent,/Scene/);
+    assert.ok(ui.document.querySelector('[data-mirror-remove]'));
+    ui.document.querySelector('[data-mirror-remove]').click();
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.draft_subassemblies[0].mirrors);
+    for(const id of ['left','right','loose','panel'])
+      assert.ok(ui.state.doc.parts.some(part=>part.id===`${id}-mirror-mirror-1`));
+    assert.ok(ui.state.doc.draft_subassemblies[1].runs.some(run=>run.id==='other-run-mirror-mirror-1'));
+  }finally{await ui.close();}
+});
+
 test('adding a fitting reuses a stale mirrored ID without duplicating mirror_parts',async()=>{
   const doc=draftFixture();doc.parts=[];
   doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
@@ -207,6 +259,164 @@ test('adding a fitting reuses a stale mirrored ID without duplicating mirror_par
     ui.document.querySelector('[data-catalog="tubeclamp.TC101C"]').click();
     await ui.wait(()=>ui.state.scene.parts.some(part=>part.id==='tc101c-1'));
     assert.deepEqual(ui.state.doc.draft_subassemblies[0].mirror_parts,['tc101c-1']);
+  }finally{await ui.close();}
+});
+
+test('duplicating a fitting in draft mode previews its mirror and keeps the copy on bake',async()=>{
+  const doc=draftFixture();for(const part of doc.parts)part.pose.position_mm[1]=200;
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,200,100],end_mm:[1000,200,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}]}],
+    mirrors:[{id:'side',axis:'y',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.select('left');ui.document.querySelector('#duplicate-selected').click();
+    await ui.wait(()=>ui.state.selected==='left-copy'&&!ui.state.placementPending);
+    assert.ok(ui.state.doc.draft_subassemblies[0].mirror_parts.includes('left-copy'));
+    ui.tick();
+    const preview=[...ui.mirrorCopies.values()].find(record=>record.source===ui.partObjects.get('left-copy'));
+    assert.ok(preview,'the duplicate has a mirror preview');
+    assert.equal(new Three.Vector3().setFromMatrixPosition(preview.clone.matrix).y,-200);
+    ui.select('run');ui.document.querySelector('[data-mirror-remove]').click();
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.draft_subassemblies[0].mirrors);
+    assert.ok(ui.state.doc.parts.some(part=>part.id==='left-copy-mirror-side'));
+  }finally{await ui.close();}
+});
+
+test('preferences convert inspector values for display while saving millimetres',async()=>{
+  const ui=await editor(fixture());try{
+    ui.select('tee');ui.document.querySelector('#snap-settings-button').click();
+    ui.document.querySelector('#pref-length').value='in';
+    ui.document.querySelector('#pref-mass').value='lb';
+    ui.document.querySelector('#pref-grid').checked=false;
+    ui.document.querySelector('#pref-ports').checked=true;
+    ui.document.querySelector('#pref-width').value='2048';
+    ui.document.querySelector('#modal-actions .primary').click();
+    assert.match(ui.document.querySelector('.unit-badge').textContent,/in · lb · N/);
+    assert.equal(ui.document.querySelector('#grid-button').classList.contains('active'),false);
+    assert.equal(ui.document.querySelector('#ports-button').classList.contains('active'),true);
+    const x=ui.document.querySelector('[data-pose="position_mm"][data-axis="0"]');
+    assert.equal(Number(x.value),preferences.displayValue(300,'length','in'));
+    x.value='20';x.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.parts.find(part=>part.id==='tee').pose.position_mm[0]===508);
+    assert.equal(ui.state.doc.units,'mm-kg-s-N-deg');
+    assert.equal(JSON.parse(ui.window.localStorage.getItem('pipesim.preferences.v1')).renderWidth,2048);
+  }finally{await ui.close();}
+});
+
+test('validation colors deflected members yellow and yielded members red at the chosen limit',async()=>{
+  const doc=fixture();doc.parts=doc.parts.filter(part=>part.id==='pipe');
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,deflectionWarningMm:2.5});
+  const ui=await editor(doc,null,{storedPreferences:stored});try{
+    const mesh=()=>{let found;ui.partObjects.get('pipe').traverse(object=>{if(object.isMesh&&!found)found=object;});return found;};
+    const original=mesh().material.color.getHexString();
+    ui.state.analysis={status:'solved',members:[{part:'pipe',max_displacement_mm:3,
+      max_von_mises_mpa:12,yield_utilisation:.2,buckling_utilisation:0}]};
+    ui.document.querySelector('[data-mode="check"]').click();
+    assert.equal(mesh().material.color.getHexString(),'efb849');
+    ui.state.analysis.members[0].yield_utilisation=1.1;
+    ui.document.querySelector('[data-mode="design"]').click();
+    ui.document.querySelector('[data-mode="check"]').click();
+    assert.equal(mesh().material.color.getHexString(),'e45b55');
+    ui.document.querySelector('[data-mode="design"]').click();
+    assert.equal(mesh().material.color.getHexString(),original);
+  }finally{await ui.close();}
+});
+
+test('simulation playback shows bent beam elements with the deflection warning color',async()=>{
+  const opened=await post('parse',blankDesign('Beam playback'),{text:await readFile('examples/cantilever.pipe.yaml','utf8')});
+  const doc=opened.document;doc.parts[0].parameters.length_mm=5000;
+  doc.parts[0].pose.position_mm=[2500,0,1000];doc.anchors[0].position_mm=[0,0,1000];
+  doc.loads=[];doc.environment={ground:false,gravity_m_s2:[0,0,-9.81]};
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,deflectionWarningMm:2.5});
+  const ui=await editor(doc,null,{storedPreferences:stored});try{
+    ui.document.querySelector('[data-mode="simulate"]').click();
+    ui.document.querySelector('#sim-duration').value='.5';
+    ui.document.querySelector('[data-run="simulate"]').click();
+    await ui.wait(()=>ui.state.recording&&!ui.state.busy,60000);
+    const recording=ui.state.recording,segment=recording.beam_model.beam.segments[0];
+    assert.equal(recording.deflection_warning_mm,2.5);
+    assert.ok(recording.beam_elements.length>=3);
+    assert.ok(ui.partObjects.has(segment));
+    const slider=ui.document.querySelector('#time-slider');slider.value=recording.frames.length-1;
+    slider.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(ui.partObjects.get('beam').visible,false);
+    assert.equal(ui.partObjects.get(segment).visible,true);
+    let mesh;ui.partObjects.get(segment).traverse(object=>{if(object.isMesh&&!mesh)mesh=object;});
+    assert.equal(mesh.material.color.getHexString(),'efb849');
+    recording.frames.at(-1).beam_status.beam.yielded=true;
+    slider.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(mesh.material.color.getHexString(),'e45b55');
+    ui.document.querySelector('#reset-button').click();
+    assert.equal(ui.partObjects.get('beam').visible,true);
+    assert.equal(ui.partObjects.get(segment).visible,false);
+    ui.document.querySelector('#capture-frame').click();
+    assert.match(ui.document.querySelector('#toast').textContent,/Bent beams are temporary/);
+  }finally{await ui.close();}
+});
+
+test('empty startup preference ignores the bootstrap design',async()=>{
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,startup:'empty'});
+  const ui=await editor(fixture(),null,{storedPreferences:stored});try{
+    assert.equal(ui.state.doc.parts.length,0);
+    assert.equal(ui.state.doc.units,'mm-kg-s-N-deg');
+  }finally{await ui.close();}
+});
+
+test('latest autosave startup recovers a dirty design with its original save path',async()=>{
+  const recovered=fixture();recovered.name='Recovered draft';
+  await post('autosave',recovered,{directory:'designs/.autosaves',source_path:'output/ui-test.pipe.yaml',keep:2});
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,startup:'autosave'});
+  const ui=await editor(draftFixture(),null,{storedPreferences:stored});try{
+    assert.equal(ui.state.doc.name,'Recovered draft');
+    assert.equal(ui.state.path,'output/ui-test.pipe.yaml');
+    assert.equal(ui.state.dirty,true);
+  }finally{await ui.close();}
+});
+
+test('autosave writes a recovery copy without clearing unsaved edits',async()=>{
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,autosaveEnabled:true,autosaveDirectory:'designs/.ui-autosaves'});
+  const ui=await editor(fixture(),null,{storedPreferences:stored});try{
+    ui.select('tee');const x=ui.document.querySelector('[data-pose="position_mm"][data-axis="0"]');
+    x.value='450';x.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.parts.find(part=>part.id==='tee').pose.position_mm[0]===450);
+    await ui.performAutosave();
+    const list=await (await fetch(url+'/api/autosaves?directory=designs%2F.ui-autosaves')).json();
+    assert.equal(list.autosaves.length,1);
+    assert.equal(ui.state.dirty,true);
+  }finally{await ui.close();}
+});
+
+test('new item and camera defaults appear in their controls',async()=>{
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,cameraFovDeg:55,floorVisible:false,
+    defaultDuplicateCount:4,defaultHumanHeightMm:1820,defaultHumanMassKg:82,defaultChainLengthMm:1400});
+  const ui=await editor(fixture(),null,{storedPreferences:stored});try{
+    assert.equal(ui.camera.fov,55);
+    ui.document.querySelector('#human-button').click();
+    assert.equal(ui.document.querySelector('#human-height').value,'1820');
+    assert.equal(ui.document.querySelector('#human-mass').value,'82');
+    ui.document.querySelector('#modal-close').click();
+    ui.document.querySelector('#chain-button').click();
+    assert.equal(ui.document.querySelector('#new-chain-length').value,'1400');
+    ui.document.querySelector('#modal-close').click();
+    ui.select('tee');ui.document.querySelector('#duplicate-menu-toggle').click();
+    ui.document.querySelector('[data-duplicate="count"]').click();
+    assert.equal(ui.document.querySelector('#duplicate-count').value,'4');
+  }finally{await ui.close();}
+});
+
+test('startup can reopen the last saved design or a selected example',async()=>{
+  const saved=fixture();saved.name='Saved start';
+  await post('save',saved,{path:'output/startup-saved.pipe.yaml'});
+  const last=await editor(draftFixture(),null,{storedLastSavedPath:'output/startup-saved.pipe.yaml'});try{
+    assert.equal(last.state.doc.name,'Saved start');
+  }finally{await last.close();}
+  const example=fixture();example.name='Example start';
+  await post('save',example,{path:'examples/startup-example.pipe.yaml'});
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,startup:'example',startupExample:'examples/startup-example.pipe.yaml'});
+  const ui=await editor(draftFixture(),null,{storedPreferences:stored,bootstrapOverride:()=>({examples:['examples/startup-example.pipe.yaml']})});try{
+    assert.equal(ui.state.doc.name,'Example start');
   }finally{await ui.close();}
 });
 
@@ -284,6 +494,119 @@ test('an attached centered pipe keeps its effective span constrained',async()=>{
     await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[0]===-480);
     assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].end_mm,[500,0,100]);
   }finally{await ui.close();}
+});
+
+test('pinning a copied pipe uses its attached socket direction, even when saved endpoints are reversed',async()=>{
+  const doc=draftFixture();
+  doc.parts=[
+    {id:'crossover',catalog:'tubeclamp.TC161C',pose:{position_mm:[230.40172311,-323.98325112,354.8376209],rotation_deg:[89.45707654,26.99999931,89.9999189]}},
+    {id:'tee',catalog:'tubeclamp.TC101C',pose:{position_mm:[327.62541668,-323.56534466,355.65848973],rotation_deg:[0.00223542,0.48378386,-179.75365537]}}
+  ];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'copied',catalog:'tubeclamp.tube-C',
+    start_mm:[-300.11,-327.5,357.6],end_mm:[300.11,-327.5,357.6],attachments:[
+      {connector:'crossover',port:'through'},
+      {connector:'tee',port:'branch',end:'start',insertion_mm:24}]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0,run_modes:{copied:'free'}}]}];
+  const ui=await editor(doc);try{
+    ui.select('copied');
+    assert.equal(ui.document.querySelector('[data-mirror-mode]').value,'free');
+    assert.ok(Math.abs(ui.state.scene.parts.find(part=>part.id==='copied').pose.position_mm[0])>1);
+    const select=ui.document.querySelector('[data-mirror-mode]');select.value='centered';
+    select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.copied==='centered'&&
+      Math.abs(ui.state.scene.parts.find(part=>part.id==='copied').pose.position_mm[0])<.05);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='copied').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('pinning a two-ended pipe uses available socket insertion to center it',async()=>{
+  const doc=draftFixture();doc.parts[0].pose.position_mm=[-480,0,100];doc.parts[1].pose.position_mm=[477,0,100];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'pipe',catalog:'tubeclamp.tube-C',
+    start_mm:[-500,0,100],end_mm:[500,0,100],attachments:[
+      {connector:'left',port:'socket',end:'start',insertion_mm:20},
+      {connector:'right',port:'socket',end:'end',insertion_mm:20}]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0,run_modes:{pipe:'free'}}]}];
+  const ui=await editor(doc);try{
+    ui.select('pipe');const select=ui.document.querySelector('[data-mirror-mode]');
+    select.value='centered';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.pipe==='centered'&&
+      Math.abs(ui.state.scene.parts.find(part=>part.id==='pipe').pose.position_mm[0])<.05);
+    const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.ok(run.attachments.some(a=>Math.abs(a.insertion_mm-20)>2.9));
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='pipe').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('seeded mirror pinning keeps connected draft spans centered across axes, ends and saved directions',async()=>{
+  for(let seed=0;seed<48;seed++){
+    const axis=seed%3,side=seed%2?1:-1,end=seed%4<2?'start':'end';
+    const offset=(seed%5-2)*75,distance=240+seed*21,shift=(seed%4+1)*3;
+    const point=[40,-110,260];point[axis]=offset+side*distance;
+    const direction=[0,0,0];direction[axis]=-side;
+    const transverse=(axis+1)%3;
+    direction[transverse]=.002*(seed%3-1);
+    const norm=Math.hypot(...direction);for(let i=0;i<3;i++)direction[i]/=norm;
+    const mouth=point.map((value,i)=>value+direction[i]*24);
+    const through=point.map((value,i)=>value+direction[i]*Math.min(180,distance/2));
+    const first=[...point],last=[...point];first[axis]=offset-distance;last[axis]=offset+distance;
+    if(seed%3===0)[first[axis],last[axis]]=[last[axis],first[axis]];
+    const socket=(throughFit=false)=>({type:'socket',profile:'round',diameter_mm:42.4,
+      position_mm:[0,0,0],axis:direction,engagement_mm:40,min_engagement_mm:15,...(throughFit?{through:true}:{})});
+    const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:`Mirror fuzz ${seed}`,
+      parts:[{id:'end-fit',body:{kind:'connector',mass_kg:.2,geometry:[{type:'sphere',radius_mm:5,position_mm:[0,0,-80]}],ports:{bore:socket()}},pose:{position_mm:mouth}},
+        {id:'through-fit',body:{kind:'connector',mass_kg:.2,geometry:[{type:'sphere',radius_mm:5,position_mm:[0,0,-80]}],ports:{bore:socket(true)}},pose:{position_mm:through}}],
+      joints:[],draft_subassemblies:[{id:'frame',runs:[{id:'pipe',catalog:'tubeclamp.tube-C',
+        start_mm:first,end_mm:last,attachments:[{connector:'end-fit',port:'bore',end,insertion_mm:24},
+          {connector:'through-fit',port:'bore'}]}],mirrors:[{id:'mirror',axis:'xyz'[axis],
+        offset_mm:offset,run_modes:{pipe:'free'}}]}]};
+    // Preserve a raw centered span but make the connector-driven span off center.
+    const run=doc.draft_subassemblies[0].runs[0];
+    run.end_mm[axis]+=shift;
+    const ui=await editor(doc);try{
+      ui.select('pipe');const select=ui.document.querySelector('[data-mirror-mode]');
+      select.value='centered';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+      await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.pipe==='centered'&&
+        Math.abs(ui.state.scene.parts.find(part=>part.id==='pipe').pose.position_mm[axis]-offset)<.05);
+      const pipe=ui.state.scene.parts.find(part=>part.id==='pipe');
+      assert.equal(pipe.conflicts.length,0,`seed ${seed}`);
+      assert.ok(Math.abs(pipe.pose.position_mm[axis]-offset)<.05,`seed ${seed}`);
+      assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.pipe,'centered',`seed ${seed}`);
+    }finally{await ui.close();}
+  }
+});
+
+test('seeded two-socket mirror pinning absorbs offset through insertion depth',async()=>{
+  for(let seed=0;seed<18;seed++){
+    const axis=seed%3,offset=(seed%7-3)*60,distance=260+seed*13;
+    const error=(seed%2?-1:1)*(1+seed%6);
+    const base=[25,-70,310],start=[...base],end=[...base];
+    start[axis]=offset-distance;end[axis]=offset+distance+error;
+    const forward=[0,0,0],backward=[0,0,0];forward[axis]=1;backward[axis]=-1;
+    const mouthStart=start.map((v,i)=>v+forward[i]*24);
+    const mouthEnd=end.map((v,i)=>v+backward[i]*24);
+    const fit=(id,position,orientation)=>({id,body:{kind:'connector',mass_kg:.2,
+      geometry:[{type:'sphere',radius_mm:5,position_mm:[0,0,-80]}],
+      ports:{bore:{type:'socket',profile:'round',diameter_mm:42.4,position_mm:[0,0,0],
+        axis:orientation,engagement_mm:40,min_engagement_mm:15}}},pose:{position_mm:position}});
+    const rawStart=[...base],rawEnd=[...base];rawStart[axis]=offset-distance;rawEnd[axis]=offset+distance;
+    if(seed%4===0)[rawStart[axis],rawEnd[axis]]=[rawEnd[axis],rawStart[axis]];
+    const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:`Two-socket mirror fuzz ${seed}`,
+      parts:[fit('first',mouthStart,forward),fit('second',mouthEnd,backward)],joints:[],
+      draft_subassemblies:[{id:'frame',runs:[{id:'pipe',catalog:'tubeclamp.tube-C',
+        start_mm:rawStart,end_mm:rawEnd,attachments:[
+          {connector:'first',port:'bore',end:'start',insertion_mm:24},
+          {connector:'second',port:'bore',end:'end',insertion_mm:24}]}],
+        mirrors:[{id:'middle',axis:'xyz'[axis],offset_mm:offset,run_modes:{pipe:'free'}}]}]};
+    const ui=await editor(doc);try{
+      ui.select('pipe');const select=ui.document.querySelector('[data-mirror-mode]');
+      select.value='centered';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+      await ui.wait(()=>ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.pipe==='centered'&&
+        Math.abs(ui.state.scene.parts.find(part=>part.id==='pipe').pose.position_mm[axis]-offset)<.05);
+      const run=ui.state.doc.draft_subassemblies[0].runs[0];
+      assert.ok(run.attachments.some(a=>Math.abs(a.insertion_mm-24)>0.9),`seed ${seed}`);
+      assert.equal(ui.state.scene.parts.find(part=>part.id==='pipe').conflicts.length,0,`seed ${seed}`);
+    }finally{await ui.close();}
+  }
 });
 
 test('connecting an off-centre end fitting grows the mirrored draft span',async()=>{
@@ -366,11 +689,13 @@ test('finalizing a mirrored draft run commits both sides in one edit',async()=>{
   }finally{await ui.close();}
 });
 
-async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOverride=()=>({}),interceptFetch=()=>null,storedHotkeys=null}={}){
+async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOverride=()=>({}),interceptFetch=()=>null,storedHotkeys=null,storedPreferences=null,storedLastSavedPath=null}={}){
   const html=await readFile('pipesim/web/index.html','utf8');const dom=new JSDOM(html,{url});const window=dom.window;
   const document=window.document,timers=[],captures=new Set();let frame,inFlight=0;
   if(storedDefaults)window.localStorage.setItem('pipesim.snap-defaults.v1',storedDefaults);
   if(storedHotkeys)window.localStorage.setItem('pipesim.library-hotkeys.v1',storedHotkeys);
+  if(storedPreferences)window.localStorage.setItem('pipesim.preferences.v1',storedPreferences);
+  if(storedLastSavedPath)window.localStorage.setItem('pipesim.last-saved-path.v1',storedLastSavedPath);
   window.matchMedia=()=>({matches:false,addEventListener(){}});
   window.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
   window.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
@@ -382,23 +707,30 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   class Controls extends Three.EventDispatcher {constructor(camera){super();this.camera=camera;this.target=new Three.Vector3();this.enabled=true;}update(){this.camera.lookAt(this.target);this.camera.updateMatrixWorld();}dispose(){}}
   class Gizmo extends Three.EventDispatcher {constructor(){super();this.axis=null;this.dragging=false;}getHelper(){return new Three.Group();}setSize(){}setTranslationSnap(v){this.translationSnap=v;}setRotationSnap(v){this.rotationSnap=v;}setSpace(s){this.space=s;}attach(o){this.object=o;}detach(){this.object=null;}setMode(m){this.mode=m;}}
   const resolved=await post('resolve',doc);
+  const initialDoc=resolved.document||doc;
   const fetchEditor=async(path,options)=>{
-    if(path==='/api/bootstrap')return new Response(JSON.stringify({...bootstrap,path:'output/ui-test.pipe.yaml',document:doc,scene:resolved,...bootstrapOverride()}));
+    if(path==='/api/bootstrap')return new Response(JSON.stringify({...bootstrap,path:'output/ui-test.pipe.yaml',document:initialDoc,scene:resolved,...bootstrapOverride()}));
     const intercepted=interceptFetch(path,options);if(intercepted)return intercepted;
-    inFlight++;try{const response=await fetch(new URL(path,url),options),body=await response.arrayBuffer();await beforeResponse(path);return new Response(body,{status:response.status,headers:response.headers});}finally{inFlight--;}
+    inFlight++;try{
+      const response=await fetch(new URL(path,url),options);
+      const body=await response.arrayBuffer();await beforeResponse(path);
+      return new Response(body,{status:response.status,headers:response.headers});
+    }finally{inFlight--;}
   };
   const source=(await readFile('pipesim/web/app.js','utf8')).replace(/^import .*;\r?\n/gm,'');
   class MeshLoader {load(path,success,progress,failure){fetchEditor(path).then(response=>response.arrayBuffer()).then(bytes=>success(new ThreeSTLLoader().parse(bytes))).catch(failure);}}
   const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-  const evaluate=new AsyncFunction('THREE','OrbitControls','TransformControls','GLTFLoader','STLLoader','OBJLoader','connectionCandidates','clearConnectionIntent','alignmentDelta','socketOccupied','rotationAlignment',
+  const evaluate=new AsyncFunction('THREE','OrbitControls','TransformControls','GLTFLoader','STLLoader','OBJLoader','connectionCandidates','hingeCandidates','clearConnectionIntent','alignmentDelta','socketOccupied','rotationAlignment',
     'DEFAULT_SNAP_SETTINGS','loadSnapDefaults','saveSnapDefaults','validateSnapSettings',
-    'draftRuns','draftRun','draftPreview','HUMAN_POSES',
+    'DEFAULT_PREFERENCES','loadPreferences','savePreferences','validatePreferences','displayValue','storedValue',
+    'draftRuns','draftRun','draftPreview','HUMAN_POSES','nextFlexibleShortcutLength',
     'window','document','devicePixelRatio','getComputedStyle','ResizeObserver','requestAnimationFrame','fetch','setTimeout','clearTimeout',
-    source+'\nreturn {state, camera, orbit, scene, partObjects, ports, viewport, gizmo, snapGhost, mirrorGhost, mirrorCopies, draftConnect};');
+    source+'\nreturn {state, camera, orbit, scene, partObjects, ports, resizeHandles, viewport, gizmo, snapGhost, mirrorGhost, mirrorCopies, draftConnect, performAutosave};');
   const app=await evaluate({...Three,WebGLRenderer:Renderer},Controls,Gizmo,class{},MeshLoader,class{},
-    snapping.connectionCandidates,snapping.clearConnectionIntent,snapping.alignmentDelta,snapping.socketOccupied,snapping.rotationAlignment,
+    snapping.connectionCandidates,snapping.hingeCandidates,snapping.clearConnectionIntent,snapping.alignmentDelta,snapping.socketOccupied,snapping.rotationAlignment,
     settings.DEFAULT_SNAP_SETTINGS,settings.loadSnapDefaults,settings.saveSnapDefaults,settings.validateSnapSettings,
-    drafting.draftRuns,drafting.draftRun,drafting.draftPreview,HUMAN_POSES,
+    preferences.DEFAULT_PREFERENCES,preferences.loadPreferences,preferences.savePreferences,preferences.validatePreferences,preferences.displayValue,preferences.storedValue,
+    drafting.draftRuns,drafting.draftRun,drafting.draftPreview,HUMAN_POSES,nextFlexibleShortcutLength,
     window,document,1,()=>({getPropertyValue:()=> '#dce5e9'}),class{constructor(callback){this.callback=callback;}observe(){this.callback();}},callback=>{frame=callback;},fetchEditor,
     (callback,delay)=>{const timer=setTimeout(callback,delay);timers.push(timer);return timer;},clearTimeout);
   const tick=()=>frame?.(performance.now());tick();
@@ -410,6 +742,288 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   const drain=async()=>{await wait(()=>inFlight===0,45000);await pause(30);};
   return {...app,document,window,wait,select,pixel,pointer,drag,tick,drain,async close(){await drain();timers.forEach(clearTimeout);dom.window.close();}};
 }
+
+test('resize handles and Y/H/U/J resize either end with one undo step each',async()=>{
+  const doc=fixture();doc.anchors=[];doc.parts=doc.parts.filter(p=>p.id==='pipe');
+  const ui=await editor(doc);try{
+    ui.select('pipe');ui.document.querySelector('[data-tool="resize"]').click();ui.tick();
+    assert.equal(ui.resizeHandles.children.length,2);
+    assert.equal(ui.document.querySelector('#resize-label-first').textContent,'Y/H');
+    assert.equal(ui.document.querySelector('#resize-label-second').textContent,'U/J');
+    const key=value=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
+    const endpoints=()=>{const p=ui.state.scene.parts.find(p=>p.id==='pipe');return [p.pose.position_mm[2]-p.length_mm/2,p.pose.position_mm[2]+p.length_mm/2];};
+    assert.deepEqual(endpoints(),[0,1000]);
+    key('y');await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm===1010);
+    assert.deepEqual(endpoints(),[-10,1000]);
+    key('h');await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm===1000);
+    assert.deepEqual(endpoints(),[0,1000]);
+    key('u');await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm===1010);
+    assert.deepEqual(endpoints(),[0,1010]);
+    key('j');await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm===1000);
+    assert.deepEqual(endpoints(),[0,1000]);
+    assert.equal(ui.state.undo.length,4);
+    const from=ui.pixel(new Three.Vector3(0,0,1000)),to=ui.pixel(new Three.Vector3(0,0,1100));
+    ui.drag(from,to);await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm>1040);
+    assert.ok(Math.abs(endpoints()[0])<1e-3);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm===1000);
+    const other=ui.pixel(new Three.Vector3(0,0,0)),outward=ui.pixel(new Three.Vector3(0,0,-100));
+    ui.drag(other,outward);await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm>1040);
+    assert.ok(Math.abs(endpoints()[1]-1000)<1e-3);
+  }finally{await ui.close();}
+});
+
+test('grabbing the edge of a resize handle does not move its endpoint',async()=>{
+  const doc=fixture();doc.anchors=[];doc.parts=doc.parts.filter(part=>part.id==='pipe');
+  const requests=[];
+  const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
+    if(path==='/api/resize-drag')requests.push(JSON.parse(options.body));return null;
+  }});try{
+    ui.select('pipe');ui.document.querySelector('[data-tool="resize"]').click();ui.tick();
+    const center=ui.pixel(new Three.Vector3(0,0,1000));
+    const edge={x:center.x+9,y:center.y+6};
+    ui.pointer('pointerdown',edge);ui.pointer('pointermove',edge);ui.pointer('pointerup',edge);
+    await ui.drain();
+    assert.equal(requests.length,0);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='pipe').length_mm,1000);
+    assert.equal(ui.state.undo.length,0);
+  }finally{await ui.close();}
+});
+
+test('resize hotkeys work with a selected pipe in Select and H fits view otherwise',async()=>{
+  const doc=fixture();doc.anchors=[];
+  const requests=[];
+  const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
+    if(path==='/api/resize-drag')requests.push(JSON.parse(options.body));return null;
+  }});try{
+    ui.select('pipe');
+    assert.equal(ui.state.tool,'select');
+    assert.equal(ui.resizeHandles.children.length,2);
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'u',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.scene.parts.find(part=>part.id==='pipe').length_mm===1010);
+    assert.equal(requests.length,1);
+    ui.select('tee');assert.equal(ui.resizeHandles.children.length,0);
+    ui.camera.position.set(6000,6000,6000);ui.orbit.target.set(2000,1000,500);ui.orbit.update();
+    const before=ui.camera.position.toArray();
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'h',bubbles:true,cancelable:true}));
+    assert.notDeepEqual(ui.camera.position.toArray(),before);
+    assert.equal(requests.length,1);
+  }finally{await ui.close();}
+});
+
+test('selected pipe resize handles work in Select, Translate and Rotate tools',async()=>{
+  const doc=fixture();doc.anchors=[];doc.parts=doc.parts.filter(part=>part.id==='pipe');
+  const ui=await editor(doc);try{
+    ui.select('pipe');ui.tick();
+    assert.equal(ui.state.tool,'select');assert.equal(ui.resizeHandles.children.length,2);
+    for(const tool of ['translate','rotate','select']){
+      ui.document.querySelector(`[data-tool="${tool}"]`).click();
+      assert.equal(ui.resizeHandles.children.length,2,tool);
+    }
+    const from=ui.pixel(ui.resizeHandles.children[1].position),
+      to=ui.pixel(ui.resizeHandles.children[1].position.clone().add(new Three.Vector3(0,0,100)));
+    ui.drag(from,to);
+    await ui.wait(()=>ui.state.scene.parts.find(part=>part.id==='pipe').length_mm>1040);
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('Resize tool leaves background left drag available to camera controls',async()=>{
+  const doc=fixture();doc.anchors=[];doc.parts=doc.parts.filter(part=>part.id==='pipe');
+  const ui=await editor(doc);try{
+    ui.select('pipe');ui.document.querySelector('[data-tool="resize"]').click();ui.tick();
+    const canvas=ui.document.querySelector('#viewport canvas'),seen=[];
+    for(const type of ['pointerdown','pointermove','pointerup'])
+      canvas.addEventListener(type,()=>seen.push(type));
+    ui.drag({x:850,y:500},{x:750,y:400});
+    assert.deepEqual(seen,['pointerdown','pointermove','pointermove','pointerup']);
+    assert.equal(ui.orbit.enabled,true);
+    assert.equal(ui.state.undo.length,0);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='pipe').length_mm,1000);
+    ui.select('pipe');ui.tick();
+    const handle=ui.pixel(ui.resizeHandles.children[1].position);
+    ui.pointer('pointerdown',handle);
+    assert.equal(seen.filter(type=>type==='pointerdown').length,1);
+    ui.pointer('pointerup',handle);
+    assert.equal(ui.orbit.enabled,true);
+  }finally{await ui.close();}
+});
+
+test('connected lattice free-end resize commits and undoes',async()=>{
+  const id='tube-c-1-copy-11';
+  const ui=await editor(await resizeFixture('tests/fixtures/resize-connected-lattice.pipe.yaml'));try{
+    ui.select(id);ui.document.querySelector('[data-tool="resize"]').click();
+    const original=ui.state.scene.parts.find(part=>part.id===id).length_mm;
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',
+      {key:'u',bubbles:true,cancelable:true}));
+    await ui.wait(()=>!ui.state.placementPending&&
+      ui.state.scene.parts.find(part=>part.id===id).length_mm>original+9,30000);
+    assert.ok(ui.state.scene.parts.filter(part=>part.draft).every(part=>!part.conflicts.length));
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>Math.abs(ui.state.scene.parts.find(part=>part.id===id).length_mm-original)<.001);
+    assert.equal(ui.state.undo.length,0);
+  }finally{await ui.close();}
+});
+
+function draftResizeCapture(socketType){
+  const doc=blankDesign('Draft resize socket capture');
+  const fitting=(id,x,through,axis)=>({id,pose:{position_mm:[x,0,0]},body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:12}],ports:{bore:{type:'socket',profile:'round',diameter_mm:42.4,
+      position_mm:[0,0,0],axis,engagement_mm:40,min_engagement_mm:15,...(through?{through:true}:{})}}}});
+  doc.parts=[fitting('reached',socketType==='through'?1100:1180,
+    socketType==='through',socketType==='through'?[1,0,0]:[-1,0,0])];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'pipe',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,0],end_mm:[1000,0,0],attachments:[]}],
+    mirrors:[{id:'mirror-1',axis:'x',offset_mm:0,scope:'scene',run_modes:{pipe:'free'}}]}];
+  return doc;
+}
+
+for(const socketType of ['through','end'])
+  test(`extending a draft pipe captures a reached ${socketType} socket in the inspector`,async()=>{
+    const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,resizeKeyStepMm:200});
+    const requests=[];
+    const ui=await editor(draftResizeCapture(socketType),null,{storedPreferences:stored,
+      interceptFetch:(path,options)=>{if(path==='/api/resize-drag')requests.push(JSON.parse(options.body));return null;}});
+    try{
+      ui.select('pipe');
+      assert.match(ui.document.querySelector('#inspector').textContent,/CONNECTIONS · 0/);
+      ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'u',bubbles:true,cancelable:true}));
+      await ui.wait(()=>!ui.state.placementPending&&
+        ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===1);
+      const run=ui.state.doc.draft_subassemblies[0].runs[0];
+      assert.equal(run.end_mm[0],1200);
+      const captured=run.attachments.find(attachment=>attachment.connector==='reached');
+      assert.equal(captured.port,'bore');
+      if(socketType==='through')assert.equal(captured.end,undefined);
+      else{assert.equal(captured.end,'end');assert.ok(captured.insertion_mm>=15&&captured.insertion_mm<=40);}
+      assert.match(ui.document.querySelector('#inspector').textContent,/CONNECTIONS · 1/);
+      assert.match(ui.document.querySelector('#inspector').textContent,/reached \/ bore/);
+      assert.equal(ui.state.scene.parts.find(part=>part.id==='pipe').conflicts.length,0);
+      assert.equal(requests.at(-1).auto_connect,true);
+      assert.equal(requests.at(-1).endpoint,'end');
+      assert.equal(ui.state.undo.length,1);
+      ui.document.querySelector('#undo').click();
+      await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===0&&
+        /CONNECTIONS · 0/.test(ui.document.querySelector('#inspector').textContent));
+    }finally{await ui.close();}
+  });
+
+test('shrinking a mirrored draft free end keeps the rest of its connected scene',async()=>{
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,resizeKeyStepMm:20});
+  const ui=await editor(await resizeFixture('tests/fixtures/resize-connected-lattice.pipe.yaml'),null,{storedPreferences:stored});
+  try{
+    const id='tube-c-1-copy-11',run=()=>ui.state.doc.draft_subassemblies[0].runs.find(item=>item.id===id);
+    ui.select(id);
+    const length=ui.state.scene.parts.find(part=>part.id===id).length_mm;
+    const before=structuredClone(ui.state.doc);
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'j',bubbles:true,cancelable:true}));
+    await ui.wait(()=>!ui.state.placementPending&&
+      Math.abs(ui.state.scene.parts.find(part=>part.id===id).length_mm-(length-20))<.01,30000);
+    assert.equal(ui.state.scene.parts.find(part=>part.id===id).conflicts.length,0);
+    assert.deepEqual(ui.state.doc.parts,before.parts);
+    assert.deepEqual(ui.state.doc.joints,before.joints);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].mirrors,before.draft_subassemblies[0].mirrors);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs.filter(item=>item.id!==id),
+      before.draft_subassemblies[0].runs.filter(item=>item.id!==id));
+    assert.ok(run().end_mm[0]!==before.draft_subassemblies[0].runs.find(item=>item.id===id).end_mm[0]);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>Math.abs(ui.state.scene.parts.find(part=>part.id===id).length_mm-length)<.01);
+  }finally{await ui.close();}
+});
+
+test('resize preferences change keyboard step and alternate connector behavior',async()=>{
+  const doc=fixture();doc.anchors=[];doc.parts=doc.parts.filter(p=>p.id==='pipe');
+  const ui=await editor(doc);try{
+    ui.select('pipe');ui.document.querySelector('#snap-settings-button').click();
+    ui.document.querySelector('#pref-resize-step').value='25';
+    ui.document.querySelector('#pref-resize-key-1-grow').value='b';
+    ui.document.querySelector('#pref-resize-key-1-shrink').value='n';
+    ui.document.querySelector('#pref-resize-key-2-grow').value='m';
+    ui.document.querySelector('#pref-resize-key-2-shrink').value='b';
+    ui.document.querySelector('#pref-resize-mode').value='detach';
+    ui.document.querySelector('#pref-resize-shift').value='follow';
+    ui.document.querySelector('#modal-actions .primary').click();
+    assert.equal(ui.document.querySelector('#modal').open,true);
+    assert.match(ui.document.querySelector('#toast').textContent,/different letters/);
+    await ui.wait(()=>!ui.document.querySelector('#modal-actions .primary').disabled);
+    ui.document.querySelector('#pref-resize-key-2-shrink').value='k';
+    ui.document.querySelector('#modal-actions .primary').click();
+    const saved=JSON.parse(ui.window.localStorage.getItem('pipesim.preferences.v1'));
+    assert.equal(saved.resizeKeyStepMm,25);assert.equal(saved.resizeConnectorMode,'detach');
+    ui.document.querySelector('[data-tool="resize"]').click();
+    assert.equal(ui.document.querySelector('#resize-label-first').textContent,'B/N');
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'b',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='pipe').length_mm===1025);
+  }finally{await ui.close();}
+});
+
+test('Escape cancels an in-progress resize without changing the design',async()=>{
+  const doc=fixture();doc.anchors=[];doc.parts=doc.parts.filter(p=>p.id==='pipe');
+  const ui=await editor(doc);try{
+    ui.select('pipe');ui.document.querySelector('[data-tool="resize"]').click();
+    const from=ui.pixel(new Three.Vector3(0,0,1000)),to=ui.pixel(new Three.Vector3(0,0,1150));
+    ui.pointer('pointerdown',from);ui.pointer('pointermove',to);
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='pipe').length_mm,1000);
+    assert.equal(ui.partObjects.get('pipe').scale.z,1);
+    assert.equal(ui.state.undo.length,0);
+  }finally{await ui.close();}
+});
+
+test('both drag handles keep a centered draft pipe on its mirror plane',async()=>{
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Mirror resize',parts:[],joints:[],
+    draft_subassemblies:[{id:'frame',runs:[{id:'rail',catalog:'tubeclamp.tube-C',
+      start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[]}],
+      mirrors:[{id:'mid',axis:'x',offset_mm:500,run_modes:{rail:'centered'}}]}]};
+  const ui=await editor(doc);try{
+    ui.select('rail');ui.document.querySelector('[data-tool="resize"]').click();ui.tick();
+    const run=()=>ui.state.doc.draft_subassemblies[0].runs[0];
+    ui.drag(ui.pixel(new Three.Vector3(1000,0,100)),ui.pixel(new Three.Vector3(1100,0,100)));
+    await ui.wait(()=>run().end_mm[0]>1050);
+    assert.ok(Math.abs((run().start_mm[0]+run().end_mm[0])/2-500)<1e-4);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>run().end_mm[0]===1000);
+    await ui.drain();ui.tick();
+    ui.drag(ui.pixel(new Three.Vector3(0,0,100)),ui.pixel(new Three.Vector3(-100,0,100)));
+    await ui.wait(()=>run().start_mm[0]<-50);
+    assert.ok(Math.abs((run().start_mm[0]+run().end_mm[0])/2-500)<1e-4);
+  }finally{await ui.close();}
+});
+
+test('Shift resize leaves a through fitting behind while normal resize carries it',async()=>{
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Resize fitting',
+    parts:[{id:'fitting',body:{kind:'connector',mass_kg:.2,geometry:[{type:'sphere',radius_mm:12}],
+      ports:{bore:{type:'socket',profile:'round',diameter_mm:42.4,axis:[1,0,0],through:true,
+        engagement_mm:40,min_engagement_mm:15}}},pose:{position_mm:[700,0,100]}}],joints:[],
+    draft_subassemblies:[{id:'frame',runs:[{id:'rail',catalog:'tubeclamp.tube-C',
+      start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[{connector:'fitting',port:'bore'}]}]}]};
+  const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,resizeKeyStepMm:500});
+  const requests=[];const ui=await editor(doc,null,{storedPreferences:stored,
+    interceptFetch:(path,options)=>{if(path==='/api/resize-drag')requests.push(JSON.parse(options.body));return null;}});try{
+    ui.select('rail');
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'j',shiftKey:true,bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].end_mm[0]===500);
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].attachments,[]);
+    assert.equal(ui.state.doc.parts[0].pose.position_mm[0],700);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].end_mm[0]===1000);
+    await ui.drain();
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'j',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].end_mm[0]===500);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,1);
+    assert.equal(ui.state.doc.parts[0].pose.position_mm[0],350);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].end_mm[0]===1000);
+    await ui.drain();ui.tick();assert.equal(ui.state.doc.parts[0].pose.position_mm[0],700);
+    ui.document.querySelector('[data-tool="resize"]').click();ui.tick();
+    const canvas=ui.document.querySelector('#viewport canvas');
+    const pointer=(type,point)=>{const event=new ui.window.MouseEvent(type,{clientX:point.x,clientY:point.y,
+      button:0,shiftKey:true,bubbles:true});Object.defineProperty(event,'pointerId',{value:7});canvas.dispatchEvent(event);};
+    const from=ui.pixel(new Three.Vector3(1000,0,100)),to=ui.pixel(new Three.Vector3(350,0,100));
+    pointer('pointerdown',from);pointer('pointermove',to);pointer('pointerup',to);
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].end_mm[0]<700);
+    assert.equal(requests.at(-1).behavior,'detach');
+    assert.deepEqual(ui.state.doc.draft_subassemblies[0].runs[0].attachments,[]);
+  }finally{await ui.close();}
+});
 
 test('new pipes use quick draft connections and finalize to one exact cut length',async()=>{
   const ui=await editor(draftFixture());try{
@@ -538,7 +1152,7 @@ test('selected Finalize refuses an older server rather than finalizing every dra
     ui.select('run-a');const before=structuredClone(ui.state.doc);
     ui.document.querySelector('#draft-finalize-selected').click();await ui.wait(()=>!ui.state.placementPending);
     assert.deepEqual(ui.state.doc,before);assert.equal(ui.state.undo.length,0);
-    assert.match(ui.document.querySelector('#toast').textContent,/restart the PipeSim server/);
+    assert.match(ui.document.querySelector('#toast').textContent,/restart the server and reload this tab/i);
   }finally{await ui.close();}
 });
 
@@ -600,7 +1214,7 @@ test('Repair and Finalize clear a submillimetre through engagement shortfall',as
     assert.equal(ui.state.scene.parts.find(part=>part.id==='run').conflicts[0].code,'THROUGH_FIT');
     ui.document.querySelector('#draft-repair-selected').click();
     await ui.wait(()=>!ui.state.placementPending&&ui.state.scene.parts.find(part=>part.id==='run').conflicts.length===0);
-    assert.ok(ui.state.doc.parts[0].pose.position_mm[0]>17);
+    assert.ok(ui.state.doc.draft_subassemblies[0].runs[0].start_mm[0]<-.19);
     ui.document.querySelector('#draft-finalize-selected').click();
     await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.draft_subassemblies);
     assert.equal(ui.state.doc.joints[0].type,'socket');
@@ -665,6 +1279,116 @@ test('panel fastener dialog attaches chosen flange bolt holes without editing jo
   }finally{await ui.close();}
 });
 
+test('hinge eye and clevis join through the inspector without editing JSON',async()=>{
+  const doc=blankDesign('Hinge bolt');
+  doc.parts=[
+    {id:'male',catalog:'tubeclamp.TC173MC',pose:{position_mm:[0,0,1000]}},
+    {id:'female',catalog:'tubeclamp.TC173FC',pose:{position_mm:[70,0,950]}}
+  ];
+  doc.anchors=[{part:'male',surface:'fixture'}];
+  const ui=await editor(doc);try{
+    ui.select('male');ui.document.querySelector('#new-joint').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Add joint or attachment');
+    assert.equal(ui.document.querySelector('#joint-port-a').value,'hinge');
+    assert.equal(ui.document.querySelector('#joint-port-b').value,'hinge');
+    assert.equal(ui.document.querySelector('#joint-create-type').value,'revolute');
+    await ui.wait(()=>!ui.document.querySelector('#modal-actions .primary').disabled);
+    assert.match(ui.document.querySelector('#joint-create-status').textContent,/Ready:/);
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.length===1);
+    assert.equal(ui.state.doc.joints[0].type,'revolute');
+    assert.deepEqual(ui.state.doc.joints[0].a,{part:'male',port:'hinge'});
+    assert.deepEqual(ui.state.doc.joints[0].b,{part:'female',port:'hinge'});
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
+test('wheel button configures and mounts a free-spinning axle on a pipe',async()=>{
+  const ui=await editor(fixture());try{
+    ui.select('pipe');ui.document.querySelector('#wheel-button').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Add a wheel');
+    assert.equal(ui.document.querySelector('#wheel-target').value,'pipe');
+    assert.equal(ui.document.querySelector('#wheel-location').value,'station');
+    assert.equal(ui.document.querySelector('#wheel-custom-fields').classList.contains('hidden'),true);
+    ui.document.querySelector('#wheel-diameter').value='120';
+    ui.document.querySelector('#wheel-width').value='40';
+    ui.document.querySelector('#wheel-mass').value='2';
+    ui.document.querySelector('#wheel-station').value='600';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.parts.some(part=>part.id==='wheel-1')&&ui.state.doc.joints.some(joint=>joint.b.part==='wheel-1'));
+    const wheel=ui.state.doc.parts.find(part=>part.id==='wheel-1');
+    const axle=ui.state.doc.joints.find(joint=>joint.b.part==='wheel-1');
+    assert.deepEqual(wheel.parameters,{diameter_mm:120,width_mm:40,mass_kg:2});
+    assert.equal(axle.type,'revolute');
+    assert.equal(axle.a.part,'pipe');
+    assert.equal(axle.b.port,'axle');
+    assert.equal(axle.a.frame.position_mm[2],100);
+    assert.equal(ui.state.undo.length,1);
+    const report=await post('validate',ui.state.doc);
+    assert.equal(report.valid,true,report.issues?.map(issue=>issue.code).join(', '));
+  }finally{await ui.close();}
+});
+
+test('an unattached wheel can be mounted later from its inspector',async()=>{
+  const ui=await editor(fixture());try{
+    ui.document.querySelector('#wheel-button').click();
+    ui.document.querySelector('#wheel-target').value='';
+    ui.document.querySelector('#wheel-target').dispatchEvent(new ui.window.Event('change'));
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.parts.some(part=>part.id==='wheel-1'));
+    assert.equal(ui.state.doc.joints.length,0);
+    ui.select('wheel-1');ui.document.querySelector('#mount-wheel').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Mount wheel axle');
+    assert.equal(ui.document.querySelector('#wheel-target').value,'pipe');
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.some(joint=>joint.b.part==='wheel-1'));
+    assert.equal(ui.document.querySelector('#mount-wheel'),null);
+  }finally{await ui.close();}
+});
+
+test('wheel dialog offers a named axle port and a custom local axle point',async()=>{
+  const doc=fixture();
+  doc.parts.push({id:'bracket',body:{kind:'rigid',mass_kg:1,
+    geometry:[{type:'box',size_mm:[20,20,20]}],
+    ports:{axle:{type:'pin',position_mm:[60,0,0],axis:[1,0,0]}}},
+    pose:{position_mm:[500,0,100]}});
+  const ui=await editor(doc);try{
+    ui.select('bracket');ui.document.querySelector('#wheel-button').click();
+    assert.equal(ui.document.querySelector('#wheel-location').value,'port');
+    assert.equal(ui.document.querySelector('#wheel-port').value,'axle');
+    assert.equal(ui.document.querySelector('#wheel-station-fields').classList.contains('hidden'),true);
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.some(joint=>joint.b.part==='wheel-1'));
+    assert.deepEqual(ui.state.doc.joints.find(joint=>joint.b.part==='wheel-1').a,{part:'bracket',port:'axle'});
+    ui.select('tee');ui.document.querySelector('#wheel-button').click();
+    assert.equal(ui.document.querySelector('#wheel-location').value,'custom');
+    ui.document.querySelector('#wheel-local-x').value='70';
+    ui.document.querySelector('#wheel-local-z').value='20';
+    ui.document.querySelector('#wheel-axis').value='0,0,1';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.some(joint=>joint.b.part==='wheel-2'));
+    assert.deepEqual(ui.state.doc.joints.find(joint=>joint.b.part==='wheel-2').a,
+      {part:'tee',frame:{position_mm:[70,0,20],axis:[0,0,1]}});
+  }finally{await ui.close();}
+});
+
+test('dragging a female hinge near a male eye joins their bolt holes',async()=>{
+  const doc=blankDesign('Drag hinge');
+  doc.parts=[
+    {id:'male',catalog:'tubeclamp.TC173MC',pose:{position_mm:[0,0,1000]}},
+    {id:'female',catalog:'tubeclamp.TC173FC',pose:{position_mm:[150,0,940]}}
+  ];
+  doc.anchors=[{part:'male',surface:'fixture'}];
+  const ui=await editor(doc);try{
+    ui.drag(ui.pixel(new Three.Vector3(150,0,940)),ui.pixel(new Three.Vector3(70,0,940)));
+    await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.joints[0].type,'revolute');
+    assert.equal(ui.state.doc.joints[0].a.port,'hinge');
+    assert.equal(ui.state.doc.joints[0].b.port,'hinge');
+    assert.equal(ui.snapGhost.children.length,0);
+  }finally{await ui.close();}
+});
+
 test('padded panel uses board sizing and bolt-hole fastening controls',async()=>{
   const doc=blankDesign('Padded rest');
   doc.parts=[
@@ -687,6 +1411,29 @@ test('padded panel uses board sizing and bolt-hole fastening controls',async()=>
     padding.value='35';padding.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
     await ui.wait(()=>ui.state.scene.parts.find(p=>p.id==='rest').geometry[1].size_mm[2]===35);
     assert.equal(ui.state.scene.parts.find(p=>p.id==='rest').geometry[0].size_mm[2],25);
+  }finally{await ui.close();}
+});
+
+test('padded panel accepts a nearby swivel eye as a bolt hole',async()=>{
+  const doc=blankDesign('Padded eye mount');
+  doc.parts=[
+    {id:'rest',catalog:'generic.padded-panel',parameters:{width_mm:400,depth_mm:150,
+      thickness_mm:60,padding_mm:45,edge_inset_mm:5},pose:{position_mm:[0,-470,30]}},
+    {id:'swivel',catalog:'tubeclamp.TC173MC',pose:{position_mm:[230,-520,-10],
+      rotation_deg:[90,0,180]}}
+  ];
+  const ui=await editor(doc);try{
+    ui.select('rest');ui.document.querySelector('#fasten-panel').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Fasten padded panel at bolt holes');
+    const holes=[...ui.document.querySelectorAll('[data-panel-hole]')];
+    assert.equal(holes.length,1);
+    assert.match(holes[0].parentElement.textContent,/swivel \/ hinge.*gap 10\.0 mm/);
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.length===1&&ui.state.scene.joints.length===1);
+    assert.equal(ui.state.doc.joints[0].a.part,'swivel');
+    assert.equal(ui.state.doc.joints[0].a.port,'hinge');
+    ui.select('rest');ui.document.querySelector('#fasten-panel').click();
+    assert.equal(ui.document.querySelectorAll('[data-panel-hole]').length,0,'occupied eye is unavailable');
   }finally{await ui.close();}
 });
 
@@ -899,7 +1646,36 @@ test('one draft pipe drag records every aligned through socket it passes',async(
   }finally{await ui.close();}
 });
 
-test('one draft pipe drag records nearby through sockets and repair closes their fits',async()=>{
+test('dragging a pipe or connector attaches only one socket of that connector',async()=>{
+  const fitting={id:'double',body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:22}],
+    ports:Object.fromEntries([['first',-60],['second',60]].map(([name,z])=>[name,
+      {type:'socket',through:true,profile:'round',diameter_mm:42.4,
+        position_mm:[0,0,z],axis:[0,0,1],engagement_mm:30}]))},
+    pose:{position_mm:[300,0,500]}};
+  for(const moving of ['run','double']){
+    const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'One pipe per fitting',
+      parts:[structuredClone(fitting)],joints:[],draft_subassemblies:[{id:'draft-1',runs:[
+        {id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}]};
+    const ui=await editor(doc);try{
+      const from=new Three.Vector3(moving==='run'?0:300,0,500);
+      const to=new Three.Vector3(moving==='run'?300:0,0,500);
+      ui.drag(ui.pixel(from),ui.pixel(to));
+      await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length>0);
+      await ui.drain();
+      const run=ui.state.doc.draft_subassemblies[0].runs[0];
+      assert.equal(run.attachments.length,1,`${moving} drag attached two sockets of one connector`);
+      assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+      assert.equal(ui.state.undo.length,1);
+      const other=run.attachments[0].port==='first'?'second':'first';
+      assert.throws(()=>ui.draftConnect({member:'run',connector:'double',port:other}),
+        /one pipe cannot occupy two sockets/);
+      assert.equal(run.attachments.length,1);
+    }finally{await ui.close();}
+  }
+});
+
+test('one draft pipe drag aligns a nearby free through connector without repair',async()=>{
   const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[];
   doc.parts.push({...structuredClone(doc.parts[0]),id:'tee-2',pose:{position_mm:[304,0,700],rotation_deg:[0,3,0]}});
   doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
@@ -909,11 +1685,131 @@ test('one draft pipe drag records nearby through sockets and repair closes their
     await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===2);
     assert.deepEqual(new Set(ui.state.doc.draft_subassemblies[0].runs[0].attachments.map(a=>a.connector)),
       new Set(['tee','tee-2']));
-    ui.select('run');ui.document.querySelector('#draft-repair-selected').click();
-    await ui.wait(()=>!ui.state.placementPending&&
-      ui.state.scene.parts.find(p=>p.id==='run').conflicts.length===0);
-    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,2);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='run').conflicts.length,0);
+    const corrected=ui.state.doc.parts.find(p=>p.id==='tee-2').pose;
+    assert.ok(Math.abs(corrected.position_mm[0]-300)<.01);
+    assert.ok(Math.abs(corrected.rotation_deg[1])<.01);
+    assert.equal(ui.state.undo.length,1);
   }finally{await ui.close();}
+});
+
+test('manually adding a nearby through connector aligns it in the attachment edit',async()=>{
+  const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[];
+  doc.parts[0].pose={position_mm:[4,0,500],rotation_deg:[0,4,0]};
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'run',connector:'tee',port:'through'});
+    const fitting=ui.state.doc.parts.find(part=>part.id==='tee');
+    assert.ok(Math.abs(fitting.pose.position_mm[0])<.01);
+    assert.ok(Math.abs(fitting.pose.rotation_deg[1])<.01);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').conflicts.length,0);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[0].attachments.length===0);
+    assert.deepEqual(ui.state.doc.parts.find(part=>part.id==='tee').pose.position_mm,[4,0,500]);
+  }finally{await ui.close();}
+});
+
+test('adding a free through connector clears a small engagement shortfall immediately',async()=>{
+  const fitting={id:'through',body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:8}],ports:{bore:{type:'socket',through:true,
+      profile:'round',diameter_mm:42.4,position_mm:[0,0,0],axis:[0,0,1],engagement_mm:34}}},
+    pose:{position_mm:[.2,0,16.9]}};
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Near end fit',parts:[fitting],joints:[],
+    draft_subassemblies:[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+      start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}]};
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'run',connector:'through',port:'bore'});
+    assert.ok(ui.state.doc.parts[0].pose.position_mm[2]>=17);
+    assert.ok(Math.abs(ui.state.doc.parts[0].pose.position_mm[0])<.01);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('automatic through alignment leaves an anchored connector in place',async()=>{
+  const doc=fixture('TC104C');doc.parts.shift();doc.anchors=[{part:'tee',surface:'fixture'}];
+  doc.parts[0].pose={position_mm:[4,0,500],rotation_deg:[0,4,0]};
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}];
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'run',connector:'tee',port:'through'});
+    assert.deepEqual(ui.state.doc.parts.find(part=>part.id==='tee').pose.position_mm,[4,0,500]);
+    assert.deepEqual(ui.state.doc.parts.find(part=>part.id==='tee').pose.rotation_deg,[0,4,0]);
+    assert.ok(ui.state.scene.parts.find(part=>part.id==='run').conflicts.some(c=>c.code==='THROUGH_FIT'));
+  }finally{await ui.close();}
+});
+
+test('a second draft pipe does not move a connector already holding another pipe',async()=>{
+  const fitting={id:'shared',body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:15}],ports:{
+      through:{type:'socket',through:true,profile:'round',diameter_mm:42.4,
+        position_mm:[0,0,0],axis:[0,0,1],engagement_mm:30},
+      cross:{type:'socket',through:true,profile:'round',diameter_mm:42.4,
+        position_mm:[0,0,0],axis:[1,0,0],engagement_mm:30}}},
+    pose:{position_mm:[4,0,500],rotation_deg:[0,4,0]}};
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Shared fitting',parts:[fitting],joints:[],
+    draft_subassemblies:[{id:'draft-1',runs:[
+      {id:'vertical',catalog:'tubeclamp.tube-C',start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]},
+      {id:'horizontal',catalog:'tubeclamp.tube-C',start_mm:[-200,0,500],end_mm:[200,0,500],
+        attachments:[{connector:'shared',port:'cross'}]}]}]};
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'vertical',connector:'shared',port:'through'});
+    assert.deepEqual(ui.state.doc.parts[0].pose,fitting.pose);
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,1);
+  }finally{await ui.close();}
+});
+
+test('a nearby free end connector aligns to the pipe end when attached',async()=>{
+  const fitting={id:'end',body:{kind:'connector',mass_kg:.2,geometry:[{type:'sphere',radius_mm:15}],
+    ports:{socket:{type:'socket',profile:'round',diameter_mm:42.4,
+      position_mm:[0,0,0],axis:[0,0,1],engagement_mm:40,min_engagement_mm:10}}},
+    pose:{position_mm:[4,0,20],rotation_deg:[0,4,0]}};
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'End fit',parts:[fitting],joints:[],
+    draft_subassemblies:[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+      start_mm:[0,0,0],end_mm:[0,0,1000],attachments:[]}]}]};
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'run',connector:'end',port:'socket',end:'start',insertion_mm:20});
+    assert.ok(Math.abs(ui.state.doc.parts[0].pose.position_mm[0])<.01);
+    assert.ok(Math.abs(ui.state.doc.parts[0].pose.rotation_deg[1])<.01);
+    assert.equal(ui.state.scene.parts.find(part=>part.id==='run').conflicts.length,0);
+  }finally{await ui.close();}
+});
+
+test('adding a crossed shared fitting repairs its connected draft graph in one Undo',async()=>{
+  const ui=await editor(crossedRepairDraft());try{
+    assert.ok(ui.state.scene.parts.filter(part=>part.draft).every(part=>part.conflicts.length===0));
+    ui.draftConnect({member:'bridge',connector:'cross1',port:'cross'});
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[2].attachments.length,2);
+    await ui.wait(()=>!ui.state.placementPending&&
+      ui.state.scene.parts.filter(part=>part.draft).every(part=>part.conflicts.length===0),30000);
+    const parts=ui.state.doc.parts;
+    for(const id of ['cross0','cross1']){
+      const fitting=parts.find(part=>part.id===id);
+      assert.ok(Math.abs(fitting.pose.rotation_deg[1]-18)>4,`${id} should rotate with the crossed graph`);
+    }
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[2].attachments.length===1);
+    assert.equal(ui.state.doc.parts.find(part=>part.id==='cross0').pose.rotation_deg[1],18);
+  }finally{await ui.close();}
+});
+
+test('an Undo during automatic crossed-graph repair discards its late result',async()=>{
+  let releaseRepair,repairResponding=false;
+  const gate=new Promise(resolve=>{releaseRepair=resolve;});
+  const ui=await editor(crossedRepairDraft(),null,{beforeResponse:async path=>{
+    if(path==='/api/draft-repair-selected'){repairResponding=true;await gate;}
+  }});try{
+    ui.draftConnect({member:'bridge',connector:'cross1',port:'cross'});
+    await ui.wait(()=>repairResponding,30000);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>ui.state.doc.draft_subassemblies[0].runs[2].attachments.length===1);
+    releaseRepair();await ui.drain();
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[2].attachments.length,1);
+    assert.equal(ui.state.doc.parts.find(part=>part.id==='cross0').pose.rotation_deg[1],18);
+    assert.equal(ui.state.undo.length,0);
+  }finally{releaseRepair();await ui.close();}
 });
 
 test('Repair discovers a visually intersected through socket absent from the draft graph',async()=>{
@@ -1230,6 +2126,31 @@ test('keyboard nudges use separate steps, fine movement, and queued held keys',a
   }finally{await ui.close();}
 });
 
+test('Preferences exposes and saves the keyboard nudge distance used for movement',async()=>{
+  const doc=fixture();doc.parts=[doc.parts[0]];doc.anchors=[];
+  const ui=await editor(doc);let stored;
+  try{
+    ui.document.querySelector('#snap-settings-button').click();
+    const field=ui.document.querySelector('#settings-keyboard-move');
+    assert.match(field.labels[0].textContent,/keyboard nudge distance/i);
+    assert.equal(field.closest('.preferences-sections section')?.querySelector('h3').textContent,'KEYBOARD NUDGES');
+    field.value='35';
+    [...ui.document.querySelectorAll('#modal-actions button')].find(button=>button.textContent==='Save as defaults').click();
+    stored=ui.window.localStorage.getItem('pipesim.snap-defaults.v1');
+    assert.equal(JSON.parse(stored).keyboardMoveMm,35);
+    ui.select('pipe');
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'d',bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[0]===35);
+  }finally{await ui.close();}
+  const fresh=await editor(doc,stored);
+  try{
+    assert.equal(fresh.state.snapSettings.keyboardMoveMm,35);
+    fresh.select('pipe');
+    fresh.document.dispatchEvent(new fresh.window.KeyboardEvent('keydown',{key:'d',bubbles:true,cancelable:true}));
+    await fresh.wait(()=>fresh.state.doc.parts[0].pose.position_mm[0]===35);
+  }finally{await fresh.close();}
+});
+
 test('keyboard nudges move and rotate an independent draft pipe without changing length',async()=>{
   const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{
     id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[]
@@ -1435,7 +2356,7 @@ test('an old server reports the required restart and a failed tube rotation pres
   try{
     assert.match(ui.document.querySelector('#status-text').textContent,/server update required/);
     const before=structuredClone(ui.state.doc);await rotateTube(ui);
-    assert.match(ui.document.querySelector('#toast').textContent,/server is out of date.*Save your work, restart/);
+    assert.match(ui.document.querySelector('#toast').textContent,/server at .* is older.*stop the process using that address/);
     assert.deepEqual(ui.state.doc,before);assert.equal(ui.state.undo.length,0);
     assert.deepEqual(ui.partObjects.get('pipe').quaternion.toArray(),[0,0,0,1]);
   }finally{await ui.close();}
@@ -2048,6 +2969,54 @@ test('cancelling a pending Force resize preserves cut lengths, screws and Undo h
 function changeInput(ui,selector,value){const input=ui.document.querySelector(selector);input.value=String(value);input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));}
 function selectChain(ui,end='end'){ui.document.querySelector('[data-object-select="chain"]').click();ui.document.querySelector('#chain-select-'+end).click();}
 
+test('flexible line exposes both resize handles and honors both keyboard directions',async()=>{
+  const ui=await editor(chainDesign());try{
+    selectChain(ui);ui.tick();
+    assert.equal(ui.resizeHandles.children.length,2);
+    const key=value=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
+    key('u');await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm===520);
+    key('j');await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm===500);
+    key('y');await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm===520);
+    key('h');await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm===500);
+    assert.equal(ui.state.undo.length,4);
+  }finally{await ui.close();}
+});
+
+for(const [profile,pitch] of [['generic.chain-heavy-100',80],['generic.rope-nylon-10',25],['generic.strap-seatbelt-65',25]])
+  test(`${profile} shortcut resize changes a visible segment from either end`,async()=>{
+    const doc=blankDesign('Flexible shortcut step');doc.objects=[{id:'chain',template:'chain',
+      parameters:{length_mm:5*pitch,link_catalog:profile},pose:{position_mm:[0,0,5*pitch+200]}}];
+    const ui=await editor(doc);try{
+      const summary=()=>ui.state.scene.chains.find(chain=>chain.id==='chain');
+      assert.equal(summary().pitch_mm,pitch);
+      assert.equal(ui.state.doc.objects[0].parameters.length_mm,5*pitch);
+      assert.ok(pitch>preferences.DEFAULT_PREFERENCES.resizeKeyStepMm);
+      const key=value=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}));
+      selectChain(ui,'end');assert.equal(ui.state.tool,'select');
+      key('u');await ui.wait(()=>summary().count===6);
+      selectChain(ui,'end');key('j');await ui.wait(()=>summary().count===5);
+      selectChain(ui,'start');key('y');await ui.wait(()=>summary().count===6);
+      selectChain(ui,'start');key('h');await ui.wait(()=>summary().count===5);
+      assert.equal(ui.state.undo.length,4);
+    }finally{await ui.close();}
+  });
+
+test('dragging either flexible-line handle changes length and keeps undo available',async()=>{
+  const ui=await editor(chainDesign());try{
+    selectChain(ui);ui.document.querySelector('[data-tool="resize"]').click();ui.tick();
+    const handles=ui.resizeHandles.children;
+    const direction=handles[1].position.clone().sub(handles[0].position).normalize();
+    const from=ui.pixel(handles[1].position),to=ui.pixel(handles[1].position.clone().addScaledVector(direction,100));
+    ui.drag(from,to);await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm>540);
+    const first=ui.resizeHandles.children[0].position.clone();
+    const second=ui.resizeHandles.children[1].position.clone();
+    const reverse=first.clone().sub(second).normalize();
+    ui.drag(ui.pixel(first),ui.pixel(first.clone().addScaledVector(reverse,100)));
+    await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm>600);
+    assert.equal(ui.state.undo.length,2);
+  }finally{await ui.close();}
+});
+
 test('Add flexible line creates a length-controlled object with a compact tree and one-step undo',async()=>{
   const ui=await editor(blankDesign('New chain'));try{
     ui.document.querySelector('#chain-button').click();assert.equal(ui.document.querySelector('#modal-title').textContent,'Add a flexible line');
@@ -2556,6 +3525,51 @@ test('Tree actions delete an attached grouped chain in one Undo and Redo',async(
   }finally{await ui.close();}
 });
 
+test('a newer server identifies the editor tab as the stale side',async()=>{
+  const ui=await editor(freeTube(),null,{bootstrapOverride:()=>({api_version:26})});
+  try{
+    assert.match(ui.document.querySelector('#status-text').textContent,/page update required/);
+    assert.match(ui.document.querySelector('#toast').textContent,/tab is older than the running server.*reload this tab/);
+  }finally{await ui.close();}
+});
+
+test('moving a spherical chain connector and then the whole chain carries their attachment',async()=>{
+  const doc=blankDesign('Attached chain movement');
+  doc.parts=[{id:'connector',catalog:'generic.d-link',pose:{position_mm:[0,0,300]}}];
+  doc.objects=[{id:'chain',template:'chain',parameters:{length_mm:160},pose:{position_mm:[0,0,500]}}];
+  const attached=await post('attach-part',doc,{object:'chain',part:'chain/link-1',
+    target:{part:'connector',frame:{position_mm:[0,0,0]}},type:'spherical'});
+  const requests=[];
+  const ui=await editor(attached.document,null,{interceptFetch:(path,options)=>{
+    if(path==='/api/move'||path==='/api/move-object')requests.push({path,body:JSON.parse(options.body)});
+    return null;
+  }});try{
+    const connector=()=>ui.state.doc.parts.find(part=>part.id==='connector');
+    const first=()=>ui.state.scene.parts.find(part=>part.id==='chain/link-1');
+    const connectorZ=connector().pose.position_mm[2],linkZ=first().pose.position_mm[2];
+    ui.select('connector');
+    changeInput(ui,'[data-pose="position_mm"][data-axis="2"]',connectorZ+100);
+    await ui.wait(()=>!ui.state.placementPending&&Math.abs(connector().pose.position_mm[2]-connectorZ-100)<.001);
+    assert.ok(Math.abs(first().pose.position_mm[2]-linkZ-100)<.001);
+    assert.ok(requests.some(request=>request.path==='/api/move'&&request.body.selected==='connector'));
+    assert.equal(ui.state.undo.length,1);
+    selectChain(ui,'start');
+    assert.equal(ui.document.querySelector('[data-object-mode="whole"]').getAttribute('aria-pressed'),'true');
+    const chainZ=ui.state.doc.objects[0].pose.position_mm[2];
+    changeInput(ui,'[data-pose="position_mm"][data-axis="2"]',chainZ+100);
+    await ui.wait(()=>!ui.state.placementPending&&Math.abs(connector().pose.position_mm[2]-connectorZ-200)<.001);
+    assert.ok(Math.abs(first().pose.position_mm[2]-linkZ-200)<.001);
+    assert.ok(requests.some(request=>request.path==='/api/move-object'&&request.body.object==='chain'));
+    assert.equal(ui.state.undo.length,2);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>Math.abs(connector().pose.position_mm[2]-connectorZ-100)<.001&&
+      Math.abs(first().pose.position_mm[2]-linkZ-100)<.001);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>Math.abs(connector().pose.position_mm[2]-connectorZ)<.001&&
+      Math.abs(first().pose.position_mm[2]-linkZ)<.001);
+  }finally{await ui.close();}
+});
+
 test('a flexible link can be attached to a selected human body surface',async()=>{
   const doc=blankDesign('Body surface line');
   doc.objects=[{id:'person',template:'human',parameters:{mass_kg:90}},
@@ -2605,7 +3619,7 @@ test('human inspector fixes the centerline to a draft mirror and mirrors limb po
     assert.deepEqual(ui.state.doc.objects[0].pose.position_mm,[0,120,0]);
     assert.equal(ui.document.querySelector('[data-pose="position_mm"][data-axis="0"]').disabled,true);
     assert.equal(ui.document.querySelector('[data-pose="position_mm"][data-axis="2"]').disabled,false);
-    assert.equal(ui.document.querySelector('[data-pose="rotation_deg"][data-axis="2"]').disabled,true);
+    assert.equal(ui.document.querySelector('[data-pose="rotation_deg"][data-axis="2"]').disabled,false);
     ui.document.querySelector('[data-object-mode="limb"]').click();ui.select('person/left_hand');
     const field=ui.document.querySelector('[data-part-pose="position_mm"][data-axis="1"]');
     const before=ui.state.scene.parts.find(p=>p.id==='person/right_hand').pose.position_mm[1];
@@ -2620,6 +3634,102 @@ test('human inspector fixes the centerline to a draft mirror and mirrors limb po
     free.value='';free.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
     await ui.wait(()=>!ui.state.doc.objects[0].symmetry&&!ui.state.placementPending);
     assert.equal(ui.document.querySelector('[data-pose="position_mm"][data-axis="0"]').disabled,false);
+  }finally{await ui.close();}
+});
+
+test('scene mirror constrains human joints without showing or baking a second person',async()=>{
+  const doc=blankDesign('One mirrored human');
+  doc.objects=[{id:'person',template:'human',parameters:{pose:'standing'},pose:{position_mm:[300,120,0]}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',
+    start_mm:[200,0,100],end_mm:[200,0,1100]}],mirrors:[{id:'middle',axis:'x',offset_mm:0,scope:'scene'}]}];
+  const ui=await editor(doc);try{
+    assert.equal(ui.state.doc.objects[0].symmetry.axis,'x');
+    ui.tick();
+    assert.equal(ui.mirrorCopies.size,1,'only the draft run has a reflected preview');
+    assert.equal([...ui.mirrorCopies.values()].filter(record=>record.source.userData.part?.startsWith('person/')).length,0);
+    ui.select('person/pelvis');
+    assert.match(ui.document.querySelector('#human-mirror-line').value,/current/);
+    ui.document.querySelector('[data-object-mode="limb"]').click();ui.select('person/right_hand');
+    const field=ui.document.querySelector('[data-part-pose="position_mm"][data-axis="1"]');
+    const before=ui.state.scene.parts.find(p=>p.id==='person/left_hand').pose.position_mm[1];
+    field.value=String(Number(field.value)+80);field.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.placementPending&&
+      ui.state.scene.parts.find(p=>p.id==='person/left_hand').pose.position_mm[1]>before+60);
+    const left=ui.state.scene.parts.find(p=>p.id==='person/left_hand').pose.position_mm;
+    const right=ui.state.scene.parts.find(p=>p.id==='person/right_hand').pose.position_mm;
+    assert.ok(Math.abs(left[0]+right[0])<.01&&Math.abs(left[1]-right[1])<.01);
+    ui.select('reference');ui.document.querySelector('[data-mirror-remove]').click();
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>!ui.state.placementPending&&!ui.state.doc.draft_subassemblies[0].mirrors);
+    assert.equal(ui.state.doc.objects.length,1);
+    assert.equal(ui.state.doc.parts.filter(part=>part.id.startsWith('person/')).length,0);
+  }finally{await ui.close();}
+});
+
+test('adding a scene mirror around a person and adding a person afterward both bind joint symmetry',async()=>{
+  const doc=blankDesign('Scene mirror entry paths');
+  doc.objects=[{id:'person',template:'human',parameters:{pose:'standing'},pose:{position_mm:[300,120,0]}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',
+    start_mm:[200,0,100],end_mm:[200,0,1100]}]}];
+  const ui=await editor(doc);try{
+    ui.select('reference');ui.document.querySelector('#draft-mirror-add').click();
+    ui.document.querySelector('#mirror-axis').value='x';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.objects[0].symmetry?.axis==='x');
+    assert.equal(ui.state.doc.objects[0].pose.position_mm[0],0);
+    ui.document.querySelector('#human-button').click();
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.objects.length===2&&ui.state.doc.objects[1].symmetry?.axis==='x');
+    ui.tick();
+    assert.equal(ui.mirrorCopies.size,1,'neither person is copied');
+    assert.equal([...ui.mirrorCopies.values()].filter(record=>record.source.userData.part?.startsWith('human-')).length,0);
+  }finally{await ui.close();}
+});
+
+test('an attached person that cannot reach the mirror line still resolves with an actionable error',async()=>{
+  const doc=blankDesign('Attached human mirror');
+  doc.objects=[{id:'person',template:'human',parameters:{pose:'standing'},pose:{position_mm:[300,120,0]}}];
+  doc.objects.push({id:'free-person',template:'human',parameters:{pose:'standing'},pose:{position_mm:[400,300,0]}});
+  doc.anchors=[{part:'person/pelvis',surface:'fixture'}];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',
+    start_mm:[200,0,100],end_mm:[200,0,1100]}],mirrors:[{id:'middle',axis:'x',offset_mm:0,scope:'scene'}]}];
+  const result=await post('resolve',doc);
+  assert.match(result.mirror_pose_error,/person: could not apply the scene mirror/);
+  assert.equal(result.scene,undefined);
+  assert.ok(result.parts.some(part=>part.id==='person/pelvis'));
+  assert.equal(result.document.objects.find(object=>object.id==='free-person').symmetry.axis,'x');
+});
+
+test('human mirror keeps a symmetric whole-person rotation before and after activation',async()=>{
+  const doc=blankDesign('Rotated mirror human');
+  doc.objects=[{id:'person',template:'human',parameters:{pose:'standing'},pose:{position_mm:[0,120,0]}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[0,0,1100]}],mirrors:[{id:'middle',axis:'x',offset_mm:0}]}];
+  const ui=await editor(doc);try{
+    ui.select('person/pelvis');
+    let field=ui.document.querySelector('[data-pose="rotation_deg"][data-axis="0"]');
+    field.value='30';field.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.placementPending&&Math.abs(ui.state.doc.objects[0].pose.rotation_deg[0]-30)<.01);
+    let select=ui.document.querySelector('#human-mirror-line');
+    select.value='0';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.objects[0].symmetry&&!ui.state.placementPending);
+    assert.ok(Math.abs(ui.state.doc.objects[0].pose.rotation_deg[0]-30)<.01);
+    field=ui.document.querySelector('[data-pose="rotation_deg"][data-axis="0"]');
+    assert.equal(field.disabled,false);
+    field.value='45';field.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.placementPending&&Math.abs(ui.state.doc.objects[0].pose.rotation_deg[0]-45)<.01);
+    assert.ok(Math.abs(ui.state.doc.objects[0].symmetry.rotation_deg[0]-45)<.01);
+    select=ui.document.querySelector('#human-mirror-line');
+    select.value='';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.doc.objects[0].symmetry&&!ui.state.placementPending);
+    field=ui.document.querySelector('[data-pose="rotation_deg"][data-axis="2"]');
+    field.value='180';field.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.placementPending&&Math.abs(ui.state.doc.objects[0].pose.rotation_deg[2]-180)<.01);
+    select=ui.document.querySelector('#human-mirror-line');
+    select.value='0';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.objects[0].symmetry&&!ui.state.placementPending);
+    assert.ok(Math.abs(ui.state.doc.objects[0].pose.rotation_deg[0]-45)<.01);
+    assert.ok(Math.abs(ui.state.doc.objects[0].pose.rotation_deg[2]-180)<.01);
   }finally{await ui.close();}
 });
 

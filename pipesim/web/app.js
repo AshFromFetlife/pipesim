@@ -4,14 +4,17 @@ import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {STLLoader} from 'three/addons/loaders/STLLoader.js';
 import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
-import {connectionCandidates,clearConnectionIntent,alignmentDelta,socketOccupied,rotationAlignment} from './snapping.js';
+import {connectionCandidates,hingeCandidates,clearConnectionIntent,alignmentDelta,socketOccupied,rotationAlignment} from './snapping.js';
 import {DEFAULT_SNAP_SETTINGS,loadSnapDefaults,saveSnapDefaults,validateSnapSettings} from './snap-settings.js';
+import {DEFAULT_PREFERENCES,loadPreferences,savePreferences,validatePreferences,displayValue,storedValue} from './preferences.js';
+import {nextFlexibleShortcutLength} from './resize-shortcuts.js';
 import {draftRuns,draftRun,draftPreview} from './drafting.js';
 import {HUMAN_POSES} from './human-poses.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const clone=x=>structuredClone(x), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let snapDefaults={...DEFAULT_SNAP_SETTINGS};try{snapDefaults=loadSnapDefaults(window.localStorage);}catch{}
+let preferences={...DEFAULT_PREFERENCES};try{preferences=loadPreferences(window.localStorage);}catch{}
 const LIBRARY_HOTKEYS_KEY='pipesim.library-hotkeys.v1';
 const libraryHotkeys=Object.create(null);
 try{const saved=JSON.parse(window.localStorage.getItem(LIBRARY_HOTKEYS_KEY)||'{}');
@@ -19,18 +22,21 @@ try{const saved=JSON.parse(window.localStorage.getItem(LIBRARY_HOTKEYS_KEY)||'{}
     if(typeof catalog==='string'&&typeof hotkey==='string'&&/^(?:Shift\+)?[0-9]$|^Alt\+Shift\+[A-CE-Z]$/.test(hotkey)&&
        !Object.values(libraryHotkeys).includes(hotkey))libraryHotkeys[catalog]=hotkey;
 }catch{}
-const state={doc:null,path:'',library:{},scene:null,selected:null,connectionSource:null,mode:'design',tool:'select',undo:[],redo:[],dirty:false,revision:0,recording:null,playing:false,frame:0,checks:null,analysis:null,plan:null,step:0,busy:false,simulation:null,simulationError:null,simulationOptions:null,ports:false,snap:snapDefaults.gridEnabled,connectionSnap:snapDefaults.connectionsEnabled,snapSettings:snapDefaults,placementPending:false,moveBody:true};
-let token='',toastTimer,renderer,orbit,gizmo,sceneGeneration=0,dragStart=null,pointerDrag=null,localRotationHeld=false;
+const state={doc:null,path:'',library:{},scene:null,selected:null,connectionSource:null,mode:'design',tool:'select',undo:[],redo:[],dirty:false,revision:0,recording:null,playing:false,frame:0,checks:null,analysis:null,plan:null,step:0,busy:false,simulation:null,simulationError:null,mirrorPoseError:null,simulationOptions:null,ports:preferences.portsVisible,snap:snapDefaults.gridEnabled,connectionSnap:snapDefaults.connectionsEnabled,snapSettings:snapDefaults,placementPending:false,moveBody:true};
+let token='',toastTimer,renderer,orbit,gizmo,sceneGeneration=0,dragStart=null,pointerDrag=null,resizeDrag=null,localRotationHeld=false;
 const viewport=$('#viewport'), scene=new THREE.Scene(), objects=new THREE.Group(), ports=new THREE.Group(), overlays=new THREE.Group();
-const snapGhost=new THREE.Group(),mirrorGhost=new THREE.Group();let reviewCleanup=null,reviewVersion=0;
-scene.add(objects,ports,overlays,snapGhost,mirrorGhost);scene.background=new THREE.Color('#eef3f5');
-const camera=new THREE.PerspectiveCamera(38,1,1,100000);camera.up.set(0,0,1);camera.position.set(2100,-2600,1800);
+const snapGhost=new THREE.Group(),mirrorGhost=new THREE.Group(),resizeHandles=new THREE.Group(),resizePreview=new THREE.Group();let reviewCleanup=null,reviewVersion=0;
+scene.add(objects,ports,overlays,snapGhost,mirrorGhost,resizeHandles,resizePreview);scene.background=new THREE.Color('#eef3f5');
+const camera=new THREE.PerspectiveCamera(preferences.cameraFovDeg,1,1,100000);camera.up.set(0,0,1);camera.position.set(2100,-2600,1800);
 const ambient=new THREE.HemisphereLight('#fbfeff','#aabac0',2.2);ambient.position.set(0,0,2000);scene.add(ambient);
 const key=new THREE.DirectionalLight('#fff6e4',3.2);key.position.set(-1400,-2500,4000);key.castShadow=true;key.shadow.mapSize.set(2048,2048);key.shadow.camera.left=-3000;key.shadow.camera.right=3000;key.shadow.camera.top=3000;key.shadow.camera.bottom=-3000;key.shadow.camera.near=1;key.shadow.camera.far=12000;key.shadow.bias=-.0002;key.shadow.normalBias=1;scene.add(key);
 const fill=new THREE.DirectionalLight('#e0edf7',1.3);fill.position.set(2300,1400,1800);scene.add(fill);
 const floor=new THREE.Mesh(new THREE.PlaneGeometry(30000,30000),new THREE.MeshStandardMaterial({color:'#f0f4f5',roughness:1,metalness:0}));floor.position.z=-1;floor.receiveShadow=true;scene.add(floor);
+floor.visible=preferences.floorVisible;
 const grid=new THREE.GridHelper(12000,120,'#c6d3d8','#dce5e9');grid.rotation.x=Math.PI/2;grid.position.z=.1;grid.material.transparent=true;grid.material.opacity=.65;scene.add(grid);
 function applyViewportTheme(){
+  const dark=preferences.theme==='dark'||preferences.theme==='system'&&colorPreference.matches;
+  document.documentElement.dataset.viewportTheme=dark?'dark':'light';
   const styles=getComputedStyle(document.documentElement);
   const color=name=>styles.getPropertyValue('--viewport-'+name).trim();
   scene.background.set(color('background'));
@@ -41,8 +47,10 @@ function applyViewportTheme(){
 const colorPreference=window.matchMedia('(prefers-color-scheme: dark)');
 colorPreference.addEventListener('change',applyViewportTheme);
 applyViewportTheme();
+grid.visible=preferences.gridVisible;
 const raycaster=new THREE.Raycaster(), pointer=new THREE.Vector2(), groundPlane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
 const partObjects=new Map();
+const beamObjects=new Map();
 let hoveredDraftConnection=null;
 const mirrorCopies=new Map(),mirrorPlanes=new Map();
 const rotationHandle=new THREE.Object3D(),wholeObjectHandle=new THREE.Object3D();scene.add(rotationHandle,wholeObjectHandle);
@@ -94,8 +102,15 @@ function setPose(object,pose={}){object.position.fromArray(pose.position_mm||[0,
 function getPose(object){const e=new THREE.Euler().setFromQuaternion(object.quaternion,'ZYX');return {position_mm:object.position.toArray().map(v=>+v.toFixed(5)),rotation_deg:[e.x,e.y,e.z].map(v=>+THREE.MathUtils.radToDeg(v).toFixed(5))};}
 function status(text){$('#status-text').textContent=text;}
 function toast(text,error=false){clearTimeout(toastTimer);const el=$('#toast');el.textContent=text;el.className=error?'error':'';toastTimer=setTimeout(()=>el.classList.add('hidden'),error?9000:4500);}
-const EDITOR_API_VERSION=23;
-const SERVER_UPDATE_MESSAGE='The running editor server is out of date. Save your work, restart the PipeSim server, then refresh the page.';
+const EDITOR_API_VERSION=25;
+let serverApiVersion=null;
+const SERVER_UPDATE_MESSAGE=`The PipeSim server at ${window.location.host} is older than this editor. Save your work, stop the process using that address, start the server again, then reload this tab.`;
+const EDITOR_UPDATE_MESSAGE='This PipeSim tab is older than the running server. Save any unsaved work, then reload this tab.';
+function compatibilityMessage(version){
+  if(version===EDITOR_API_VERSION)return null;
+  const detail=` (editor API ${EDITOR_API_VERSION}; server API ${Number.isInteger(version)?version:'unknown'})`;
+  return (Number.isInteger(version)&&version>EDITOR_API_VERSION?EDITOR_UPDATE_MESSAGE:SERVER_UPDATE_MESSAGE)+detail;
+}
 async function api(route,extra={}){
   const body=JSON.stringify({document:state.doc,path:state.path,...extra});
   for(let attempt=0;attempt<2;attempt++){
@@ -106,13 +121,16 @@ async function api(route,extra={}){
       // Restarting the local server changes its token. Refresh only the session,
       // keeping the authored document, undo history and camera in this page.
       const sessionResponse=await fetch('/api/bootstrap'),session=await sessionResponse.json();
-      if(sessionResponse.ok&&session.token){token=session.token;continue;}
+      if(sessionResponse.ok&&session.token){token=session.token;serverApiVersion=session.api_version;continue;}
     }
-    if(response.status===404&&data.error==='Unknown operation')throw new Error(SERVER_UPDATE_MESSAGE);
+    if(response.status===404&&data.error==='Unknown operation'){
+      try{const probe=await fetch('/api/bootstrap');if(probe.ok)serverApiVersion=(await probe.json()).api_version;}catch{}
+      throw new Error(compatibilityMessage(serverApiVersion)||`The running PipeSim server does not recognize ${route}. Restart the server and reload this tab.`);
+    }
     throw new Error(data.error||'Operation failed');
   }
 }
-function checkpoint(){if(!state.doc)return;state.undo.push(clone(state.doc));if(state.undo.length>80)state.undo.shift();state.redo=[];}
+function checkpoint(){if(!state.doc)return;state.undo.push(clone(state.doc));if(state.undo.length>preferences.undoLimit)state.undo.shift();state.redo=[];}
 function autoMirrorModes(scene=state.scene,{placed=true}={}){
   const sceneParts=new Map((scene?.parts||[]).map(part=>[part.id,part]));
   const documentParts=new Map((state.doc?.parts||[]).map(part=>[part.id,part]));
@@ -153,22 +171,50 @@ function constrainDraftMirrors(){
     const axis={x:0,y:1,z:2}[plane.axis],start=new THREE.Vector3(...run.start_mm),end=new THREE.Vector3(...run.end_mm);
     const bound=(run.attachments||[]).filter(attachment=>attachment.end);
     if(bound.length){
-      if(mode==='centered'&&bound.length===1&&run.locked_length_mm==null){
-        const attachment=bound[0],spec=state.doc.parts.find(part=>part.id===attachment.connector);
+      const socketEnd=attachment=>{
+        const spec=state.doc.parts.find(part=>part.id===attachment.connector);
         const socket=state.scene?.parts.find(part=>part.id===attachment.connector)?.ports?.[attachment.port];
-        if(spec&&socket){
-          const pose=spec.pose||{},rotation=new THREE.Quaternion().setFromEuler(new THREE.Euler(...(pose.rotation_deg||[0,0,0]).map(THREE.MathUtils.degToRad),'ZYX'));
-          const direction=new THREE.Vector3(...(socket.axis||[0,0,1])).applyQuaternion(rotation).normalize();
-          const sign=Math.sign(end.getComponent(axis)-start.getComponent(axis));
-          const expected=attachment.end==='start'?sign:-sign;
-          if(sign&&Math.abs(direction.getComponent(axis)-expected)<1e-5){
-            const point=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyQuaternion(rotation)
-              .add(new THREE.Vector3(...(pose.position_mm||[0,0,0])))
-              .addScaledVector(direction,-(attachment.insertion_mm??Math.min(30,socket.engagement_mm*.8)));
-            const length=2*Math.abs(point.getComponent(axis)-plane.offset_mm);
-            if(length>1e-6){const center=point.clone().setComponent(axis,plane.offset_mm);
-              run.start_mm=center.clone().setComponent(axis,plane.offset_mm-sign*length/2).toArray();
-              run.end_mm=center.setComponent(axis,plane.offset_mm+sign*length/2).toArray();}
+        if(!spec||!socket)return null;
+        const pose=spec.pose||{},rotation=new THREE.Quaternion().setFromEuler(new THREE.Euler(...(pose.rotation_deg||[0,0,0]).map(THREE.MathUtils.degToRad),'ZYX'));
+        const direction=new THREE.Vector3(...(socket.axis||[0,0,1])).applyQuaternion(rotation).normalize();
+        const depth=attachment.insertion_mm??Math.min(30,socket.engagement_mm*.8);
+        const point=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyQuaternion(rotation)
+          .add(new THREE.Vector3(...(pose.position_mm||[0,0,0]))).addScaledVector(direction,-depth);
+        return {attachment,socket,direction,depth,point};
+      };
+      if(mode==='centered'&&bound.length===1&&run.locked_length_mm==null){
+        const socket=socketEnd(bound[0]);
+        if(socket){
+          const {attachment,direction,point}=socket;
+          const component=direction.getComponent(axis);
+          if(Math.abs(component)>1e-6){
+            // An attached end defines the effective direction. The saved draft
+            // endpoints can point the other way after a socket snap or copy.
+            const length=2*(plane.offset_mm-point.getComponent(axis))/component;
+            if(length>1e-6&&length*(1-Math.abs(component))<=.05){
+              const other=point.clone().addScaledVector(direction,length);
+              run.start_mm=(attachment.end==='start'?point:other).toArray();
+              run.end_mm=(attachment.end==='start'?other:point).toArray();
+            }
+          }
+        }
+      }else if(mode==='centered'&&bound.length===2){
+        const sockets=bound.map(socketEnd);
+        if(sockets.every(Boolean)){
+          const points=Object.fromEntries(sockets.map(socket=>[socket.attachment.end,socket.point]));
+          const midpoint=(points.start.getComponent(axis)+points.end.getComponent(axis))/2;
+          const candidates=sockets.map(socket=>{
+            const component=socket.direction.getComponent(axis);
+            if(Math.abs(component)<1e-6)return null;
+            const depth=socket.depth+2*(midpoint-plane.offset_mm)/component;
+            return depth>=(socket.socket.min_engagement_mm||0)-1e-6&&depth<=socket.socket.engagement_mm+1e-6?
+              {socket,depth,travel:Math.abs(depth-socket.depth)}:null;
+          }).filter(Boolean).sort((a,b)=>a.travel-b.travel);
+          if(candidates.length){
+            const {socket,depth}=candidates[0];
+            socket.attachment.insertion_mm=depth;
+            points[socket.attachment.end].addScaledVector(socket.direction,socket.depth-depth);
+            run.start_mm=points.start.toArray();run.end_mm=points.end.toArray();
           }
         }
       }
@@ -187,17 +233,24 @@ function mirrorConstrainedDelta(ids,delta){
     if(Object.entries(plane.run_modes||{}).some(([id,mode])=>mode!=='free'&&members.has(id)))result.setComponent({x:0,y:1,z:2}[plane.axis],0);
   return result;
 }
-function changed({inferMirrors=true}={}){if(inferMirrors)autoMirrorModes();constrainDraftMirrors();state.simulationError=null;state.doc.results={};delete state.doc.build_plan;state.dirty=true;state.revision++;state.recording=null;state.playing=false;state.checks=null;state.analysis=null;state.plan=null;state.frame=0;updateHeader();}
+let pendingAutomaticDraftRepair=null;
+function changed({inferMirrors=true}={}){
+  if(pendingAutomaticDraftRepair){
+    const job=pendingAutomaticDraftRepair;pendingAutomaticDraftRepair=null;
+    api('draft-repair-cancel',{job_id:job.id}).catch(()=>{});
+  }
+  if(inferMirrors)autoMirrorModes();constrainDraftMirrors();state.simulationError=null;state.doc.results={};delete state.doc.build_plan;state.dirty=true;state.revision++;state.recording=null;state.playing=false;state.checks=null;state.analysis=null;state.plan=null;state.frame=0;updateHeader();scheduleAutosave();
+}
 function refreshDraft(id,{structure=false}={}){
   const run=draftRun(state.doc,id),previous=partObjects.get(id);
   if(previous){objects.remove(previous);dispose(previous);partObjects.delete(id);state.scene.parts=state.scene.parts.filter(p=>p.id!==id);state.scene.groups=state.scene.groups.filter(g=>!g.includes(id));}
   if(run){const part=draftPreview(run,state.scene,state.library),group=new THREE.Group();group.name=id;group.userData.part=id;
     for(const shape of part.geometry)group.add(meshShape(shape,part.color,part.kind));setPose(group,part.pose);objects.add(group);partObjects.set(id,group);
     state.scene.parts.push(part);state.scene.groups.push([id]);}
-  state.scene.draft_attachments=draftRuns(state.doc).flatMap(r=>r.attachments||[]);
+  state.scene.draft_attachments=draftRuns(state.doc).flatMap(r=>(r.attachments||[]).map(a=>({...a,run:r.id})));
   if(structure){renderOutline();updateHeader();}
   if(structure||state.selected===id)highlightSelection();
-  if(structure||state.selected===id){renderInspector();attachGizmo();}
+  if(structure||state.selected===id){renderInspector();attachGizmo();updateResizeHandles();}
 }
 function mirrorSourceIds(group,exactIds){
   const ids=new Set([...group.runs.map(run=>run.id),...(group.mirror_parts||[])]);
@@ -232,9 +285,11 @@ function syncMirrorPreviews(){
         mesh.renderOrder=1;mirrorGhost.add(mesh);mirrorPlanes.set(key,mesh);
       }
     }
-    const planes=group.mirrors,ids=mirrorSourceIds(group,exactIds),sources=new Map(),seen=new Map();
+    const planes=group.mirrors,groupIds=mirrorSourceIds(group,exactIds);
+    const ids=planes.some(plane=>plane.scope==='scene')?new Set(sceneParts.keys()):groupIds;
+    const sources=new Map(),seen=new Map();
     for(const id of ids){
-      const source=partObjects.get(id),part=sceneParts.get(id);if(!source||!part)continue;
+      const source=partObjects.get(id),part=sceneParts.get(id);if(!source||!part||part.kind==='human')continue;
       source.updateMatrix();
       let signature=0;source.traverse(()=>signature++);
       const a=part.draft?new THREE.Vector3(0,0,-part.length_mm/2).applyMatrix4(source.matrix):null;
@@ -244,9 +299,11 @@ function syncMirrorPreviews(){
       seen.set(id,new Set([original]));
     }
     for(let mask=1;mask<1<<planes.length;mask++){
+      const sceneMask=planes.some((plane,bit)=>(mask&(1<<bit))&&plane.scope==='scene');
       const transform=new THREE.Matrix4().identity();
       for(let bit=0;bit<planes.length;bit++)if(mask&(1<<bit))transform.premultiply(mirrorMatrix(planes[bit].axis,planes[bit].offset_mm));
       for(const [id,{source,part,signature,a,b}] of sources){
+        if(!sceneMask&&!groupIds.has(id))continue;
         const reflected=part.draft?[pointKey(a.clone().applyMatrix4(transform)),pointKey(b.clone().applyMatrix4(transform))].sort().join('|'):
           pointKey(new THREE.Vector3().setFromMatrixPosition(source.matrix).applyMatrix4(transform));
         if(seen.get(id).has(reflected))continue;
@@ -320,8 +377,24 @@ async function repairDrafts(subassembly=null,run_id=null){
   finally{if($('#modal').open&&$('#modal-title').textContent==='Repairing draft')closeModal();state.placementPending=false;attachGizmo();}
 }
 async function mutate(fn){checkpoint();try{fn();changed();await resolve();}catch(e){state.doc=state.undo.pop()||state.doc;toast(e.message,true);await resolve();throw e;}}
-async function resolve(){const revision=state.revision;try{const data=await api('resolve');if(revision!==state.revision)return;buildScene(data);renderInspector();renderOutline();updateHeader();}catch(e){toast(e.message,true);status('Resolve error: '+e.message);throw e;}}
-function updateHeader(){if(!state.doc)return;const drafts=draftRuns(state.doc).length,exact=state.scene?.parts.filter(p=>!p.draft)||[],exactIds=new Set(exact.map(p=>p.id)),bodies=(state.scene?.groups||[]).filter(group=>group.some(id=>exactIds.has(id))).length;$('#rename').textContent=state.doc.name||'Untitled creation';$('#file-path').textContent=state.path;$('#dirty').classList.toggle('changed',state.dirty);$('#tree-count').textContent=state.scene?.parts.length||0;$('#part-stat').textContent=exact.length+' parts'+(drafts?' · '+drafts+' draft':'');$('#body-stat').textContent=bodies+(bodies===1?' rigid body':' rigid bodies');$('#mass-stat').textContent=exact.reduce((sum,p)=>sum+p.mass_kg,0).toFixed(1)+' kg';$('#undo').disabled=!state.undo.length;$('#redo').disabled=!state.redo.length;$('#finalize-draft').disabled=!drafts;}
+async function resolve(){const revision=state.revision;try{const data=await api('resolve');if(revision!==state.revision)return;if(data.document){state.doc=data.document;state.dirty=true;state.revision++;scheduleAutosave();}if(data.mirror_pose_error&&data.mirror_pose_error!==state.mirrorPoseError)toast(data.mirror_pose_error,true);state.mirrorPoseError=data.mirror_pose_error||null;buildScene(data);renderInspector();renderOutline();updateHeader();}catch(e){toast(e.message,true);status('Resolve error: '+e.message);throw e;}}
+function updateHeader(){
+  if(!state.doc)return;
+  const drafts=draftRuns(state.doc).length,exact=state.scene?.parts.filter(p=>!p.draft)||[];
+  const exactIds=new Set(exact.map(p=>p.id));
+  const bodies=(state.scene?.groups||[]).filter(group=>group.some(id=>exactIds.has(id))).length;
+  const mass=exact.reduce((sum,p)=>sum+p.mass_kg,0);
+  $('#rename').textContent=state.doc.name||'Untitled creation';
+  $('#file-path').textContent=state.path;
+  $('#dirty').classList.toggle('changed',state.dirty);
+  $('#tree-count').textContent=state.scene?.parts.length||0;
+  $('#part-stat').textContent=exact.length+' parts'+(drafts?' · '+drafts+' draft':'');
+  $('#body-stat').textContent=bodies+(bodies===1?' rigid body':' rigid bodies');
+  $('#mass-stat').textContent=(preferences.massUnit==='kg'?mass.toFixed(1):displayValue(mass,'mass',preferences.massUnit))+' '+preferences.massUnit;
+  $('.unit-badge').textContent=`${preferences.lengthUnit} · ${preferences.massUnit} · ${preferences.forceUnit}`;
+  $('.view-caption').textContent=preferences.lengthUnit==='mm'?'Z up · millimetres':`Z up · ${preferences.lengthUnit}`;
+  $('#undo').disabled=!state.undo.length;$('#redo').disabled=!state.redo.length;$('#finalize-draft').disabled=!drafts;
+}
 
 function solid(shape){
   const type=shape.type,radius=shape.radius_mm??shape.diameter_mm/2,length=shape.length_mm;
@@ -353,8 +426,60 @@ function meshShape(shape,color,kind){
   group.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});return group;
 }
 function dispose(group){group.traverse(o=>{o.geometry?.dispose();if(o.material){for(const m of Array.isArray(o.material)?o.material:[o.material])m.dispose();}});group.clear();}
+function resizeTarget(){
+  const object=selectedObject();
+  if(object&&object.template!=='chain')return null;
+  if(object?.template==='chain'){
+    const chain=state.scene?.chains?.find(c=>c.id===object.id);
+    if(!chain)return null;
+    const point=(part,port)=>{const data=state.scene.parts.find(p=>p.id===part),mesh=partObjects.get(part);
+      return data&&mesh&&data.ports[port]?new THREE.Vector3(...(data.ports[port].position_mm||[0,0,0])).applyMatrix4(mesh.matrix):null;};
+    const first=point(chain.start_part,chain.start_port),last=point(chain.end_part,chain.end_port);
+    return first&&last?{id:object.id,first,last,length:chain.requested_length_mm,pitch:chain.pitch_mm,chain:true}:null;
+  }
+  const part=state.scene?.parts.find(p=>p.id===state.selected&&p.kind==='member'),mesh=partObjects.get(state.selected);
+  if(!part||!mesh||!Number.isFinite(part.length_mm)||part.length_mm<=0)return null;
+  const centered=state.doc?.draft_subassemblies?.some(group=>group.runs.some(run=>run.id===part.id)&&
+    group.mirrors?.some(plane=>plane.run_modes?.[part.id]==='centered'))||false;
+  return {id:part.id,first:new THREE.Vector3(0,0,-part.length_mm/2).applyMatrix4(mesh.matrix),
+    last:new THREE.Vector3(0,0,part.length_mm/2).applyMatrix4(mesh.matrix),length:part.length_mm,chain:false,centered};
+}
+function updateResizeHandles(){
+  dispose(resizeHandles);
+  $('#resize-label-first').classList.add('hidden');$('#resize-label-second').classList.add('hidden');
+  if(state.tool==='connect'||state.mode!=='design'||state.placementPending)return;
+  const target=resizeTarget();if(!target)return;
+  for(const [side,point] of [['start',target.first],['end',target.last]]){
+    const radius=Math.min(14,Math.max(5,target.first.distanceTo(target.last)*.24));
+    const handle=new THREE.Mesh(new THREE.SphereGeometry(radius,16,12),new THREE.MeshBasicMaterial({color:'#f4bb65',depthTest:false}));
+    handle.position.copy(point);handle.renderOrder=130;handle.userData.resizeSide=side;resizeHandles.add(handle);
+  }
+  $('#resize-label-first').textContent=`${preferences.resizeHandle1GrowKey.toUpperCase()}/${preferences.resizeHandle1ShrinkKey.toUpperCase()}`;
+  $('#resize-label-second').textContent=`${preferences.resizeHandle2GrowKey.toUpperCase()}/${preferences.resizeHandle2ShrinkKey.toUpperCase()}`;
+  $('#resize-label-first').classList.remove('hidden');$('#resize-label-second').classList.remove('hidden');
+}
+function positionResizeLabels(){
+  if(resizeHandles.children.length!==2)return;
+  const rect=viewport.getBoundingClientRect();
+  for(const [index,id] of ['#resize-label-first','#resize-label-second'].entries()){
+    const projected=resizeHandles.children[index].position.clone().project(camera),label=$(id);
+    label.style.left=((projected.x+1)*rect.width/2+18)+'px';
+    label.style.top=((1-projected.y)*rect.height/2+32)+'px';
+  }
+}
+async function requestResize(target,side,length,shift=false){
+  if(state.placementPending||state.busy||!target||!Number.isFinite(length))return;
+  const revision=state.revision;state.placementPending=true;updateResizeHandles();
+  try{const result=await api('resize-drag',{member:target.id,endpoint:side,length_mm:Math.max(1,length),
+      behavior:shift?preferences.resizeShiftMode:preferences.resizeConnectorMode,
+      capture_mm:preferences.resizeCaptureMm,capture_deg:preferences.resizeCaptureDeg,
+      auto_connect:preferences.resizeAutoConnect,locked:preferences.connectionLocked});
+    await acceptPlacement(result,revision);status(`Resized ${target.id} to ${result.length_mm.toFixed(1)} mm`);
+  }catch(error){restorePlacement();toast(error.message,true);}
+  finally{state.placementPending=false;updateResizeHandles();}
+}
 function buildScene(data){
-  state.scene=data;sceneGeneration++;gizmo?.detach();dispose(objects);dispose(ports);dispose(overlays);partObjects.clear();
+  state.scene=data;sceneGeneration++;gizmo?.detach();dispose(objects);dispose(ports);dispose(overlays);partObjects.clear();beamObjects.clear();
   if(state.selected&&!data.parts.some(p=>p.id===state.selected)){
     const chain=data.chains?.find(c=>state.selected.startsWith(c.id+'/'));
     if(chain)state.selected=chain.end_part;
@@ -362,7 +487,7 @@ function buildScene(data){
   for(const part of data.parts){const group=new THREE.Group();group.name=part.id;group.userData.part=part.id;for(const shape of part.geometry)group.add(meshShape(shape,part.color,part.kind));setPose(group,part.pose);objects.add(group);partObjects.set(part.id,group);}
   for(const drive of state.doc.drives||[]){if(!drive.route_mm?.length)continue;const points=drive.route_mm.map(p=>new THREE.Vector3(...p));const curve=new THREE.CatmullRomCurve3(points,false,'catmullrom',0);const belt=new THREE.Mesh(new THREE.TubeGeometry(curve,80,2,6,false),new THREE.MeshStandardMaterial({color:'#374b52',roughness:.8}));overlays.add(belt);}
   for(const anchor of data.anchors){const part=partObjects.get(anchor.part);if(!part)continue;const loc=part.position.clone();const marker=new THREE.Mesh(new THREE.RingGeometry(70,73,48),new THREE.MeshBasicMaterial({color:'#74a28c',transparent:true,opacity:.55,side:THREE.DoubleSide}));marker.position.copy(loc);marker.position.z+=1;marker.quaternion.copy(part.quaternion);overlays.add(marker);}
-  updatePorts();updateConnectionHint();highlightSelection();updateHeader();if(state.tool==='translate'||state.tool==='rotate')attachGizmo();
+  updatePorts();updateConnectionHint();highlightSelection();updateHeader();updateResizeHandles();if(state.tool==='translate'||state.tool==='rotate')attachGizmo();
 }
 function updatePorts(){dispose(ports);if(!state.scene)return;const show=state.ports||state.tool==='connect';for(const p of state.scene.parts){if(!show&&p.id!==state.selected&&p.id!==hoveredDraftConnection?.connector)continue;for(const [name,port] of Object.entries(p.ports)){const focused=p.id===hoveredDraftConnection?.connector&&name===hoveredDraftConnection?.port;if(!show&&p.id===hoveredDraftConnection?.connector&&!focused)continue;const chain=state.scene.chains?.find(c=>p.id.startsWith(c.id+'/'));if(chain&&!((p.id===chain.start_part&&name===chain.start_port)||(p.id===chain.end_part&&name===chain.end_port)||(chain.layout_mode==='posable'&&p.id===state.selected)))continue;if(port.type!=='socket'&&!show)continue;const radius=focused?12:port.type==='socket'?7:4;const sphere=new THREE.Mesh(new THREE.SphereGeometry(radius,12,8),new THREE.MeshBasicMaterial({color:focused?'#f3ba62':port.type==='socket'?'#3c9c85':'#779eba',depthTest:false,transparent:true,opacity:focused?1:.8}));const local=new THREE.Vector3(...(port.position_mm||[0,0,0]));const obj=partObjects.get(p.id);sphere.position.copy(local.applyMatrix4(obj.matrix));sphere.renderOrder=100;sphere.userData={port:name,part:p.id,portType:port.type};ports.add(sphere);const axis=new THREE.Vector3(...(port.axis||[0,0,1])).transformDirection(obj.matrix);const arrow=new THREE.ArrowHelper(axis,sphere.position,38,focused?'#f3ba62':'#64a294',8,4);arrow.visible=show||focused;ports.add(arrow);}}}
 function highlightSelection(){
@@ -381,7 +506,7 @@ function select(id){
       return;
     }
   }
-  state.selected=id;updateConnectionHint();highlightSelection();updatePorts();renderInspector();renderOutline();attachGizmo();
+  state.selected=id;updateConnectionHint();highlightSelection();updatePorts();renderInspector();renderOutline();attachGizmo();updateResizeHandles();
 }
 function attachGizmo(){
   if(!gizmo)return;gizmo.detach();gizmo.showX=gizmo.showY=gizmo.showZ=true;gizmo.setSpace?.(state.tool==='rotate'&&localRotationHeld?'local':'world');
@@ -417,10 +542,12 @@ function updateConnectionHint(){
 }
 function setTool(tool){
   state.tool=tool;
+  if(tool!=='resize'&&resizeDrag)clearResizeDrag();
+  if(renderer)renderer.domElement.style.cursor='';
   state.connectionSource=tool==='connect'&&state.scene?.parts.some(p=>p.id===state.selected&&p.kind==='member')?state.selected:null;
   if(tool==='connect'){if(state.mode!=='design')setMode('design');ports.visible=true;}
   $$('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));
-  updateConnectionHint();updatePorts();attachGizmo();
+  updateConnectionHint();updatePorts();attachGizmo();updateResizeHandles();
 }
 function fitView(){if(!objects.children.length||!orbit)return;syncMirrorPreviews();const box=new THREE.Box3().setFromObject(objects);for(const {clone} of mirrorCopies.values())box.expandByObject(clone);const center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());const halfAngle=Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*Math.min(1,camera.aspect));const distance=Math.max(size.length()/2,150)/Math.sin(halfAngle)*1.16;const direction=camera.position.clone().sub(orbit.target).normalize();orbit.target.copy(center);camera.position.copy(center).addScaledVector(direction,distance);orbit.update();}
 function icon(part){const base='<svg viewBox="0 0 48 48" fill="none" stroke="#8eaaaF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">';let p='<path d="M13 34V14h22v20H13Z"/>';
@@ -448,7 +575,9 @@ function libraryHotkeyFromEvent(event){
 function showDraftConnection(connector,port){hoveredDraftConnection=connector?{connector,port}:null;highlightSelection();updatePorts();}
 function addLibraryCatalog(catalog){
   if(!state.library[catalog]||state.busy||state.placementPending||dragStart)return;
-  if(state.library[catalog].kind==='chain')chainDialog(catalog);else addPart(catalog);
+  if(state.library[catalog].kind==='chain')chainDialog(catalog);
+  else if(state.library[catalog].kind==='wheel')wheelDialog(catalog);
+  else addPart(catalog);
 }
 function saveLibraryHotkeys(){try{window.localStorage.setItem(LIBRARY_HOTKEYS_KEY,JSON.stringify(libraryHotkeys));return true;}catch{return false;}}
 let libraryMenuOwner=null;
@@ -616,7 +745,7 @@ async function addPart(catalog,position=null,{origin=false,quiet=false}={}){cons
   }
   await mutate(()=>{state.doc.parts.push({id,catalog,parameters:params,pose:{position_mm:position?[position[0],position[1],position[2]+(origin?0:z)]:[0,-600,z],rotation_deg:[0,0,0]}});
     const mirrored=(state.doc.draft_subassemblies||[]).filter(group=>group.mirrors?.length);
-    if(mirrored.length===1){
+    if(mirrored.length===1&&(mirrored[0].mirrors||[]).some(plane=>plane.scope!=='scene')){
       const existing=new Set(state.doc.parts.map(part=>part.id));
       mirrored[0].mirror_parts=[...new Set((mirrored[0].mirror_parts||[]).filter(part=>existing.has(part)))];
       if(!mirrored[0].mirror_parts.includes(id))mirrored[0].mirror_parts.push(id);
@@ -638,7 +767,7 @@ async function deleteDraft(id){
 
 function addDraftMirrorDialog(group,run){
   if((group.mirrors||[]).length>=3){toast('A draft subassembly can use one mirror plane per axis.',true);return;}
-  modal('Add draft mirror',`<p>Mirror this draft subassembly while editing. Generated parts are previews until you keep the mirror or finalize.</p>
+  modal('Add draft mirror',`<p>Mirror the scene while editing. Generated parts are previews until you keep the mirror or finalize.</p>
     <div class="single-field"><label for="mirror-axis">PLANE NORMAL</label><select id="mirror-axis">${['x','y','z'].filter(axis=>!(group.mirrors||[]).some(plane=>plane.axis===axis)).map(axis=>`<option value="${axis}">${axis.toUpperCase()} = offset</option>`).join('')}</select></div>
     <div class="single-field"><label for="mirror-offset">OFFSET · mm</label><input id="mirror-offset" type="number" step="any" required value="0"></div>
     <p>Common planes are X = 0, Y = 0, and Z at the height you choose.</p>`,[
@@ -647,7 +776,9 @@ function addDraftMirrorDialog(group,run){
       const input=$('#mirror-offset');if(!input.reportValidity())return;
       const axis=$('#mirror-axis').value,offset=Number(input.value);if(!Number.isFinite(offset))return;
       const used=new Set((group.mirrors||[]).map(plane=>plane.id));let index=1;while(used.has('mirror-'+index))index++;
-      closeModal();await mutate(()=>{group.mirrors||=[];group.mirrors.push({id:'mirror-'+index,axis,offset_mm:offset,run_modes:{}});});
+      closeModal();await mutate(()=>{
+        group.mirrors||=[];group.mirrors.push({id:'mirror-'+index,axis,offset_mm:offset,scope:'scene',run_modes:{}});
+      });
       syncMirrorPreviews();fitView();
     }}]);
   let edited=false;
@@ -667,6 +798,80 @@ function removeDraftMirrorDialog(group,plane){
     }}]);
 }
 
+const DRAFT_SOCKET_CAPTURE_MM=10,DRAFT_SOCKET_CAPTURE_DEG=5;
+function canAlignDraftConnector(id){
+  if(!state.doc.parts.some(part=>part.id===id)||state.scene.anchors?.some(anchor=>anchor.part===id))return false;
+  if(state.scene.joints?.some(joint=>joint.a.part===id||joint.b.part===id))return false;
+  if(draftRuns(state.doc).some(run=>(run.attachments||[]).some(attachment=>attachment.connector===id)))return false;
+  if((state.scene.groups||[]).some(group=>group.includes(id)&&group.length>1))return false;
+  if((state.doc.draft_subassemblies||[]).some(group=>(group.mirror_parts||[]).includes(id)))return false;
+  return true;
+}
+const REPAIRABLE_DRAFT_CONFLICTS=new Set(['THROUGH_FIT','POSITION_MISMATCH','AXIS_MISMATCH','LOCKED_LENGTH']);
+function repairNewDraftConnection(runId){
+  const preview=state.scene.parts.find(part=>part.id===runId);
+  if(!preview?.conflicts?.some(conflict=>REPAIRABLE_DRAFT_CONFLICTS.has(conflict.code)))return;
+  const revision=state.revision,document=state.doc;
+  Promise.resolve().then(async()=>{
+    if(revision!==state.revision||document!==state.doc||state.placementPending||dragStart)return;
+    const job={id:Date.now().toString(36)+Math.random().toString(36).slice(2)};
+    pendingAutomaticDraftRepair=job;state.placementPending=true;gizmo?.detach();
+    status('Aligning connected draft structure…');
+    try{
+      const result=await api('draft-repair-selected',{job_id:job.id,run:runId});
+      if(pendingAutomaticDraftRepair!==job||revision!==state.revision||document!==state.doc)return;
+      if(result.status==='repaired'){
+        pendingAutomaticDraftRepair=null;
+        await acceptPlacement(result,revision,false);
+        toast('Draft connection added and alignment repaired.');status('Draft graph updated');
+      }else if(result.status==='conflict')status('Draft connection needs further adjustment');
+      else status('Draft connection alignment checked');
+    }catch(error){
+      if(pendingAutomaticDraftRepair===job&&revision===state.revision&&document===state.doc){
+        toast('Automatic draft alignment failed: '+error.message,true);
+        status('Draft connection needs adjustment');
+      }
+    }finally{
+      if(pendingAutomaticDraftRepair===job)pendingAutomaticDraftRepair=null;
+      state.placementPending=false;attachGizmo();
+    }
+  });
+}
+function alignDraftConnector(run,fitting,socket,attachment,preview=null){
+  if(!canAlignDraftConnector(fitting.id))return false;
+  if(!socket.through&&(state.doc.draft_subassemblies||[]).some(group=>group.runs.includes(run)&&
+    (group.mirrors||[]).some(plane=>plane.run_modes?.[run.id]&&plane.run_modes[run.id]!=='free')))return false;
+  preview||=draftPreview(run,state.scene,state.library);
+  const pipe=new THREE.Object3D();setPose(pipe,preview.pose);
+  const start=new THREE.Vector3(0,0,-preview.length_mm/2).applyMatrix4(pipe.matrix);
+  const direction=new THREE.Vector3(0,0,1).transformDirection(pipe.matrix);
+  const object=partObjects.get(fitting.id);if(!object)return false;
+  object.updateMatrix();
+  const mouth=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyMatrix4(object.matrix);
+  const axis=new THREE.Vector3(...(socket.axis||[0,0,1])).transformDirection(object.matrix);
+  let targetMouth,targetAxis;
+  if(socket.through){
+    const station=mouth.clone().sub(start).dot(direction);
+    const half=(socket.engagement_mm||0)/2;
+    if(preview.length_mm<half*2)return false;
+    targetMouth=start.clone().addScaledVector(direction,THREE.MathUtils.clamp(station,half,preview.length_mm-half));
+    targetAxis=direction.clone().multiplyScalar(axis.dot(direction)<0?-1:1);
+  }else{
+    const end=attachment.end;
+    if(end!=='start'&&end!=='end')return false;
+    targetAxis=direction.clone().multiplyScalar(end==='start'?1:-1);
+    targetMouth=start.clone().addScaledVector(direction,end==='start'?0:preview.length_mm)
+      .addScaledVector(targetAxis,attachment.insertion_mm||0);
+  }
+  if(mouth.distanceTo(targetMouth)>DRAFT_SOCKET_CAPTURE_MM||
+    axis.angleTo(targetAxis)>THREE.MathUtils.degToRad(DRAFT_SOCKET_CAPTURE_DEG))return false;
+  const rotation=new THREE.Quaternion().setFromUnitVectors(axis,targetAxis).multiply(object.quaternion);
+  const target=new THREE.Object3D();target.quaternion.copy(rotation);
+  target.position.copy(targetMouth).sub(new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyQuaternion(rotation));
+  const pose=getPose(target),part=state.doc.parts.find(item=>item.id===fitting.id);
+  part.pose=pose;fitting.pose=clone(pose);setPose(object,pose);
+  return true;
+}
 function attachAlignedThroughSockets(run){
   const preview=draftPreview(run,state.scene,state.library),object=new THREE.Object3D();setPose(object,preview.pose);
   const start=new THREE.Vector3(0,0,-preview.length_mm/2).applyMatrix4(object.matrix);
@@ -674,18 +879,20 @@ function attachAlignedThroughSockets(run){
   const section=preview.section,profile=['tube','round','circle'].includes(section.type)?'round':section.profile||section.type;
   let added=0;
   for(const fitting of state.scene.parts){
+    if((run.attachments||[]).some(a=>a.connector===fitting.id))continue;
     const matrix=partObjects.get(fitting.id)?.matrix;if(!matrix)continue;
     for(const [name,socket] of Object.entries(fitting.ports||{})){
+      if((run.attachments||[]).some(a=>a.connector===fitting.id))break;
       if(socket.type!=='socket'||!socket.through||socketOccupied(state.scene,fitting.id,name))continue;
       if(profile!==(socket.profile||'round')||Math.abs((section.diameter_mm||0)-(socket.diameter_mm||0))>.6)continue;
-      if((run.attachments||[]).some(a=>a.connector===fitting.id&&
-        (a.port===name||socket.excludes?.includes(a.port)||fitting.ports[a.port]?.excludes?.includes(name))))continue;
       const mouth=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyMatrix4(matrix);
       const axis=new THREE.Vector3(...(socket.axis||[0,0,1])).transformDirection(matrix);
       const station=mouth.clone().sub(start).dot(direction);
       const gap=mouth.distanceTo(start.clone().addScaledVector(direction,station));
-      if(gap>Math.min(10,(socket.diameter_mm||0)/4)||Math.abs(axis.dot(direction))<Math.cos(5*Math.PI/180)||
+      if(gap>Math.min(DRAFT_SOCKET_CAPTURE_MM,(socket.diameter_mm||0)/4)||
+        Math.abs(axis.dot(direction))<Math.cos(THREE.MathUtils.degToRad(DRAFT_SOCKET_CAPTURE_DEG))||
         station<0||station>preview.length_mm)continue;
+      alignDraftConnector(run,fitting,socket,{connector:fitting.id,port:name},preview);
       run.attachments.push({connector:fitting.id,port:name});added++;
     }
   }
@@ -694,6 +901,8 @@ function attachAlignedThroughSockets(run){
 function draftConnect(match,recordUndo=true){
   const run=draftRun(state.doc,match.member),fitting=state.scene.parts.find(p=>p.id===match.connector),socket=fitting?.ports?.[match.port];
   if(!run||!socket||socket.type!=='socket')throw new Error('Choose a draft run and a socket');
+  if((run.attachments||[]).some(a=>a.connector===match.connector))
+    throw new Error('This pipe is already attached to this connector; one pipe cannot occupy two sockets of the same connector');
   if(socketOccupied(state.scene,match.connector,match.port))throw new Error('This socket or its shared bore is occupied');
   const section=state.scene.parts.find(p=>p.id===run.id).section,profile=['tube','round','circle'].includes(section.type)?'round':section.profile||section.type;
   if(profile!==(socket.profile||'round')||Math.abs((section.diameter_mm||0)-(socket.diameter_mm||0))>.6)throw new Error('The pipe size or profile does not match this socket');
@@ -704,7 +913,9 @@ function draftConnect(match,recordUndo=true){
     attachment.insertion_mm=match.insertion_mm??Math.min(30,socket.engagement_mm*.8);
     if(attachment.insertion_mm<(socket.min_engagement_mm||0)||attachment.insertion_mm>socket.engagement_mm)throw new Error('Insertion is outside the socket engagement range');
   }
-  if(recordUndo)checkpoint();run.attachments||=[];run.attachments.push(attachment);
+  if(recordUndo)checkpoint();
+  alignDraftConnector(run,fitting,socket,attachment);
+  run.attachments||=[];run.attachments.push(attachment);
   const owner=state.doc.draft_subassemblies.find(group=>group.runs.includes(run));
   const ends=Object.fromEntries(run.attachments.filter(item=>item.end).map(item=>[item.end,item]));
   if(attachment.end&&ends.start&&ends.end)for(const plane of owner.mirrors||[]){
@@ -732,7 +943,7 @@ function draftConnect(match,recordUndo=true){
     attachment.insertion_mm=depth;
     run.start_mm=frames.start.point.toArray();run.end_mm=frames.end.point.toArray();
   }
-  const additional=attachAlignedThroughSockets(run);changed();refreshDraft(run.id);
+  const additional=attachAlignedThroughSockets(run);changed();refreshDraft(run.id);updatePorts();repairNewDraftConnection(run.id);
   toast(`${additional+1} draft ${additional?'connections':'connection'} added. Finalize when the subassembly is ready.`);status('Draft graph updated');
 }
 
@@ -851,16 +1062,65 @@ function snapRotation(selected){
   selected.updateMatrix();
 }
 function snapSettingsDialog(){
-  if(state.placementPending){toast('Finish the connection preview before changing snap settings.');return;}
+  if(state.placementPending){toast('Finish the connection preview before changing preferences.');return;}
   const settings=currentSnapSettings();
-  modal('Snap settings',`<label class="check-label"><input id="settings-grid" type="checkbox">Use position and angle increments</label><div class="fields snap-settings-fields"><div class="field"><label for="settings-position">POSITION · mm</label><input id="settings-position" type="number" min="0.1" max="10000" step="any"></div><div class="field"><label for="settings-angle">ROTATION · °</label><input id="settings-angle" type="number" min="0.1" max="180" step="any"></div></div><div class="snap-presets"><button data-snap-preset="90">Frame · 90°</button><button data-snap-preset="45">Brace · 45°</button><button data-snap-preset="15">Fine · 15°</button></div><label class="check-label"><input id="settings-align" type="checkbox">Align rotation with existing parts and world axes</label><div class="single-field"><label for="settings-alignment">ALIGNMENT WINDOW · °</label><input id="settings-alignment" type="number" min="0.1" max="20" step="any"></div><p>Nearby reference axes take priority over the rotation increment. Turn alignment off to use only your chosen increment.</p><label class="check-label"><input id="settings-connections" type="checkbox">Snap and connect on drop</label><div class="single-field"><label for="settings-capture">CONNECTION REACH ON SCREEN · px</label><input id="settings-capture" type="number" min="4" max="100" step="any"></div><p>Apply changes this session. Save as defaults also remembers these settings for future visits in this browser.</p>`,[
+  modal('Preferences',`<h3>SNAPPING &amp; GRID</h3><label class="check-label"><input id="settings-grid" type="checkbox">Use position and angle increments</label><div class="fields snap-settings-fields"><div class="field"><label for="settings-position">POSITION · mm</label><input id="settings-position" type="number" min="0.1" max="10000" step="any"></div><div class="field"><label for="settings-angle">ROTATION · °</label><input id="settings-angle" type="number" min="0.1" max="180" step="any"></div></div><div class="snap-presets"><button data-snap-preset="90">Frame · 90°</button><button data-snap-preset="45">Brace · 45°</button><button data-snap-preset="15">Fine · 15°</button></div><label class="check-label"><input id="settings-align" type="checkbox">Align rotation with existing parts and world axes</label><div class="single-field"><label for="settings-alignment">ALIGNMENT WINDOW · °</label><input id="settings-alignment" type="number" min="0.1" max="20" step="any"></div><p>Nearby reference axes take priority over the rotation increment. Turn alignment off to use only your chosen increment.</p><label class="check-label"><input id="settings-connections" type="checkbox">Snap and connect on drop</label><div class="single-field"><label for="settings-capture">CONNECTION REACH ON SCREEN · px</label><input id="settings-capture" type="number" min="4" max="100" step="any"></div><p>Apply changes this session. Save as defaults remembers them in this browser.</p>`,[
     {label:'Cancel',action:closeModal},
     {label:'Apply',action:()=>apply(false)},
     {label:'Save as defaults',primary:true,action:()=>apply(true)}
   ]);
-  const shortcuts=document.createElement('div');
-  shortcuts.innerHTML=`<h3>KEYBOARD NUDGES</h3><div class="fields snap-settings-fields"><div class="field"><label for="settings-keyboard-move">MOVE · mm</label><input id="settings-keyboard-move" type="number" min="0.1" max="10000" step="any"></div><div class="field"><label for="settings-keyboard-rotate">ROTATE · °</label><input id="settings-keyboard-rotate" type="number" min="0.1" max="180" step="any"></div></div><p>W/A/S/D move in the XY plane; F/V move up/down. Z/X/C rotate around world X/Y/Z. Shift uses one tenth of the keyboard step; Alt reverses rotation. With the R rotation gizmo, hold Shift to use the part’s local axes instead of world axes. Alt+Shift+D duplicates the selected part; Alt+D also works when the browser does not reserve it. G/R keep the move and rotate gizmos. Home frames the design. Keyboard steps are separate from snap increments.</p>`;
-  $('#settings-capture').closest('.single-field').after(shortcuts);
+  const options=(values,current)=>values.map(([value,label])=>`<option value="${esc(value)}" ${value===current?'selected':''}>${esc(label)}</option>`).join('');
+  $('#modal-content').insertAdjacentHTML('beforeend',`<div class="preferences-sections">
+    <section><h3>STARTUP</h3><div class="single-field"><label>OPEN ON START</label><select id="pref-startup">${options([['workspace','Last saved design or workspace default'],['autosave','Latest autosave'],['empty','Empty design'],['example','Example design']],preferences.startup)}</select></div>
+      <div class="single-field"><label>EXAMPLE</label><select id="pref-example">${options((state.examples||[]).map(path=>[path,path.split('/').pop()]),preferences.startupExample||state.examples?.[0])}</select></div>
+      <label class="check-label"><input id="pref-fit" type="checkbox">Fit design in view when opened</label><div class="single-field"><label>DEFAULT TOOL</label><select id="pref-tool">${options([['select','Select'],['translate','Move'],['rotate','Rotate'],['resize','Resize length'],['connect','Connect']],preferences.defaultTool)}</select></div></section>
+    <section><h3>AUTOSAVE</h3><label class="check-label"><input id="pref-autosave" type="checkbox">Keep recovery copies in the workspace</label>
+      <div class="single-field"><label>FOLDER INSIDE WORKSPACE</label><input id="pref-directory" value="${esc(preferences.autosaveDirectory)}"></div>
+      <div class="fields"><div class="field"><label>EVERY · MINUTES</label><input id="pref-minutes" type="number" min="1" max="120" step="1" value="${preferences.autosaveMinutes}"></div>
+      <div class="field"><label>COPIES PER DESIGN</label><input id="pref-keep" type="number" min="1" max="100" step="1" value="${preferences.autosaveKeep}"></div></div>
+      <p>Autosaves are separate recovery files. Saving your design still uses Save.</p></section>
+    <section><h3>DISPLAY UNITS</h3><div class="fields"><div class="field"><label>LENGTH</label><select id="pref-length">${options([['mm','Millimetres'],['cm','Centimetres'],['m','Metres'],['in','Inches'],['ft','Feet']],preferences.lengthUnit)}</select></div>
+      <div class="field"><label>MASS</label><select id="pref-mass">${options([['kg','Kilograms'],['g','Grams'],['lb','Pounds']],preferences.massUnit)}</select></div>
+      <div class="field"><label>FORCE</label><select id="pref-force">${options([['N','Newtons'],['kN','Kilonewtons'],['lbf','Pounds force']],preferences.forceUnit)}</select></div></div>
+      <p>Design files, simulation, and APIs remain in mm, kg, and N.</p></section>
+    <section><h3>VIEW &amp; HISTORY</h3><label class="check-label"><input id="pref-grid" type="checkbox">Show ground grid</label>
+      <label class="check-label"><input id="pref-floor" type="checkbox">Show floor</label>
+      <label class="check-label"><input id="pref-ports" type="checkbox">Show connection ports</label>
+      <label class="check-label"><input id="pref-fit-duplicate" type="checkbox">Fit view after duplicate</label>
+      <div class="single-field"><label>VIEWPORT THEME</label><select id="pref-theme">${options([['system','Follow system'],['light','Light'],['dark','Dark']],preferences.theme)}</select></div>
+      <div class="single-field"><label>CAMERA FIELD OF VIEW · °</label><input id="pref-fov" type="number" min="20" max="90" step="1" value="${preferences.cameraFovDeg}"></div>
+      <div class="single-field"><label>UNDO STEPS TO KEEP</label><input id="pref-undo" type="number" min="10" max="500" step="1" value="${preferences.undoLimit}"></div></section>
+    <section><h3>KEYBOARD NUDGES</h3><div class="fields"><div class="field"><label for="settings-keyboard-move">KEYBOARD NUDGE DISTANCE · mm</label><input id="settings-keyboard-move" type="number" min="0.1" max="10000" step="any"></div>
+      <div class="field"><label for="settings-keyboard-rotate">KEYBOARD ROTATION STEP · °</label><input id="settings-keyboard-rotate" type="number" min="0.1" max="180" step="any"></div></div>
+      <p>W/A/S/D move in the XY plane; F/V move up/down. Z/X/C rotate around world X/Y/Z. Shift uses one tenth of the keyboard step; Alt reverses rotation. With the R rotation gizmo, hold Shift to use the part’s local axes instead of world axes. Alt+Shift+D duplicates the selected part; Alt+D also works when the browser does not reserve it. G/R keep the move and rotate gizmos. Home frames the design. Keyboard steps are separate from snap increments.</p></section>
+    <section><h3>NEW ITEMS</h3><div class="fields"><div class="field"><label>DUPLICATE COPIES</label><input id="pref-duplicate-count" type="number" min="1" max="100" step="1" value="${preferences.defaultDuplicateCount}"></div>
+      <div class="field"><label>HUMAN HEIGHT · mm</label><input id="pref-human-height" type="number" min="500" max="2500" step="1" value="${preferences.defaultHumanHeightMm}"></div>
+      <div class="field"><label>HUMAN MASS · kg</label><input id="pref-human-mass" type="number" min="10" max="250" step="any" value="${preferences.defaultHumanMassKg}"></div></div>
+      <div class="single-field"><label>FLEXIBLE LINE LENGTH · mm</label><input id="pref-chain-length" type="number" min="1" max="100000" step="1" value="${preferences.defaultChainLengthMm}"></div></section>
+    <section><h3>CONNECTIONS</h3><label class="check-label"><input id="pref-lock" type="checkbox">Secure new socket connections by default</label>
+      <div class="single-field"><label>DEFAULT FIT TOLERANCE · mm</label><input id="pref-tolerance" type="number" min="0.01" max="20" step="any" value="${preferences.connectionToleranceMm}"></div></section>
+    <section><h3>RESIZE LENGTH</h3><p>Select a pipe or flexible line, then drag either gold end handle. Both ends keep the opposite end fixed. Hold Shift to use the alternate connector behavior.</p>
+      <div class="fields"><div class="field"><label>CONNECTORS WHEN DRAGGING</label><select id="pref-resize-mode">${options([['follow','Follow the pipe'],['detach','Leave behind and disconnect']],preferences.resizeConnectorMode)}</select></div>
+      <div class="field"><label>WITH SHIFT HELD</label><select id="pref-resize-shift">${options([['detach','Leave behind and disconnect'],['follow','Follow the pipe']],preferences.resizeShiftMode)}</select></div></div>
+      <label class="check-label"><input id="pref-resize-auto" type="checkbox">Connect newly covered free through sockets</label>
+      <div class="fields"><div class="field"><label>CONNECTION REACH · mm</label><input id="pref-resize-capture" type="number" min="0" max="100" step="any" value="${preferences.resizeCaptureMm}"></div>
+      <div class="field"><label>AXIS WINDOW · °</label><input id="pref-resize-angle" type="number" min="0" max="45" step="any" value="${preferences.resizeCaptureDeg}"></div></div>
+      <div class="single-field"><label>KEYBOARD RESIZE STEP · mm</label><input id="pref-resize-step" type="number" min="0.1" max="1000" step="any" value="${preferences.resizeKeyStepMm}"></div>
+      <div class="fields"><div class="field"><label>FIRST HANDLE · GROW</label><input id="pref-resize-key-1-grow" maxlength="1" value="${esc(preferences.resizeHandle1GrowKey)}"></div>
+      <div class="field"><label>FIRST HANDLE · SHRINK</label><input id="pref-resize-key-1-shrink" maxlength="1" value="${esc(preferences.resizeHandle1ShrinkKey)}"></div></div>
+      <div class="fields"><div class="field"><label>SECOND HANDLE · GROW</label><input id="pref-resize-key-2-grow" maxlength="1" value="${esc(preferences.resizeHandle2GrowKey)}"></div>
+      <div class="field"><label>SECOND HANDLE · SHRINK</label><input id="pref-resize-key-2-shrink" maxlength="1" value="${esc(preferences.resizeHandle2ShrinkKey)}"></div></div>
+      <p>The first and second handles correspond to the two visible ends. Shift also applies to keyboard resizing. A flexible line changes by at least one full segment per keypress.</p></section>
+    <section><h3>RENDER &amp; SIMULATION</h3><div class="fields"><div class="field"><label>IMAGE WIDTH · px</label><input id="pref-width" type="number" min="320" max="4096" step="1" value="${preferences.renderWidth}"></div>
+      <div class="field"><label>IMAGE HEIGHT · px</label><input id="pref-height" type="number" min="240" max="4096" step="1" value="${preferences.renderHeight}"></div></div>
+      <div class="fields"><div class="field"><label>LIGHTING</label><select id="pref-light">${options([['studio','Studio'],['technical','Technical'],['flat','Flat']],preferences.renderLighting)}</select></div>
+      <div class="field"><label>BACKGROUND</label><select id="pref-background">${options([['#edf1f3','Soft grey'],['#ffffff','White'],['transparent','Transparent']],preferences.renderBackground)}</select></div></div>
+      <div class="fields"><div class="field"><label>SIMULATION · SECONDS</label><input id="pref-sim-seconds" type="number" min="0.1" max="30" step="any" value="${preferences.simulationSeconds}"></div>
+      <div class="field"><label>CHAIN LINKS PER BODY</label><input id="pref-chain-links" type="number" min="1" max="1000" step="1" value="${preferences.simulationChainLinks}"></div></div>
+      <div class="single-field"><label>YELLOW DEFLECTION WARNING · mm</label><input id="pref-deflection-warning" type="number" min="0.01" max="100000" step="any" value="${preferences.deflectionWarningMm}"></div>
+      <p>In validation and playback, red marks predicted yielding or possible fracture. Yellow marks displacement above this threshold.</p></section>
+  </div>`);
+  for(const [id,value] of [['fit',preferences.fitOnOpen],['autosave',preferences.autosaveEnabled],['grid',preferences.gridVisible],['floor',preferences.floorVisible],['ports',preferences.portsVisible],['fit-duplicate',preferences.fitAfterDuplicate],['lock',preferences.connectionLocked],['resize-auto',preferences.resizeAutoConnect]])$('#pref-'+id).checked=value;
   $('#settings-grid').checked=settings.gridEnabled;$('#settings-position').value=settings.translationMm;$('#settings-angle').value=settings.rotationDeg;
   $('#settings-align').checked=settings.alignEnabled;$('#settings-alignment').value=settings.alignmentDeg;
   $('#settings-connections').checked=settings.connectionsEnabled;$('#settings-capture').value=settings.connectionPixels;
@@ -871,9 +1131,33 @@ function snapSettingsDialog(){
     let next=validateSnapSettings({gridEnabled:$('#settings-grid').checked,translationMm:$('#settings-position').value,rotationDeg:$('#settings-angle').value,
       alignEnabled:$('#settings-align').checked,alignmentDeg:$('#settings-alignment').value,connectionsEnabled:$('#settings-connections').checked,connectionPixels:$('#settings-capture').value,
       keyboardMoveMm:$('#settings-keyboard-move').value,keyboardRotateDeg:$('#settings-keyboard-rotate').value});
+    let chosen;try{chosen=validatePreferences({autosaveEnabled:$('#pref-autosave').checked,autosaveDirectory:$('#pref-directory').value,
+      autosaveMinutes:$('#pref-minutes').value,autosaveKeep:$('#pref-keep').value,startup:$('#pref-startup').value,
+      startupExample:$('#pref-example').value,lengthUnit:$('#pref-length').value,massUnit:$('#pref-mass').value,
+      forceUnit:$('#pref-force').value,gridVisible:$('#pref-grid').checked,floorVisible:$('#pref-floor').checked,portsVisible:$('#pref-ports').checked,
+      theme:$('#pref-theme').value,undoLimit:$('#pref-undo').value,defaultTool:$('#pref-tool').value,fitOnOpen:$('#pref-fit').checked,
+      fitAfterDuplicate:$('#pref-fit-duplicate').checked,cameraFovDeg:$('#pref-fov').value,
+      defaultDuplicateCount:$('#pref-duplicate-count').value,defaultHumanHeightMm:$('#pref-human-height').value,
+      defaultHumanMassKg:$('#pref-human-mass').value,defaultChainLengthMm:$('#pref-chain-length').value,
+      renderWidth:$('#pref-width').value,renderHeight:$('#pref-height').value,renderLighting:$('#pref-light').value,
+      renderBackground:$('#pref-background').value,simulationSeconds:$('#pref-sim-seconds').value,
+      simulationChainLinks:$('#pref-chain-links').value,deflectionWarningMm:$('#pref-deflection-warning').value,connectionLocked:$('#pref-lock').checked,
+      connectionToleranceMm:$('#pref-tolerance').value,resizeConnectorMode:$('#pref-resize-mode').value,
+      resizeShiftMode:$('#pref-resize-shift').value,resizeAutoConnect:$('#pref-resize-auto').checked,
+      resizeCaptureMm:$('#pref-resize-capture').value,resizeCaptureDeg:$('#pref-resize-angle').value,
+      resizeKeyStepMm:$('#pref-resize-step').value,
+      resizeHandle1GrowKey:$('#pref-resize-key-1-grow').value,resizeHandle1ShrinkKey:$('#pref-resize-key-1-shrink').value,
+      resizeHandle2GrowKey:$('#pref-resize-key-2-grow').value,resizeHandle2ShrinkKey:$('#pref-resize-key-2-shrink').value});}
+    catch(error){toast(error.message,true);return;}
     if(persist)next=saveSnapDefaults(window.localStorage,next);
-    state.snapSettings=next;state.snap=next.gridEnabled;state.connectionSnap=next.connectionsEnabled;updateSnapControls();renderInspector();clearSnapPreview();closeModal();
-    toast(persist?'Snap defaults saved in this browser.':'Snap settings applied.');
+    state.snapSettings=next;state.snap=next.gridEnabled;state.connectionSnap=next.connectionsEnabled;updateSnapControls();clearSnapPreview();closeModal();
+    preferences=persist?savePreferences(window.localStorage,chosen):chosen;
+    grid.visible=preferences.gridVisible;$('#grid-button').classList.toggle('active',grid.visible);
+    floor.visible=preferences.floorVisible;camera.fov=preferences.cameraFovDeg;camera.updateProjectionMatrix();
+    state.ports=preferences.portsVisible;$('#ports-button').classList.toggle('active',state.ports);updatePorts();
+    applyViewportTheme();state.undo.splice(0,Math.max(0,state.undo.length-preferences.undoLimit));
+    updateHeader();renderInspector();applyStructuralColors();if(state.mode==='simulate'&&state.recording)showFrame(state.frame);updateResizeHandles();scheduleAutosave();
+    toast(persist?'Preferences saved in this browser.':'Preferences applied for this session.');
   }
 }
 function clearSnapPreview(){dispose(snapGhost);$('#snap-hint').classList.add('hidden');}
@@ -885,12 +1169,25 @@ function previewCopy(id,pose,ghost=false,definition=null){
   if(definition)dispose(source);return copy;
 }
 function showPosePreview(poses,definitions=[]){clearSnapPreview();for(const id of new Set([...Object.keys(poses),...definitions.map(p=>p.id)])){const definition=definitions.find(p=>p.id===id);const copy=previewCopy(id,poses[id]||definition?.pose,true,definition);if(copy)snapGhost.add(copy);}}
-function dragCandidates(group){const rect=viewport.getBoundingClientRect();return state.connectionSnap?connectionCandidates(state.scene,currentMatrices(),group,camera,rect.width,rect.height,currentSnapSettings()):[];}
+function dragCandidates(group){
+  if(!state.connectionSnap)return [];
+  const rect=viewport.getBoundingClientRect(),matrices=currentMatrices(),settings=currentSnapSettings();
+  return [...connectionCandidates(state.scene,matrices,group,camera,rect.width,rect.height,settings),
+    ...hingeCandidates(state.scene,matrices,group,camera,rect.width,rect.height,settings)]
+    .sort((a,b)=>a.score-b.score).slice(0,6);
+}
 let lastSnapTime=0;
 function showDragSnap(){
   if(!dragStart||performance.now()-lastSnapTime<65)return;lastSnapTime=performance.now();
   const matches=dragStart.matches?.length?dragStart.matches:dragCandidates(dragStart.group);clearSnapPreview();if(!matches.length){if(dragStart.alignment){$('#snap-hint').textContent=dragStart.alignment;$('#snap-hint').classList.remove('hidden');}return;}
-  const best=matches[0],side=dragStart.group.includes(best.connector)?'connector':'member';
+  const best=matches[0];
+  if(best.kind==='hinge'){
+    const marker=new THREE.Mesh(new THREE.SphereGeometry(10,12,8),new THREE.MeshBasicMaterial({color:'#48c6a0',depthTest:false}));
+    marker.position.fromArray(best.point);marker.renderOrder=150;snapGhost.add(marker);
+    $('#snap-hint').textContent=best.label+' · Release to join the bolt holes';$('#snap-hint').classList.remove('hidden');
+    return;
+  }
+  const side=dragStart.group.includes(best.connector)?'connector':'member';
   const id=side==='connector'?best.connector:best.member,group=state.scene.groups.find(g=>g.includes(id))||[id];
   const matrices=currentMatrices(),delta=alignmentDelta(state.scene,matrices,best,side),poses={};
   for(const part of group){const object=new THREE.Object3D();delta.clone().multiply(matrices.get(part)).decompose(object.position,object.quaternion,object.scale);poses[part]=getPose(object);}
@@ -970,7 +1267,7 @@ async function finishPlacement(){
     const matrix=matches.length?snappedDraftMatrix(matches[0]):partObjects.get(drag.id).matrix;
     dragStart=null;clearSnapPreview();checkpoint();positionDraftRun(run,matrix);changed();refreshDraft(run.id);
     if(matches.length){try{draftConnect(matches[0],false);}catch(e){toast(e.message,true);}}
-    else{const added=attachAlignedThroughSockets(run);if(added){changed();refreshDraft(run.id);toast(`${added} draft ${added===1?'connection':'connections'} added.`);}else status('Draft run moved');}
+    else{const added=attachAlignedThroughSockets(run);if(added){changed();refreshDraft(run.id);updatePorts();repairNewDraftConnection(run.id);toast(`${added} draft ${added===1?'connection':'connections'} added.`);}else status('Draft run moved');}
     state.placementPending=false;attachGizmo();return;
   }
   if(drag.constrained){
@@ -1000,6 +1297,16 @@ async function finishPlacement(){
   await offerConnection(matches,poses,drag.revision);
 }
 async function offerConnection(matches,poses={},revision=state.revision,recordUndo=true,movingId=null){
+  if(matches[0]?.kind==='hinge'){
+    state.placementPending=true;gizmo?.detach();status('Aligning hinge bolt holes…');
+    try{
+      const match=matches[0],move=match.moving===match.male.part?'a':'b';
+      const result=await api('connect-ports',{a:match.male,b:match.female,type:'revolute',move,poses});
+      await acceptPlacement(result,revision,recordUndo);
+      toast('Hinge joined at its bolt holes.');status('Hinge joint created');
+    }catch(e){restorePlacement();toast(e.message,true);}
+    return;
+  }
   if(draftRun(state.doc,matches[0]?.member)){
     try{
       if(Object.keys(poses).length){
@@ -1037,7 +1344,7 @@ async function offerConnection(matches,poses={},revision=state.revision,recordUn
 function connectionReview(matches,poses={},revision=state.revision,initial=null,replaceJoint=null,recordUndo=true){
   state.placementPending=true;gizmo?.detach();let result=initial,chosen=null,requestVersion=0,previewRenderer=null,previewControls=null,previewObjects=null;
   const session=++reviewVersion;
-  modal(replaceJoint?'Edit socket connection':'Align and connect',`<div class="single-field"><label for="snap-target">CONNECTION</label><select id="snap-target">${matches.map((m,i)=>`<option value="${i}">${esc(m.label||m.connector+' / '+m.port)}</option>`).join('')}</select></div><div id="snap-settings"></div><div class="single-field"><label for="snap-move">PARTS TO MOVE</label><select id="snap-move" disabled></select></div><label class="check-label"><input id="snap-lock" type="checkbox" checked>Secure the screw</label><div id="snap-preview-view" aria-label="Connection alignment preview"></div><p id="snap-review-status" role="status">Checking available movement…</p>`,[
+  modal(replaceJoint?'Edit socket connection':'Align and connect',`<div class="single-field"><label for="snap-target">CONNECTION</label><select id="snap-target">${matches.map((m,i)=>`<option value="${i}">${esc(m.label||m.connector+' / '+m.port)}</option>`).join('')}</select></div><div id="snap-settings"></div><div class="single-field"><label for="snap-move">PARTS TO MOVE</label><select id="snap-move" disabled></select></div><label class="check-label"><input id="snap-lock" type="checkbox" ${preferences.connectionLocked?'checked':''}>Secure the screw</label><div id="snap-preview-view" aria-label="Connection alignment preview"></div><p id="snap-review-status" role="status">Checking available movement…</p>`,[
     {label:'Cancel',action:()=>{closeModal();restorePlacement();}},
     ...(Object.keys(poses).length?[{label:'Place only',action:async()=>{closeModal();await placeWithoutConnection(poses,revision,recordUndo);}}]:[]),
     {label:'Force',action:()=>refresh(true)},
@@ -1048,7 +1355,7 @@ function connectionReview(matches,poses={},revision=state.revision,initial=null,
   forceButton.title='Search for a fit using the permitted screw releases and cut-length adjustments. Review the changes before connecting.';
   const forceHelp=document.createElement('p');forceHelp.id='snap-force-help';forceHelp.textContent='Force searches more hinge rotations and slides, and can adjust socket position to find a fit. Review the preview, then Connect.';
   $('#snap-review-status').after(forceHelp);forceButton.setAttribute('aria-describedby','snap-force-help');
-  const fitControls=document.createElement('div');fitControls.innerHTML=`<div class="single-field"><label for="snap-tolerance">CONNECTION TOLERANCE · mm</label><input id="snap-tolerance" type="number" min="0.01" max="20" step="any" value="${initial?.joint?.fit_tolerance_mm??2}"></div>
+  const fitControls=document.createElement('div');fitControls.innerHTML=`<div class="single-field"><label for="snap-tolerance">CONNECTION TOLERANCE · mm</label><input id="snap-tolerance" type="number" min="0.01" max="20" step="any" value="${initial?.joint?.fit_tolerance_mm??preferences.connectionToleranceMm}"></div>
     <details id="snap-force-options"><summary>Force options</summary><p>Allow a bounded adjustment of the build. Released screws are tightened again after fitting. World anchors stay fixed.</p>
     <div class="single-field"><label for="snap-unlock-count">LOOSEN & RETIGHTEN UP TO · connectors</label><input id="snap-unlock-count" type="number" min="0" max="6" step="1" value="0"></div>
     <div class="fields"><div class="field"><label for="snap-resize-count">RESIZE UP TO · pipes</label><input id="snap-resize-count" type="number" min="0" max="4" step="1" value="0"></div>
@@ -1113,7 +1420,7 @@ function connectionReview(matches,poses={},revision=state.revision,initial=null,
   }
   reviewCleanup=()=>{reviewVersion++;requestVersion++;previewControls?.dispose();if(previewObjects)dispose(previewObjects);previewRenderer?.dispose();previewRenderer=null;$('#modal').classList.remove('connection-modal');restorePlacement();};
   $('#snap-target').onchange=()=>{settings();refresh();};$('#snap-move').onchange=chooseMovement;$('#snap-lock').onchange=()=>refresh();
-  const old=state.doc.joints?.find(j=>j.id===replaceJoint);if(old){$('#snap-lock').checked=!!old.locked;$('#snap-tolerance').value=old.fit_tolerance_mm??2;}
+  const old=state.doc.joints?.find(j=>j.id===replaceJoint);if(old){$('#snap-lock').checked=!!old.locked;$('#snap-tolerance').value=old.fit_tolerance_mm??preferences.connectionToleranceMm;}
   settings();if(initial)showResult(initial);else refresh();
 }
 
@@ -1317,7 +1624,7 @@ function duplicateCountDialog(){
   const draft=!!draftRun(state.doc,state.selected);
   let cancelled=false,offsetEdited=false;
   modal('Duplicate N copies',`<form id="duplicate-form">
-    <div class="single-field"><label for="duplicate-count">Number of new copies</label><input id="duplicate-count" type="number" min="1" max="100" step="1" value="2" required aria-describedby="duplicate-count-help"></div>
+    <div class="single-field"><label for="duplicate-count">Number of new copies</label><input id="duplicate-count" type="number" min="1" max="100" step="1" value="${preferences.defaultDuplicateCount}" required aria-describedby="duplicate-count-help"></div>
     <p id="duplicate-count-help">Enter a whole number from 1 to 100.</p>
     <div class="single-field"><label for="duplicate-scope">Include in each copy</label><select id="duplicate-scope"><option value="part">Selected part only</option><option value="touching">Part and directly touching parts</option><option value="subassembly">Entire subassembly</option></select></div>
     <div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label for="duplicate-offset-${i}">STEP ${axis} · mm</label><input id="duplicate-offset-${i}" type="number" step="any" required value="${i===0?defaultDuplicateStep('part'):0}"></div>`).join('')}</div>
@@ -1387,7 +1694,7 @@ async function duplicateSelected(scope='part',count=1,cancelled=()=>false,offset
       ...(offsetMm?{offset_mm:offsetMm}:{})});
     if(cancelled()||revision!==state.revision)return false;
     state.selected=result.selected;await acceptPlacement(result,revision);
-    setTool('translate');fitView();toast(`Created ${count} ${count===1?'copy':'copies'} · ${result.parts_per_copy*count} new ${result.parts_per_copy*count===1?'part':'parts'}.`);return true;
+    setTool('translate');if(preferences.fitAfterDuplicate)fitView();toast(`Created ${count} ${count===1?'copy':'copies'} · ${result.parts_per_copy*count} new ${result.parts_per_copy*count===1?'part':'parts'}.`);return true;
   }catch(error){if(!cancelled()&&revision===state.revision){state.selected=selected;toast(error.message,true);}return false;}
   finally{state.placementPending=false;select(state.selected);$$('#duplicate-form input, #duplicate-form select').forEach(b=>b.disabled=false);}
 }
@@ -1416,11 +1723,34 @@ function duplicateDraft(selected,scope,count,cancelled,offsetMm=null){
     group.runs.push(copy);copies.push(id);
   }
   changed();for(const id of copies)refreshDraft(id);
-  setTool('translate');select(copies.at(-1));updateHeader();fitView();
+  setTool('translate');select(copies.at(-1));updateHeader();if(preferences.fitAfterDuplicate)fitView();
   toast(`Created ${count} draft ${count===1?'copy':'copies'}. Socket connections stay with the original.`);
   return true;
 }
-function renderInspector(){
+function decorateInspectorUnits(){
+  if(preferences.massUnit!=='kg'){
+    const chip=$('#inspector .chip.gray');
+    if(chip&&/^[-\d.]+ kg$/.test(chip.textContent))chip.textContent=displayValue(parseFloat(chip.textContent),'mass',preferences.massUnit)+' '+preferences.massUnit;
+    for(const row of $$('#inspector .property-row'))if(row.querySelector('span')?.textContent==='Mass'){
+      const value=row.querySelector('strong');
+      if(value&&/^[-\d.]+ kg$/.test(value.textContent))value.textContent=displayValue(parseFloat(value.textContent),'mass',preferences.massUnit)+' '+preferences.massUnit;
+    }
+  }
+  const unit=preferences.lengthUnit;
+  if(unit==='mm')return;
+  const inputs=$$('#inspector [data-pose="position_mm"], #inspector [data-part-pose="position_mm"], #inspector [data-param$="_mm"], #inspector [data-object-param$="_mm"], #draft-length');
+  for(const input of inputs){
+    input.value=displayValue(Number(input.value),'length',unit);
+    if(input.step&&input.step!=='any')input.step=Math.max(.0001,displayValue(Number(input.step),'length',unit));
+    if(input.min)input.min=displayValue(Number(input.min),'length',unit);
+    const label=input.closest('.field, .single-field')?.querySelector('label');
+    if(label){label.textContent=label.textContent.replace(/\bmm\b/i,unit);if(!label.textContent.includes(unit))label.textContent+=' · '+unit;}
+    const handler=input.onchange;
+    if(handler)input.onchange=event=>{input.value=storedValue(input.value,'length',unit);return handler.call(input,event);};
+  }
+}
+function renderInspector(){renderInspectorContents();decorateInspectorUnits();}
+function renderInspectorContents(){
   if(!state.doc)return;$('#inspector-title').textContent=({design:'PROPERTIES',check:'DESIGN CHECKS',simulate:'PHYSICS & MOTION',build:'ASSEMBLY PROCESS'})[state.mode];
   if(hoveredDraftConnection)showDraftConnection(null);
   if(state.mode==='check')return renderChecks();if(state.mode==='simulate')return renderSimulation();if(state.mode==='build')return renderBuild();
@@ -1428,11 +1758,16 @@ function renderInspector(){
   if(p.draft){
     const run=draftRun(state.doc,p.id),ends=(run.attachments||[]).filter(a=>a.end),fixed=ends.length===2;
     const owner=state.doc.draft_subassemblies.find(group=>group.runs.includes(run));
+    const sceneMirrorOwner=state.doc.draft_subassemblies.find(group=>(group.mirrors||[]).some(plane=>plane.scope==='scene'));
+    const mirrorAddOwner=sceneMirrorOwner||owner;
+    const mirrorEntries=[...(owner.mirrors||[]).map(plane=>({group:owner,plane})),
+      ...state.doc.draft_subassemblies.filter(group=>group!==owner).flatMap(group=>(group.mirrors||[])
+        .filter(plane=>plane.scope==='scene').map(plane=>({group,plane})))];
     const centeredAttachment=ends.length>0&&(owner.mirrors||[]).some(plane=>plane.run_modes?.[run.id]==='centered');
-    const mirrorPanel=`<div class="inspect-section"><h3>SYMMETRY</h3><p>Mirrors preview the other side while this structure stays in draft.</p>
-      ${(owner.mirrors||[]).map(plane=>`<div class="joint-card"><div class="joint-card-top"><strong>${esc(plane.axis.toUpperCase())} = ${esc(plane.offset_mm)} mm</strong><button class="subtle" data-mirror-remove="${esc(plane.id)}">Turn off…</button></div>
-        <div class="single-field"><label for="mirror-mode-${esc(plane.id)}">THIS PIPE ON PLANE</label><select id="mirror-mode-${esc(plane.id)}" data-mirror-mode="${esc(plane.id)}"><option value="free" ${!plane.run_modes?.[run.id]||plane.run_modes?.[run.id]==='free'?'selected':''}>Free</option><option value="centered" ${plane.run_modes?.[run.id]==='centered'?'selected':''}>Centered, perpendicular</option><option value="in_plane" ${plane.run_modes?.[run.id]==='in_plane'?'selected':''}>Centreline in plane</option></select></div></div>`).join('')}
-      <button class="inspect-action secondary" id="draft-mirror-add" ${(owner.mirrors||[]).length>=3?'disabled':''}>Add mirror plane</button></div>`;
+    const mirrorPanel=`<div class="inspect-section"><h3>SYMMETRY</h3><p>Mirrors preview the scene while it stays in draft.</p>
+      ${mirrorEntries.map(({group,plane},index)=>`<div class="joint-card"><div class="joint-card-top"><strong>${esc(plane.axis.toUpperCase())} = ${esc(plane.offset_mm)} mm${plane.scope==='scene'?' · Scene':''}</strong><button class="subtle" data-mirror-remove="${index}">Turn off…</button></div>
+        ${group===owner?`<div class="single-field"><label for="mirror-mode-${esc(plane.id)}">THIS PIPE ON PLANE</label><select id="mirror-mode-${esc(plane.id)}" data-mirror-mode="${esc(plane.id)}"><option value="free" ${!plane.run_modes?.[run.id]||plane.run_modes?.[run.id]==='free'?'selected':''}>Free</option><option value="centered" ${plane.run_modes?.[run.id]==='centered'?'selected':''}>Centered, perpendicular</option><option value="in_plane" ${plane.run_modes?.[run.id]==='in_plane'?'selected':''}>Centreline in plane</option></select></div>`:''}</div>`).join('')}
+      <button class="inspect-action secondary" id="draft-mirror-add" ${(mirrorAddOwner.mirrors||[]).length>=3?'disabled':''}>Add mirror plane</button></div>`;
     $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog)}</div><h2>${esc(p.id)}</h2><span class="chip">DRAFT RUN</span><p>Length follows the connector graph. The blue tube is a provisional preview; orange means a connection needs adjustment.</p></div>
       <div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<p>${run.attachments?.length?'Position moves the connected draft structure together.':'Move the tube by dragging it, using the gizmo, or entering its centre position.'}</p></div>
       <div class="inspect-section"><h3>WORKING SPAN</h3><div class="single-field"><label>Preview length · mm</label><input id="draft-length" type="number" min="1" step="any" value="${p.length_mm.toFixed(2)}" ${fixed?'disabled':''}></div><label class="check-label"><input id="draft-lock" type="checkbox" ${run.locked_length_mm!=null?'checked':''}>Lock cut length at ${p.length_mm.toFixed(1)} mm</label><p>${fixed?'Both ends are connected; move a fitting to change the span.':centeredAttachment?'Changing the span moves the connected fitting equally away from or toward the mirror plane.':'Drag the run or enter a rough working length. Exact cut length is calculated when you finalize.'}</p><button class="inspect-action" id="draft-connect">Connect to a socket</button></div>
@@ -1440,12 +1775,12 @@ function renderInspector(){
       <div class="inspect-section"><h3>CONNECTIONS · ${(run.attachments||[]).length}</h3>${(run.attachments||[]).map((a,i)=>`<div class="joint-card"><strong>${esc(a.connector)} / ${esc(a.port)}</strong><p>${esc(a.end||'through station')}</p><button class="subtle" data-draft-detach="${i}">Detach</button></div>`).join('')||'<p>No sockets yet. Choose Connect, then a connector.</p>'}
       ${p.conflicts.map(c=>`<div class="joint-card"><strong>${esc(c.code)}</strong><p>${esc(c.message)}</p></div>`).join('')}<button class="inspect-action secondary" id="draft-repair-selected">Repair alignment · stay in draft</button><button class="inspect-action" id="draft-finalize-selected">Finalize subassembly</button><p>Only draft pipes connected to this run will be finalized; separate structures stay in draft.</p><button class="inspect-action secondary" id="draft-delete">Delete draft run</button></div>`;
     $('#inspector [data-drop-floor]').remove();
-    $('#draft-mirror-add').onclick=()=>addDraftMirrorDialog(owner,run);
-    $$('[data-mirror-remove]').forEach(button=>button.onclick=()=>removeDraftMirrorDialog(owner,owner.mirrors.find(plane=>plane.id===button.dataset.mirrorRemove)));
+    $('#draft-mirror-add').onclick=()=>addDraftMirrorDialog(mirrorAddOwner,run);
+    $$('[data-mirror-remove]').forEach(button=>button.onclick=()=>{const entry=mirrorEntries[Number(button.dataset.mirrorRemove)];removeDraftMirrorDialog(entry.group,entry.plane);});
     $$('[data-mirror-mode]').forEach(select=>select.onchange=async()=>{
       const plane=owner.mirrors.find(item=>item.id===select.dataset.mirrorMode),mode=select.value;
       try{await mutate(()=>{plane.run_modes||={};plane.run_modes[run.id]=mode;});}
-      catch{toast('Move the pipe and its fittings onto the chosen plane before pinning it.',true);}
+      catch{/* mutate already reports the actual validation error and restores the document. */}
     });
     $$('[data-pose="position_mm"]').forEach(input=>input.onchange=()=>{
       const target=Number(input.value),axis=+input.dataset.axis;if(!Number.isFinite(target)){renderInspector();return;}
@@ -1475,7 +1810,7 @@ function renderInspector(){
   const spec=state.doc.parts.find(x=>x.id===p.id),definition=state.doc.definitions?.[p.catalog]||state.library[p.catalog]||spec?.body||{};
   const params={...definition.parameters,...spec?.parameters};const connections=state.scene.joints.filter(j=>[j.a.part,j.b.part].includes(p.id));const group=state.scene.groups.find(g=>g.includes(p.id))||[];const anchor=(state.doc.anchors||[]).find(a=>a.part===p.id);
   const draftConnections=draftRuns(state.doc).flatMap(run=>(run.attachments||[]).map((attachment,index)=>({run,attachment,index}))).filter(({attachment})=>attachment.connector===p.id);
-  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog||p.id)}</div><h2>${esc((p.label!==p.id&&p.label)||spec?.label||definition.name||p.id)}</h2><span class="chip">${esc(p.kind.toUpperCase())}</span><span class="chip gray">${p.mass_kg.toFixed(2)} kg</span></div><div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<div style="height:17px"></div>${propertyFields('ROTATION',p.pose.rotation_deg,'rotation_deg')}<label class="check-label"><input type="checkbox" id="move-body" ${state.moveBody?'checked':''}>Move the connected rigid body (${group.length})</label>${!spec?'<button class="inspect-action" id="expand-selected">Expand object to edit its parts</button>':''}</div><div class="inspect-section"><h3>DIMENSIONS & MATERIAL</h3>${Object.entries(params).filter(([,v])=>typeof v==='number').map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-param="${esc(k)}" value="${v}" step="1" min="0.01"></div>`).join('')}<div class="property-row"><span>Material</span><strong>${esc(definition.material||'Custom body')}</strong></div><div class="property-row"><span>Mass</span><strong>${p.mass_kg.toFixed(3)} kg</strong></div>${p.kind==='member'?'<button class="inspect-action" id="connect-selected">Connect to a socket ⌘</button>':''}</div><div class="inspect-section">${p.kind==='panel'?'<button class="inspect-action" id="fasten-panel">Fasten board at bolt holes</button>':''}<button class="inspect-action secondary" id="new-joint">Add joint or attachment</button><h3>CONNECTIONS <span style="float:right">${connections.length}</span></h3>${connections.map(j=>`<div class="joint-card"><div class="joint-card-top"><span>${esc(j.a.part===p.id?j.b.part:j.a.part)}</span><label><input type="checkbox" data-lock="${esc(j.id)}" ${j.locked||j.type==='fixed'?'checked':''}>Locked</label></div><p>${esc(j.a.port||j.type)} → ${esc(j.b.at_mm!=null?Number(j.b.at_mm).toFixed(1)+' mm from pipe start':j.b.end||j.b.port||j.type)} ${j.insertion_mm?' · '+Number(j.insertion_mm).toFixed(1)+' mm insertion':''}</p><button class="subtle" data-joint-edit="${esc(j.id)}" style="padding:3px 9px 3px 0">Edit joint</button><button class="subtle" data-detach="${esc(j.id)}" style="padding:3px 0">Detach</button></div>`).join('')||'<p>No connections. This part moves independently.</p>'}<label class="check-label"><input id="anchor-check" type="checkbox" ${anchor?'checked':''}>Fixed to the world</label>${anchor?`<div class="single-field"><label>MOUNTING SURFACE</label><select id="anchor-surface">${['floor','wall','ceiling','fixture'].map(s=>`<option ${anchor.surface===s?'selected':''}>${s}</option>`).join('')}</select></div>`:''}</div><div class="inspect-section"><h3>PART REFERENCE</h3><p>${esc(p.source?.geometry_status||'User defined geometry')}</p>${p.source?.assumptions?'<p>'+esc(p.source.assumptions.join('. '))+'</p>':''}${/^https?:\/\//.test(p.source?.url||'')?`<a class="results-link" target="_blank" rel="noreferrer" href="${esc(p.source.url)}">Supplier specifications ↗</a>`:''}<button class="inspect-action secondary" id="edit-part-definition">Edit part definition</button></div>`;
+  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog||p.id)}</div><h2>${esc((p.label!==p.id&&p.label)||spec?.label||definition.name||p.id)}</h2><span class="chip">${esc(p.kind.toUpperCase())}</span><span class="chip gray">${p.mass_kg.toFixed(2)} kg</span></div><div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<div style="height:17px"></div>${propertyFields('ROTATION',p.pose.rotation_deg,'rotation_deg')}<label class="check-label"><input type="checkbox" id="move-body" ${state.moveBody?'checked':''}>Move the connected rigid body (${group.length})</label>${!spec?'<button class="inspect-action" id="expand-selected">Expand object to edit its parts</button>':''}</div><div class="inspect-section"><h3>DIMENSIONS & MATERIAL</h3>${Object.entries(params).filter(([,v])=>typeof v==='number').map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-param="${esc(k)}" value="${v}" step="1" min="0.01"></div>`).join('')}<div class="property-row"><span>Material</span><strong>${esc(definition.material||'Custom body')}</strong></div><div class="property-row"><span>Mass</span><strong>${p.mass_kg.toFixed(3)} kg</strong></div>${p.kind==='member'?'<button class="inspect-action" id="connect-selected">Connect to a socket ⌘</button>':''}</div><div class="inspect-section">${p.kind==='panel'?'<button class="inspect-action" id="fasten-panel">Fasten board at bolt holes</button>':''}${p.kind==='wheel'&&spec&&!connections.some(j=>j.a.part===p.id&&j.a.port==='axle'||j.b.part===p.id&&j.b.port==='axle')?'<button class="inspect-action" id="mount-wheel">Mount wheel axle</button>':''}<button class="inspect-action secondary" id="new-joint">Add joint or attachment</button><h3>CONNECTIONS <span style="float:right">${connections.length}</span></h3>${connections.map(j=>`<div class="joint-card"><div class="joint-card-top"><span>${esc(j.a.part===p.id?j.b.part:j.a.part)}</span><label><input type="checkbox" data-lock="${esc(j.id)}" ${j.locked||j.type==='fixed'?'checked':''}>Locked</label></div><p>${esc(j.a.port||j.type)} → ${esc(j.b.at_mm!=null?Number(j.b.at_mm).toFixed(1)+' mm from pipe start':j.b.end||j.b.port||j.type)} ${j.insertion_mm?' · '+Number(j.insertion_mm).toFixed(1)+' mm insertion':''}</p><button class="subtle" data-joint-edit="${esc(j.id)}" style="padding:3px 9px 3px 0">Edit joint</button><button class="subtle" data-detach="${esc(j.id)}" style="padding:3px 0">Detach</button></div>`).join('')||'<p>No connections. This part moves independently.</p>'}<label class="check-label"><input id="anchor-check" type="checkbox" ${anchor?'checked':''}>Fixed to the world</label>${anchor?`<div class="single-field"><label>MOUNTING SURFACE</label><select id="anchor-surface">${['floor','wall','ceiling','fixture'].map(s=>`<option ${anchor.surface===s?'selected':''}>${s}</option>`).join('')}</select></div>`:''}</div><div class="inspect-section"><h3>PART REFERENCE</h3><p>${esc(p.source?.geometry_status||'User defined geometry')}</p>${p.source?.assumptions?'<p>'+esc(p.source.assumptions.join('. '))+'</p>':''}${/^https?:\/\//.test(p.source?.url||'')?`<a class="results-link" target="_blank" rel="noreferrer" href="${esc(p.source.url)}">Supplier specifications ↗</a>`:''}<button class="inspect-action secondary" id="edit-part-definition">Edit part definition</button></div>`;
   if(draftConnections.length){
     const section=$('#anchor-check').closest('.inspect-section');
     section.querySelector('h3 span').textContent=connections.length+draftConnections.length;
@@ -1489,6 +1824,7 @@ function renderInspector(){
   }
   if(p.kind==='panel'&&definition.panel_layers)$('#fasten-panel').textContent='Fasten padded panel at bolt holes';
   bindDuplicateButton();bindFloorButtons(p.id);$('#new-joint').onclick=()=>jointDialog();if($('#fasten-panel'))$('#fasten-panel').onclick=()=>fastenPanelDialog(p);
+  if($('#mount-wheel'))$('#mount-wheel').onclick=()=>wheelDialog(p.catalog,null,p.id);
   const candidate=state.scene.regroupable_objects?.find(o=>o.parts.includes(p.id));
   if(candidate){
     const section=document.createElement('div');section.className='inspect-section';
@@ -1643,7 +1979,7 @@ function renderChainControls(instance,selectedPart){
     <div class="single-field"><label for="chain-length">Length · mm</label><input id="chain-length" type="number" required min="0.001" max="${info.pitch_mm*1000}" step="any" value="${info.requested_length_mm}"></div>
     <p id="chain-length-summary">${info.count} segments × ${info.pitch_mm} mm pitch = ${info.length_mm} mm. Length rounds up to whole segments.</p>
     <div class="single-field"><label for="chain-profile">Material and section</label><select id="chain-profile">${profiles.map(([id,part])=>`<option value="${esc(id)}" ${id===info.link_catalog?'selected':''}>${esc(part.name||id)}</option>`).join('')}</select></div>
-    <p>${esc(info.profile)} · ${info.break_force_n?`illustrative break threshold ${info.break_force_n} N${info.break_strain?` at about ${(100*info.break_strain).toFixed(1)}% tensile strain`:''}`:'no break threshold'}. Segment dimensions and mass follow the selected profile. Replace illustrative strengths with verified ratings for a real design.</p>
+    <p>${esc(info.profile)} · ${info.break_force_n?`illustrative break threshold ${displayValue(info.break_force_n,'force',preferences.forceUnit)} ${preferences.forceUnit}${info.break_strain?` at about ${(100*info.break_strain).toFixed(1)}% tensile strain`:''}`:'no break threshold'}. Segment dimensions and mass follow the selected profile. Replace illustrative strengths with verified ratings for a real design.</p>
     <p>Move the line as one object or choose Pose segments. Simulation always lets its joints flex.</p>
     <div class="object-modes"><button id="chain-select-start">Select start</button><button id="chain-select-end">Select end</button></div>
     <div class="single-field"><label for="chain-link-index">Select segment</label><input id="chain-link-index" type="number" min="1" max="${info.count}" step="1" value="${Number(selectedPart.id.split('/link-').pop())||1}"></div>
@@ -1657,10 +1993,96 @@ function renderChainControls(instance,selectedPart){
   for(const end of ['start','end'])$('#chain-attach-'+end).onclick=()=>attachmentDialog(instance,state.scene.parts.find(p=>p.id===info[end+'_part']));
 }
 
+function wheelDialog(catalog='generic.wheel',position=null,wheelId=null){
+  const wheels=Object.entries(state.library).filter(([,part])=>part.kind==='wheel'&&part.ports?.axle);
+  if(!wheels.length){toast('No wheel with an axle port is available.');return;}
+  const existing=wheelId&&state.scene.parts.find(part=>part.id===wheelId);
+  const definition=state.library[catalog]||wheels[0][1];
+  const parameters=existing?{...definition.parameters,...state.doc.parts.find(part=>part.id===wheelId)?.parameters}:definition.parameters;
+  const targets=state.scene.parts.filter(part=>part.id!==wheelId&&!draftRun(state.doc,part.id));
+  if(existing&&!targets.length){toast('Add a part to mount this wheel to first.');return;}
+  const selectedTarget=targets.some(part=>part.id===state.selected)?state.selected:existing?targets[0]?.id:'';
+  const revision=state.revision;
+  const wheelOptions=wheels.map(([id,part])=>`<option value="${esc(id)}" ${id===catalog?'selected':''}>${esc(part.name||id)}</option>`).join('');
+  const targetOptions=`${existing?'':'<option value="">Leave unattached for now</option>'}${targets.map(part=>`<option value="${esc(part.id)}">${esc(part.label||part.id)} · ${esc(part.id)}</option>`).join('')}`;
+  const dimensions=existing?'':`<div class="single-field"><label for="wheel-catalog">WHEEL TYPE</label><select id="wheel-catalog">${wheelOptions}</select></div>
+    <div class="fields"><div class="field"><label for="wheel-diameter">DIAMETER · mm</label><input id="wheel-diameter" type="number" min="0.01" step="any" value="${esc(parameters.diameter_mm)}"></div>
+    <div class="field"><label for="wheel-width">WIDTH · mm</label><input id="wheel-width" type="number" min="0.01" step="any" value="${esc(parameters.width_mm)}"></div>
+    <div class="field"><label for="wheel-mass">MASS · kg</label><input id="wheel-mass" type="number" min="0.001" step="any" value="${esc(parameters.mass_kg)}"></div></div>`;
+  modal(existing?'Mount wheel axle':'Add a wheel',`${dimensions}<div class="single-field"><label for="wheel-target">MOUNT TO</label><select id="wheel-target">${targetOptions}</select></div>
+    <div id="wheel-mount-fields"><div class="single-field"><label for="wheel-location">AXLE LOCATION</label><select id="wheel-location"></select></div>
+    <div id="wheel-station-fields" class="fields"><div class="field"><label for="wheel-station">DISTANCE FROM PIPE START · mm</label><input id="wheel-station" type="number" min="0" step="any"></div>
+    <div class="field"><label for="wheel-side">SIDE</label><select id="wheel-side"><option value="y">+Y</option><option value="-y">−Y</option><option value="x">+X</option><option value="-x">−X</option></select></div>
+    <div class="field"><label for="wheel-clearance">AXLE CLEARANCE · mm</label><input id="wheel-clearance" type="number" min="0" step="any" value="10"></div></div>
+    <div id="wheel-custom-fields"><p>Coordinates are relative to the chosen part. The wheel centre is placed at this axle point.</p>
+      <div class="fields">${['x','y','z'].map(axis=>`<div class="field"><label for="wheel-local-${axis}">${axis.toUpperCase()} · mm</label><input id="wheel-local-${axis}" type="number" step="any" value="0"></div>`).join('')}</div>
+      <div class="single-field"><label for="wheel-axis">AXLE DIRECTION</label><select id="wheel-axis"><option value="0,1,0">+Y</option><option value="0,-1,0">−Y</option><option value="1,0,0">+X</option><option value="-1,0,0">−X</option><option value="0,0,1">+Z</option><option value="0,0,-1">−Z</option></select></div></div>
+    <p id="wheel-mount-summary" role="status"></p></div><p>The wheel spins on a revolute axle joint. Specify the real axle, bearing and retaining hardware before fabrication.</p>`,[
+    {label:'Cancel',action:closeModal},
+    {label:existing?'Mount wheel':'Add wheel',primary:true,action:async()=>{
+      const positive=(id,label)=>{const value=Number($(id).value);if(!Number.isFinite(value)||value<=0)throw new Error(`${label} must be positive.`);return value;};
+      const wheelWidth=existing?parameters.width_mm:positive('#wheel-width','Wheel width');
+      const targetId=$('#wheel-target').value;
+      let target=null;
+      if(targetId){
+        const part=targets.find(item=>item.id===targetId),mode=$('#wheel-location').value;
+        if(mode==='port')target={part:targetId,port:$('#wheel-port').value};
+        else if(mode==='station'){
+          const station=Number($('#wheel-station').value),clearance=Number($('#wheel-clearance').value);
+          if(!Number.isFinite(station)||station<0||station>part.length_mm)throw new Error('Choose a point along the pipe.');
+          if(!Number.isFinite(clearance)||clearance<0)throw new Error('Axle clearance cannot be negative.');
+          const side=$('#wheel-side').value,sign=side.startsWith('-')?-1:1,index=side.endsWith('x')?0:1;
+          const section=part.section||{},radius=(section.diameter_mm||Math.max(section.width_mm||0,section.height_mm||0))/2;
+          const offset=radius+wheelWidth/2+clearance,local=[0,0,station-part.length_mm/2],axis=[0,0,0];
+          local[index]=sign*offset;axis[index]=sign;
+          target={part:targetId,frame:{position_mm:local,axis}};
+        }else{
+          const coordinates=['x','y','z'].map(axis=>Number($(`#wheel-local-${axis}`).value));
+          if(!coordinates.every(Number.isFinite))throw new Error('Enter finite axle coordinates.');
+          target={part:targetId,frame:{position_mm:coordinates,axis:$('#wheel-axis').value.split(',').map(Number)}};
+        }
+      }else if(existing)throw new Error('Choose a part to mount the wheel to.');
+      const payload=existing?{wheel:wheelId,target}:{catalog:$('#wheel-catalog').value,
+        parameters:{diameter_mm:positive('#wheel-diameter','Wheel diameter'),width_mm:wheelWidth,mass_kg:positive('#wheel-mass','Wheel mass')},target,
+        ...(position?{pose:{position_mm:[position[0],position[1],position[2]+positive('#wheel-diameter','Wheel diameter')/2]}}:{})};
+      const result=await api(existing?'mount-wheel':'add-wheel',payload);
+      closeModal();state.selected=result.wheel;await acceptPlacement(result,revision);
+      setMode('design');setTool('translate');toast(target?'Wheel mounted on a free-spinning axle.':'Wheel added. Select it to mount its axle later.');
+    }}]);
+  $('#wheel-target').value=selectedTarget||'';
+  function refreshLocation(){
+    const part=targets.find(item=>item.id===$('#wheel-target').value),fields=$('#wheel-mount-fields');
+    fields.classList.toggle('hidden',!part);if(!part)return;
+    const ports=Object.entries(part.ports||{}).filter(([name,port])=>port.type!=='socket'&&!socketOccupied(state.scene,part.id,name));
+    $('#wheel-location').innerHTML=`${part.kind==='member'?'<option value="station">Along pipe or profile</option>':''}${ports.length?'<option value="port">Attachment port</option>':''}<option value="custom">Local point</option>`;
+    $('#wheel-station').value=part.kind==='member'?part.length_mm/2:0;
+    $('#wheel-station').max=part.length_mm||0;
+    $('#wheel-port-options')?.remove();
+    const holder=document.createElement('div');holder.id='wheel-port-options';holder.className='single-field';
+    holder.innerHTML=`<label for="wheel-port">PORT</label><select id="wheel-port">${ports.map(([name,port])=>`<option value="${esc(name)}">${esc(name)} · ${esc(port.type)}</option>`).join('')}</select>`;
+    $('#wheel-location').parentElement.after(holder);
+    $('#wheel-location').onchange=refreshMode;refreshMode();
+  }
+  function refreshMode(){
+    const mode=$('#wheel-location').value;
+    $('#wheel-station-fields').classList.toggle('hidden',mode!=='station');
+    $('#wheel-port-options').classList.toggle('hidden',mode!=='port');
+    $('#wheel-custom-fields').classList.toggle('hidden',mode!=='custom');
+    $('#wheel-mount-summary').textContent=mode==='station'?'The axle sits beside the chosen pipe station. Adjust the clearance for your mounting hardware.':
+      mode==='port'?'The wheel axle will align exactly with the selected port.':'The wheel axle will align with this point and direction on the part.';
+  }
+  $('#wheel-target').onchange=refreshLocation;
+  if($('#wheel-catalog'))$('#wheel-catalog').onchange=()=>{
+    const next=state.library[$('#wheel-catalog').value].parameters;
+    for(const [field,key] of [['#wheel-diameter','diameter_mm'],['#wheel-width','width_mm'],['#wheel-mass','mass_kg']])$(field).value=next[key];
+  };
+  refreshLocation();
+}
+
 function chainDialog(catalog='generic.chain-link',position=null){
   if(state.busy||state.placementPending)return;
   const links=Object.entries(state.library).filter(([,p])=>p.kind==='chain'&&p.ports?.a&&p.ports?.b);
-  modal('Add a flexible line',`<div class="single-field"><label for="chain-catalog">MATERIAL AND SECTION</label><select id="chain-catalog">${links.map(([id,p])=>`<option value="${esc(id)}" ${id===catalog?'selected':''}>${esc(p.name||id)}</option>`).join('')}</select></div><div class="single-field"><label for="new-chain-length">Length · mm</label><input id="new-chain-length" type="number" required min="0.001" step="any" value="1000"></div><p id="new-chain-summary" role="status"></p><p>Short segments flex at ball joints. Geometry, mass and collision size follow the selected profile; example break thresholds are illustrative.</p>`,[
+  modal('Add a flexible line',`<div class="single-field"><label for="chain-catalog">MATERIAL AND SECTION</label><select id="chain-catalog">${links.map(([id,p])=>`<option value="${esc(id)}" ${id===catalog?'selected':''}>${esc(p.name||id)}</option>`).join('')}</select></div><div class="single-field"><label for="new-chain-length">Length · mm</label><input id="new-chain-length" type="number" required min="0.001" step="any" value="${preferences.defaultChainLengthMm}"></div><p id="new-chain-summary" role="status"></p><p>Short segments flex at ball joints. Geometry, mass and collision size follow the selected profile; example break thresholds are illustrative.</p>`,[
     {label:'Cancel',action:closeModal},{label:'Add line',primary:true,action:async()=>{
       const input=$('#new-chain-length');if(!input.reportValidity())return;
       const parameters={length_mm:+input.value,link_catalog:$('#chain-catalog').value};
@@ -1669,7 +2091,8 @@ function chainDialog(catalog='generic.chain-link',position=null){
       await mutate(()=>{state.doc.objects||=[];state.doc.objects.push({id,template:'chain',parameters,pose:{position_mm:position?[position[0],position[1],position[2]+length+20]:[0,-600,length+100]}});state.selected=id+'/link-1';});
       closeModal();setMode('design');setTool('translate');fitView();toast('Added '+id+'. Set its length in Properties or choose Pose segments.');
     }}]);
-  function refresh(){const profile=state.library[$('#chain-catalog').value],pitch=chainPitch($('#chain-catalog').value),length=+$('#new-chain-length').value,count=Math.max(1,Math.ceil(length/pitch));$('#new-chain-length').max=pitch*1000;$('#new-chain-summary').textContent=`${count} segments × ${pitch} mm pitch = ${count*pitch} mm. ${profile.break_force_n?`Illustrative break threshold: ${profile.break_force_n} N.`:'No break threshold specified.'}`;}
+  function refresh(){const profile=state.library[$('#chain-catalog').value],pitch=chainPitch($('#chain-catalog').value),length=+$('#new-chain-length').value,count=Math.max(1,Math.ceil(length/pitch));$('#new-chain-length').max=pitch*1000;$('#new-chain-summary').textContent=`${count} segments × ${pitch} mm pitch = ${count*pitch} mm. ${profile.break_force_n?`Illustrative break threshold: ${displayValue(profile.break_force_n,'force',preferences.forceUnit)} ${preferences.forceUnit}.`:'No break threshold specified.'}`;}
+  $('#new-chain-length').value=Math.min(preferences.defaultChainLengthMm,chainPitch($('#chain-catalog').value)*1000);
   $('#new-chain-length').oninput=refresh;$('#chain-catalog').onchange=refresh;refresh();
 }
 function chainPitch(catalog){const ports=state.library[catalog].ports;return Math.hypot(...ports.a.position_mm.map((v,i)=>v-ports.b.position_mm[i]));}
@@ -1694,16 +2117,17 @@ function renderObjectInspector(instance,selectedPart){
       <option value="" ${current?'':'selected'}>Free pose</option>
       ${current?`<option value="current" selected>Current line · ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm</option>`:''}
       ${planes.map(({group,plane},index)=>`<option value="${index}">${esc(group.id)} · ${esc(plane.axis.toUpperCase())} = ${esc(plane.offset_mm)} mm</option>`).join('')}
-    </select></div><p>${current?`Centerline fixed at ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm and ${current.axis==='x'?'Y':'X'} = ${esc(current.line_offset_mm)} mm. The whole person moves vertically; arms and legs pose in mirrored pairs, while the back and head flex within the plane.`:
+    </select></div><p>${current?`Centerline fixed at ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm and ${current.axis==='x'?'Y':'X'} = ${esc(current.line_offset_mm)} mm. The whole person moves vertically and can rotate while its left-right axis stays perpendicular to the mirror; arms and legs pose in mirrored pairs.`:
       'Choose a vertical draft mirror. The current position sets the centerline; mirrored arms and legs will pose together.'}</p>
-      ${planes.length?'':'<p>Add an X or Y draft mirror plane to use this constraint.</p>'}`;
+      ${planes.length?'':'<p>Add an X or Y draft mirror plane to use this constraint.</p>'}
+      ${state.mirrorPoseError?.startsWith(instance.id+':')?`<p class="issue error">${esc(state.mirrorPoseError)}</p>`:''}`;
     $('#inspector').appendChild(section);
     $('#human-mirror-line').onchange=e=>{
       if(e.target.value==='current')return;
       const choice=planes[Number(e.target.value)];
       objectEdit('human-symmetry',{object:instance.id,...(e.target.value===''?{}:{group:choice.group.id,plane:choice.plane.id})});
     };
-    if(current)$$('[data-pose]').forEach(input=>{if(input.dataset.pose==='rotation_deg'||+input.dataset.axis<2)input.disabled=true;});
+    if(current)$$('[data-pose="position_mm"]').forEach(input=>{if(+input.dataset.axis<2)input.disabled=true;});
   }
   if(chain){
     $('#inspector [data-object-mode="whole"]').textContent='Move whole line';
@@ -1749,7 +2173,7 @@ function renderObjectInspector(instance,selectedPart){
 }
 
 function renderChecks(){const result=state.checks,analysis=state.analysis;$('#inspector').innerHTML=`<div class="inspect-section"><div class="report-head"><div class="report-symbol ${result&&!result.valid?'error':''}">${result?(result.valid?'✓':'!'):'◇'}</div><div><h2>${result?(result.valid?'Geometry checked':'Review connections'):'Check the design'}</h2><div class="subtle">Sockets · alignment · collisions</div></div></div><button class="inspect-action" data-run="validate">${state.busy?'Working…':'Run validation'}</button>${result?`<div class="metric-cards"><div class="metric"><strong>${result.summary.errors}</strong><span>ERRORS</span></div><div class="metric"><strong>${result.summary.warnings}</strong><span>ADVISORIES</span></div></div>`:''}</div><div class="inspect-section"><h3>STRUCTURAL RESPONSE</h3><p>3D beam analysis of the current load case. Review the material and connector assumptions with the results.</p><button class="inspect-action secondary" data-run="analyse">Calculate stress & deflection</button>${analysis?`<p><b>${esc(analysis.status)}</b></p>${analysis.message?'<p>'+esc(analysis.message)+'</p>':''}${(analysis.members||[]).map(m=>`<button class="issue" data-result-part="${esc(m.part)}"><div class="issue-code">${esc(m.part)}</div><div class="property-row"><span>Peak stress</span><strong>${m.max_von_mises_mpa.toFixed(2)} MPa</strong></div><div class="property-row"><span>Deflection</span><strong>${m.max_displacement_mm.toFixed(3)} mm</strong></div></button>`).join('')}<p>Model results · unverified strength data remains unknown.</p>`:''}</div>${result?'<div class="inspect-section"><h3>FINDINGS</h3>'+result.issues.map((i,index)=>`<button class="issue ${i.severity}" data-result-finding="${index}" data-result-part="${esc(i.parts?.[0]||'')}"><div class="issue-code">${esc(i.code)}</div><p>${esc(i.message)}</p></button>`).join('')+'</div>':''}`;bindOperations();}
-function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label>DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="1" value="${state.simulationOptions?.duration||Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||3))}"></div><div class="single-field"><label for="sim-chain-links">Chain links per rigid body</label><input id="sim-chain-links" type="number" min="1" max="1000" step="1" value="${state.simulationOptions?.chain_links_per_body||1}" ${state.busy?'disabled':''}></div><p>1 keeps full flexibility. Higher values make groups of links rigid for faster simulation. Attachment links stay flexible.</p><button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${r?`<div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(c.id)}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part||e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$('#fit-human').onclick=fitDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;updateSimulationProgress();}
+function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label>DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="1" value="${state.simulationOptions?.duration||Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||preferences.simulationSeconds))}"></div><div class="single-field"><label for="sim-chain-links">Chain links per rigid body</label><input id="sim-chain-links" type="number" min="1" max="1000" step="1" value="${state.simulationOptions?.chain_links_per_body||preferences.simulationChainLinks}" ${state.busy?'disabled':''}></div><p>1 keeps full flexibility. Higher values make groups of links rigid for faster simulation. Attachment links stay flexible.</p><button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${r?`<div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(c.id)}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part||e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$('#fit-human').onclick=fitDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;updateSimulationProgress();}
 function renderBuild(){const p=state.plan;$('#inspector').innerHTML=`<div class="inspect-section"><h2>A plan you can build.</h2><p>Find an insertion order with clear paths and stable intermediate structures.</p><button class="inspect-action" data-run="plan">${state.busy?'Checking insertion paths…':'Find assembly order'}</button>${p?`<div class="report-head" style="margin-top:17px"><div class="report-symbol ${p.status==='buildable'?'':'warn'}">${p.status==='buildable'?'✓':'?'}</div><div><b>${esc(p.status)}</b><div class="subtle">${p.steps.length} assembly steps</div></div></div>${p.reason?'<p>'+esc(p.reason)+'</p>':''}`:''}</div>${p?.status==='buildable'?`<div class="inspect-section"><h3>STEP ${state.step+1} OF ${p.steps.length}</h3><p>${esc(p.steps[state.step].instruction)}</p>${p.steps[state.step].fasten.map(f=>'<p>↳ '+esc(f.action)+'</p>').join('')}<button class="inspect-action" id="export-build">Export illustrated build book ↗</button></div><div class="inspect-section"><h3>ASSEMBLY ORDER</h3>${p.steps.map((s,i)=>`<button class="build-step ${i===state.step?'active':''}" data-step="${i}"><span>${String(s.number).padStart(2,'0')}</span>${esc(s.part)}</button>`).join('')}</div>`:''}`;bindOperations();$$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));if($('#export-build'))$('#export-build').onclick=()=>exportBuild();}
 function findingReference(button){
   const finding=state.checks?.issues[Number(button.dataset.resultFinding)]||{};
@@ -1837,18 +2261,22 @@ async function generateSimulation(options){
     throw error;
   }
 }
-async function run(operation){if(state.busy)return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value||3),chain_links_per_body:Number($('#sim-chain-links')?.value||1)}:{};if(operation==='simulate'){state.simulationError=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
+async function run(operation){if(state.busy)return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value||3),chain_links_per_body:Number($('#sim-chain-links')?.value||1),deflection_warning_mm:preferences.deflectionWarningMm}:{};if(operation==='simulate'){state.simulationError=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
   try{const result=operation==='simulate'?await generateSimulation(extra):await api(operation,extra);if(!result)return;if(revision!==state.revision){toast('The design changed during the calculation. Run it again for the current design.');return;}state.doc.results||={};state.doc.results[operation]=result;state.dirty=true;
     if(operation==='validate'){state.checks=result;status(result.valid?'Geometry checks passed':'Design has '+result.summary.errors+' errors');}
-    if(operation==='analyse'){state.analysis=result;status('Structural analysis: '+result.status);}
-    if(operation==='simulate'){state.recording=result;state.frame=0;$('#time-slider').max=result.frames.length-1;$('#timeline-mid').textContent=(result.duration_s/2).toFixed(1)+' s';$('#timeline-end').textContent=result.duration_s.toFixed(1)+' s';state.playing=true;status('Simulation recorded · '+result.frames.length+' frames');}
+    if(operation==='analyse'){state.analysis=result;status('Structural analysis: '+result.status);applyStructuralColors();}
+    if(operation==='simulate'){state.recording=result;state.frame=0;installBeamPlayback(result);$('#time-slider').max=result.frames.length-1;$('#timeline-mid').textContent=(result.duration_s/2).toFixed(1)+' s';$('#timeline-end').textContent=result.duration_s.toFixed(1)+' s';state.playing=true;showFrame(0);status('Simulation recorded · '+result.frames.length+' frames');}
     if(operation==='plan'){state.plan=result;state.doc.build_plan=result;state.step=0;status('Assembly search: '+result.status);if(result.status==='buildable')showStep(0);}
     if(operation==='fit')jsonDialog('Human fit results',result);updateHeader();
   }catch(e){if(operation==='simulate')state.simulationError=e.message;toast(e.message,true);status('Operation needs attention');}finally{state.busy=false;state.simulation=null;renderInspector();}}
-function setMode(mode){state.mode=mode;$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-selected',b.dataset.mode===mode?'true':'false');});if(mode!=='design'){gizmo?.detach();if(state.tool==='connect')setTool('select');}else attachGizmo();ports.visible=mode==='design';for(const obj of partObjects.values())obj.visible=true;if(mode==='build'&&state.plan?.status==='buildable')showStep(state.step);renderInspector();}
+function setMode(mode){state.mode=mode;if(mode!=='design'&&resizeDrag)clearResizeDrag();if(mode!=='design'&&renderer)renderer.domElement.style.cursor='';$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-selected',b.dataset.mode===mode?'true':'false');});if(mode!=='design'){gizmo?.detach();if(state.tool==='connect')setTool('select');}else attachGizmo();ports.visible=mode==='design';for(const obj of partObjects.values())obj.visible=true;for(const obj of beamObjects.values())obj.visible=false;if(mode==='simulate'&&state.recording)showFrame(state.frame);if(mode==='build'&&state.plan?.status==='buildable')showStep(state.step);applyStructuralColors();renderInspector();updateResizeHandles();}
 function showStep(index){if(state.plan?.status!=='buildable')return;state.step=index;const step=state.plan.steps[index];state.selected=step.part;for(const [id,object] of partObjects)object.visible=step.installed_parts.includes(id);highlightSelection();ports.visible=false;renderBuild();}
-function showFrame(index){const frame=state.recording?.frames[index];if(!frame)return;state.frame=index;for(const [id,pose] of Object.entries(frame.parts)){if(partObjects.has(id))setPose(partObjects.get(id),pose);}$('#time-slider').value=index;$('#time-label').textContent=frame.time_s.toFixed(2)+' s';ports.visible=false;}
-async function restore(){state.playing=false;$('#play-button').textContent='▶';for(const p of state.scene.parts)setPose(partObjects.get(p.id),p.pose);for(const o of partObjects.values())o.visible=true;state.frame=0;$('#time-slider').value=0;$('#time-label').textContent='0.00 s';ports.visible=true;updatePorts();}
+function statusColor(deflection,yielded){return yielded?'#e45b55':deflection>preferences.deflectionWarningMm?'#efb849':null;}
+function tintPart(group,color){if(!group)return;group.traverse(object=>{if(!object.isMesh||!object.material?.color)return;object.userData.baseColor??=object.material.color.clone();object.material.color.copy(color?new THREE.Color(color):object.userData.baseColor);});}
+function applyStructuralColors(){for(const p of state.scene?.parts||[])tintPart(partObjects.get(p.id),null);if(state.mode!=='check')return;for(const member of state.analysis?.members||[]){const unsafe=(member.yield_utilisation||0)>=1||(member.buckling_utilisation||0)>=1; tintPart(partObjects.get(member.part),statusColor(member.max_displacement_mm,unsafe));}}
+function installBeamPlayback(recording){for(const [id,group] of beamObjects){objects.remove(group);dispose(group);partObjects.delete(id);}beamObjects.clear();const owner=new Map();for(const [source,model] of Object.entries(recording.beam_model||{}))for(const id of model.segments)owner.set(id,source);for(const part of recording.beam_elements||[]){const group=new THREE.Group();group.name=part.id;group.userData.part=owner.get(part.id);for(const shape of part.geometry)group.add(meshShape(shape,part.color,part.kind));setPose(group,part.pose);group.visible=false;objects.add(group);beamObjects.set(part.id,group);partObjects.set(part.id,group);}}
+function showFrame(index){const frame=state.recording?.frames[index];if(!frame)return;state.frame=index;for(const [id,pose] of Object.entries(frame.parts)){if(partObjects.has(id))setPose(partObjects.get(id),pose);}for(const [source,model] of Object.entries(state.recording.beam_model||{})){const status=frame.beam_status?.[source],color=statusColor(status?.deflection_mm||0,status?.yielded||status?.possible_fracture);const original=partObjects.get(source);if(original)original.visible=false;for(const id of model.segments){const segment=beamObjects.get(id);if(segment){segment.visible=true;tintPart(segment,color);}}}$('#time-slider').value=index;$('#time-label').textContent=frame.time_s.toFixed(2)+' s';ports.visible=false;}
+async function restore(){state.playing=false;$('#play-button').textContent='▶';for(const p of state.scene.parts)setPose(partObjects.get(p.id),p.pose);for(const o of partObjects.values())o.visible=true;for(const o of beamObjects.values())o.visible=false;state.frame=0;$('#time-slider').value=0;$('#time-label').textContent='0.00 s';ports.visible=true;applyStructuralColors();updatePorts();}
 
 function modal(title,content,actions=[]){$('#modal-title').textContent=title;$('#modal-content').innerHTML=content;$('#modal-actions').replaceChildren();for(const a of actions){const b=document.createElement('button');b.textContent=a.label;b.className='button'+(a.primary?' primary':'');b.onclick=async()=>{b.disabled=true;try{await a.action();}catch(e){toast(e.message,true);}finally{b.disabled=false;}};$('#modal-actions').appendChild(b);}$('#modal').showModal();}
 function closeModal(){$('#modal').close();const cleanup=reviewCleanup;reviewCleanup=null;cleanup?.();}
@@ -1861,12 +2289,13 @@ function activateDesign(data){
   closeModal();
   state.doc=data.document;state.path=data.path;state.library=data.library;
   state.selected=null;state.connectionSource=null;state.undo=[];state.redo=[];objectModes.clear();openObjects.clear();
-  state.dirty=!!data.imported;state.revision++;state.playing=false;state.frame=0;state.step=0;
+  state.dirty=!!(data.imported||data.autosaved||data.auto_symmetry);state.mirrorPoseError=data.mirror_pose_error||null;state.revision++;state.playing=false;state.frame=0;state.step=0;
   state.checks=null;state.analysis=null;state.recording=null;state.plan=null;state.simulationOptions=null;state.simulationError=null;
   $('#time-slider').value=0;$('#time-slider').max=100;$('#time-label').textContent='0.00 s';
   $('#timeline-mid').textContent='1.5 s';$('#timeline-end').textContent='3 s';$('#play-button').textContent='▶';
-  clearSnapPreview();setTool('select');adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();setMode('design');updateHeader();fitView();
-  status(data.imported?'Opened file · Save to keep it in your workspace':'Loaded '+data.path);
+  clearSnapPreview();setTool(preferences.defaultTool);adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();setMode('design');updateHeader();if(preferences.fitOnOpen)fitView();scheduleAutosave();
+  status(data.autosaved?'Recovered autosave · Save to keep this version':data.imported?'Opened file · Save to keep it in your workspace':'Loaded '+data.path);
+  if(state.mirrorPoseError)toast(state.mirrorPoseError,true);
 }
 function confirmDesignOpen(data){
   if(!state.dirty){activateDesign(data);return;}
@@ -1898,10 +2327,16 @@ function openWorkspaceDesign(path){
     if(!response.ok)throw new Error(data.error||'Could not read the design');return data;
   },path);
 }
+function openAutosave(path){
+  return openDesign(async()=>{
+    const response=await fetch('/api/autosave?directory='+encodeURIComponent(preferences.autosaveDirectory)+'&path='+encodeURIComponent(path));
+    const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not read the autosave');return data;
+  },path);
+}
 async function loadDialog(){
   if(!canOpenDesign())return;
   closeModal();
-  modal('Load design','<button id="open-file-button" class="option-row">Open file…<small>Choose a YAML or JSON design from your computer · Ctrl+O</small></button><p>You can also drop a design file anywhere in the editor.</p><div class="single-field"><label for="design-search">SAVED IN DESIGNS/</label><input id="design-search" type="search" placeholder="Find a saved design" disabled></div><div id="saved-design-list" aria-live="polite"><p>Loading saved designs…</p></div>',[{label:'Close',action:closeModal}]);
+  modal('Load design','<button id="open-file-button" class="option-row">Open file…<small>Choose a YAML or JSON design from your computer · Ctrl+O</small></button><p>You can also drop a design file anywhere in the editor.</p><div class="single-field"><label for="design-search">SAVED IN DESIGNS/</label><input id="design-search" type="search" placeholder="Find a saved design" disabled></div><div id="saved-design-list" aria-live="polite"><p>Loading saved designs…</p></div><h3>RECOVERY COPIES</h3><div id="autosave-list" aria-live="polite"><p>Loading autosaves…</p></div>',[{label:'Close',action:closeModal}]);
   $('#open-file-button').onclick=chooseDesignFile;
   const list=$('#saved-design-list'),search=$('#design-search');
   try{
@@ -1916,6 +2351,15 @@ async function loadDialog(){
     };
     search.disabled=false;search.oninput=render;render();
   }catch(error){if(list.isConnected){list.innerHTML='<p class="file-error" role="alert"></p>';list.firstChild.textContent=error.message;}}
+  const recover=$('#autosave-list');
+  try{
+    const response=await fetch('/api/autosaves?directory='+encodeURIComponent(preferences.autosaveDirectory));
+    if(!recover.isConnected||!$('#modal').open)return;
+    if(!response.ok)throw new Error('Could not list autosaves');
+    const records=(await response.json()).autosaves;
+    recover.innerHTML=records.length?records.map(record=>`<button class="option-row" data-autosave="${esc(record.path)}">${esc(record.source_path)}<small>${esc(new Date(record.saved_at*1000).toLocaleString())} · ${esc(record.path)}</small></button>`).join(''):'<p>No recovery copies in the configured folder.</p>';
+    recover.querySelectorAll('[data-autosave]').forEach(button=>button.onclick=()=>openAutosave(button.dataset.autosave));
+  }catch(error){if(recover.isConnected)recover.textContent=error.message;}
 }
 function chooseDesignFile(){if(canOpenDesign())$('#design-file').click();}
 function openDesignFiles(files){
@@ -1965,7 +2409,8 @@ function saveDialog(afterSave=null){
       try{
         const saved=await api('save',{path,source_path:state.path});
         if(state.revision!==revision||state.doc!==document||state.path!==source){toast('Saved '+saved.saved+'. Your newer edits are still open.');return;}
-        state.doc=saved.document;state.path=saved.saved;state.dirty=false;updateHeader();
+        state.doc=saved.document;state.path=saved.saved;state.dirty=false;clearTimeout(autosaveTimer);updateHeader();
+        try{window.localStorage.setItem('pipesim.last-saved-path.v1',saved.saved);}catch{}
         toast('Saved '+saved.saved);
         if(error.isConnected&&$('#modal').open){closeModal();await afterSave?.();}
       }catch(e){error.textContent=e.message;}
@@ -1975,10 +2420,10 @@ function saveDialog(afterSave=null){
 }
 function exportDialog(){modal('Export your creation','<button class="option-row" id="export-book-option">Illustrated build book<small>Printable instructions, bill of materials and a stock cutting plan</small></button><button class="option-row" id="export-image-option">Render an image<small>PNG from the current camera, with configurable lighting</small></button><button class="option-row" id="export-file-option">Download design file<small>Portable JSON with parts, constraints and recorded results</small></button>',[{label:'Close',action:closeModal}]);$('#export-book-option').onclick=()=>{closeModal();exportBuild();};$('#export-image-option').onclick=()=>{closeModal();renderDialog();};$('#export-file-option').onclick=()=>{const blob=new Blob([JSON.stringify(state.doc,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=(state.doc.name||'design').replace(/[^a-z0-9-]/gi,'-')+'.pipe.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};}
 async function exportBuild(){if(state.busy)return;state.busy=true;status('Generating the illustrated build book…');try{const result=await api('export',{engineering:true});modal('Build book ready',`<p>${result.steps} illustrated assembly steps, ${result.stock_bars} stock lengths, plus the parts list and engineering results.</p><a class="button primary" href="${esc(result.url)}" target="_blank">Open printable instructions ↗</a><p>Saved in ${esc(result.directory)}</p>`,[{label:'Done',action:closeModal}]);status('Build instructions exported');}catch(e){toast(e.message,true);}finally{state.busy=false;}}
-function renderDialog(){modal('Render an image','<div class="fields"><div class="field"><label>WIDTH px</label><input id="render-width" value="1600" type="number"></div><div class="field"><label>HEIGHT px</label><input id="render-height" value="1000" type="number"></div></div><div class="single-field"><label>LIGHTING</label><select id="render-light"><option>studio</option><option>technical</option><option>flat</option></select></div><div class="single-field"><label>BACKGROUND</label><select id="render-bg"><option value="#edf1f3">Soft grey</option><option value="#ffffff">White</option><option value="transparent">Transparent</option></select></div>',[{label:'Cancel',action:closeModal},{label:'Render PNG',primary:true,action:async()=>{status('Rendering image…');const result=await api('render',{options:{width:+$('#render-width').value,height:+$('#render-height').value,eye:camera.position.toArray(),target:orbit.target.toArray(),lighting:$('#render-light').value,background:$('#render-bg').value}});closeModal();modal('Image ready',`<a href="${esc(result.url)}" target="_blank"><img src="${esc(result.url)}" style="width:100%" alt="Rendered pipe creation"></a><p>Open the image to save it at full resolution.</p>`,[{label:'Done',action:closeModal}]);status('Image exported');}}]);}
+function renderDialog(){modal('Render an image',`<div class="fields"><div class="field"><label>WIDTH px</label><input id="render-width" value="${preferences.renderWidth}" type="number"></div><div class="field"><label>HEIGHT px</label><input id="render-height" value="${preferences.renderHeight}" type="number"></div></div><div class="single-field"><label>LIGHTING</label><select id="render-light"><option>studio</option><option>technical</option><option>flat</option></select></div><div class="single-field"><label>BACKGROUND</label><select id="render-bg"><option value="#edf1f3">Soft grey</option><option value="#ffffff">White</option><option value="transparent">Transparent</option></select></div>`,[{label:'Cancel',action:closeModal},{label:'Render PNG',primary:true,action:async()=>{status('Rendering image…');const result=await api('render',{options:{width:+$('#render-width').value,height:+$('#render-height').value,eye:camera.position.toArray(),target:orbit.target.toArray(),lighting:$('#render-light').value,background:$('#render-bg').value}});closeModal();modal('Image ready',`<a href="${esc(result.url)}" target="_blank"><img src="${esc(result.url)}" style="width:100%" alt="Rendered pipe creation"></a><p>Open the image to save it at full resolution.</p>`,[{label:'Done',action:closeModal}]);status('Image exported');}}]);$('#render-light').value=preferences.renderLighting;$('#render-bg').value=preferences.renderBackground;}
 function humanDialog(){
   modal('Add a human model',`<p>A configurable 19-part mannequin with articulated spine, neck, shoulders, arms, hands, hips, knees and ankles. Mass and stature estimate body thickness for fit checks.</p>
-    <div class="fields"><div class="field"><label for="human-height">STATURE mm</label><input id="human-height" value="1750" type="number"></div><div class="field"><label for="human-mass">MASS kg</label><input id="human-mass" value="75" type="number"></div></div>
+    <div class="fields"><div class="field"><label for="human-height">STATURE mm</label><input id="human-height" value="${preferences.defaultHumanHeightMm}" type="number"></div><div class="field"><label for="human-mass">MASS kg</label><input id="human-mass" value="${preferences.defaultHumanMassKg}" type="number"></div></div>
     <div class="single-field"><label for="human-pose">INITIAL POSE</label><select id="human-pose">${humanPoseOptions()}</select><p id="human-pose-description">${esc(humanPoseDescription('standing'))}</p></div>
     <div class="single-field"><label for="human-hold">POSTURE CONTROL</label><select id="human-hold">${HUMAN_POSTURES.filter(([id])=>id!=='custom').map(([id,label])=>`<option value="${id}">${label}</option>`).join('')}</select></div>
     <div class="fields"><div class="field"><label for="human-strength">STRENGTH SCALE</label><input id="human-strength" type="number" min="0.1" max="10" step="0.1" value="1"></div><div class="field"><label for="human-grip">GRIPPED BAR Ø mm</label><input id="human-grip" type="number" min="8" max="80" step="0.1" placeholder="Open hands"></div></div>
@@ -1992,12 +2437,36 @@ function humanDialog(){
     }}]);
   $('#human-pose').onchange=e=>{$('#human-pose-description').textContent=humanPoseDescription(e.target.value);};
 }
+let autosaveTimer=null,lastAutosavedRevision=-1;
+async function performAutosave(){
+  clearTimeout(autosaveTimer);autosaveTimer=null;
+  if(!preferences.autosaveEnabled||!state.doc||!state.dirty||state.revision===lastAutosavedRevision)return;
+  if(state.busy||state.placementPending||dragStart){scheduleAutosave();return;}
+  const revision=state.revision;
+  try{
+    await api('autosave',{directory:preferences.autosaveDirectory,source_path:state.path,
+      keep:preferences.autosaveKeep});
+    lastAutosavedRevision=revision;
+    status('Autosaved locally · original design unchanged');
+  }catch(error){status('Autosave failed: '+error.message);}
+  if(state.revision!==revision)scheduleAutosave();
+}
+function scheduleAutosave(){
+  clearTimeout(autosaveTimer);autosaveTimer=null;
+  if(!preferences.autosaveEnabled||!state.doc||!state.dirty||state.revision===lastAutosavedRevision)return;
+  autosaveTimer=setTimeout(performAutosave,preferences.autosaveMinutes*60000);
+}
 function fitDialog(){const humans=state.scene.parts.filter(p=>p.kind==='human'&&p.id.endsWith('/pelvis')).map(p=>p.id.slice(0,-7));if(!humans.length){humanDialog();return;}modal('Human fit test',`<div class="single-field"><label>HUMAN</label><select id="fit-id">${humans.map(id=>`<option>${esc(id)}</option>`).join('')}</select></div><div class="single-field"><label>TEST</label><select id="fit-kind"><option value="reach">Right-hand reach</option><option value="seat">Seated dimensions</option></select></div><div class="fields">${['X','Y','Z'].map((v,i)=>`<div class="field"><label>TARGET ${v} mm</label><input id="fit-${i}" type="number" value="${[300,400,1200][i]}"></div>`).join('')}</div><div class="single-field"><label>SEAT PART (FOR SEATED TEST)</label><select id="fit-seat">${state.scene.parts.filter(p=>p.kind==='panel').map(p=>`<option>${esc(p.id)}</option>`).join('')}</select></div>`,[{label:'Cancel',action:closeModal},{label:'Run fit test',primary:true,action:async()=>{const params={human:$('#fit-id').value};if($('#fit-kind').value==='reach')params.target=[0,1,2].map(i=>+$('#fit-'+i).value);else params.seat=$('#fit-seat').value;const r=await api('fit',params);closeModal();if(r.parts)for(const [id,p] of Object.entries(r.parts))if(partObjects.has(id))setPose(partObjects.get(id),p);jsonDialog('Fit test result',r);}}]);}
 function connectDialog(connector,port=null,replaceJoint=null){
   const old=state.doc.joints?.find(j=>j.id===replaceJoint);
   const member=state.scene.parts.find(p=>p.id===(old?.b.part||state.connectionSource)&&p.kind==='member');
   if(!member){toast('Select a tube, dowel or extrusion first, then click the target connector.');return;}
   const fitting=state.scene.parts.find(p=>p.id===connector);
+  if(member.draft?(draftRun(state.doc,member.id)?.attachments||[]).some(a=>a.connector===connector):
+    state.scene.joints.some(j=>j.id!==replaceJoint&&j.type==='socket'&&
+      [j.a.part,j.b.part].includes(member.id)&&[j.a.part,j.b.part].includes(connector))){
+    toast('This pipe is already attached to this connector.');return;
+  }
   const sockets=Object.entries(fitting?.ports||{}).filter(([name,p])=>p.type==='socket'&&!socketOccupied(state.scene,connector,name,replaceJoint));
   if(!sockets.length)return;
   if(port&&socketOccupied(state.scene,connector,port,replaceJoint)){toast('This socket or its shared bore is occupied.');return;}
@@ -2122,16 +2591,68 @@ function cancelPlacement(){
   if(pointerId!=null&&renderer.domElement.hasPointerCapture(pointerId))renderer.domElement.releasePointerCapture(pointerId);
   orbit.enabled=true;restorePlacement();
 }
+function pickResizeHandle(event){
+  const hit=raycaster.intersectObjects(resizeHandles.children,false)[0]?.object;
+  if(hit)return hit;
+  const rect=renderer.domElement.getBoundingClientRect();
+  const nearby=resizeHandles.children.map(handle=>{const point=handle.position.clone().project(camera);
+    return {handle,distance:Math.hypot((point.x+1)*rect.width/2+rect.left-event.clientX,
+      (1-point.y)*rect.height/2+rect.top-event.clientY)};}).sort((a,b)=>a.distance-b.distance);
+  return nearby[0]?.distance<18?nearby[0].handle:null;
+}
+function clearResizeDrag(){
+  const drag=resizeDrag;if(!drag)return;resizeDrag=null;orbit.enabled=true;
+  const canvas=renderer.domElement;if(canvas.hasPointerCapture(drag.pointerId))canvas.releasePointerCapture(drag.pointerId);
+  canvas.style.cursor='';
+  const mesh=partObjects.get(drag.target.id);if(mesh&&state.scene){const part=state.scene.parts.find(p=>p.id===drag.target.id);
+    if(part){setPose(mesh,part.pose);mesh.scale.set(1,1,1);}}
+  dispose(resizePreview);updateResizeHandles();
+}
 if(renderer){let down=null;
   renderer.domElement.addEventListener('pointerdown',e=>{
-    down=[e.clientX,e.clientY];if(e.button!==0||state.placementPending||state.mode!=='design'||!['select','translate'].includes(state.tool)||gizmo.axis)return;
-    ray(e);const hit=pickPart();if(!hit)return;
+    down=[e.clientX,e.clientY];if(e.button!==0||state.placementPending||state.mode!=='design')return;
+    ray(e);
+    const handle=resizeHandles.children.length?pickResizeHandle(e):null;
+    if(handle){
+      const target=resizeTarget(),side=handle.userData.resizeSide;
+      if(!target)return;
+      const moving=(side==='start'?target.first:target.last).clone(),fixed=(side==='start'?target.last:target.first).clone();
+      const plane=new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()),moving);
+      resizeDrag={pointerId:e.pointerId,target,side,moving,fixed,outward:moving.clone().sub(fixed).normalize(),
+        plane,grab:raycaster.ray.intersectPlane(plane,new THREE.Vector3())||moving.clone(),
+        length:target.length,shift:e.shiftKey,handle};
+      orbit.enabled=false;renderer.domElement.style.cursor='grabbing';renderer.domElement.setPointerCapture(e.pointerId);down=null;e.stopImmediatePropagation();return;
+    }
+    if(!['select','translate'].includes(state.tool)||gizmo.axis)return;
+    const hit=pickPart();if(!hit)return;
     select(hit.id);orbit.enabled=false;
     pointerDrag={pointerId:e.pointerId,x:e.clientX,y:e.clientY,point:hit.point,
       plane:new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()),hit.point),started:false};
     renderer.domElement.setPointerCapture(e.pointerId);e.stopImmediatePropagation();
   },true);
   renderer.domElement.addEventListener('pointermove',e=>{
+    if(resizeDrag&&resizeDrag.pointerId===e.pointerId){
+      e.stopImmediatePropagation();ray(e);
+      const point=raycaster.ray.intersectPlane(resizeDrag.plane,new THREE.Vector3());if(!point)return;
+      const drag=resizeDrag,delta=point.sub(drag.grab).dot(drag.outward);
+      drag.length=Math.max(1,drag.target.length+delta*(drag.target.centered?2:1));drag.shift=e.shiftKey;
+      const change=drag.length-drag.target.length;
+      const endpoint=drag.moving.clone().addScaledVector(drag.outward,drag.target.centered?change/2:change);
+      const opposite=drag.target.centered?drag.fixed.clone().addScaledVector(drag.outward,-change/2):drag.fixed;
+      drag.handle.position.copy(endpoint);
+      if(drag.target.centered)resizeHandles.children.find(handle=>handle!==drag.handle)?.position.copy(opposite);
+      if(!drag.target.chain){const mesh=partObjects.get(drag.target.id);
+        mesh.scale.z=drag.length/drag.target.length;mesh.position.copy(opposite).add(endpoint).multiplyScalar(.5);mesh.updateMatrix();
+      }else{dispose(resizePreview);const length=endpoint.distanceTo(drag.fixed),line=new THREE.Mesh(
+        new THREE.CylinderGeometry(3,3,length,8),new THREE.MeshBasicMaterial({color:'#f4bb65',transparent:true,opacity:.8,depthTest:false}));
+        line.position.copy(drag.fixed).add(endpoint).multiplyScalar(.5);line.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),drag.outward);line.renderOrder=125;resizePreview.add(line);}
+      const behavior=drag.shift?preferences.resizeShiftMode:preferences.resizeConnectorMode;
+      status(`Resize ${drag.target.id}: ${drag.length.toFixed(1)} mm · connectors ${behavior==='follow'?'follow':'stay put'}`);return;
+    }
+    if(!pointerDrag&&!dragStart&&resizeHandles.children.length){
+      ray(e);renderer.domElement.style.cursor=pickResizeHandle(e)?'grab':'';
+      if(state.tool==='resize')return;
+    }
     if(!pointerDrag||pointerDrag.pointerId!==e.pointerId)return;e.stopImmediatePropagation();
     if(!pointerDrag.started){if(Math.hypot(e.clientX-pointerDrag.x,e.clientY-pointerDrag.y)<4)return;
       if(!beginPlacement('pointer')){cancelPlacement();return;}pointerDrag.started=true;pointerDrag.context=dragStart.placement;gizmo.detach();}
@@ -2143,6 +2664,9 @@ if(renderer){let down=null;
     previewMovement();
   },true);
   renderer.domElement.addEventListener('pointerup',e=>{
+    if(resizeDrag&&resizeDrag.pointerId===e.pointerId){const drag=resizeDrag,changed=Math.abs(drag.length-drag.target.length)>0.01;
+      clearResizeDrag();down=null;e.stopImmediatePropagation();
+      if(changed)requestResize(drag.target,drag.side,drag.length,e.shiftKey);return;}
     if(pointerDrag&&pointerDrag.pointerId===e.pointerId){const started=pointerDrag.started;pointerDrag=null;down=null;orbit.enabled=true;
       if(renderer.domElement.hasPointerCapture(e.pointerId))renderer.domElement.releasePointerCapture(e.pointerId);
       e.stopImmediatePropagation();if(started)finishPlacement();else attachGizmo();return;}
@@ -2151,8 +2675,8 @@ if(renderer){let down=null;
     if(state.tool==='connect'){const socket=pickSocket();if(socket){connectDialog(socket.part,socket.port);return;}}
     select(pickPart()?.id||null);
   },true);
-  renderer.domElement.addEventListener('pointercancel',()=>{down=null;cancelPlacement();});
-  renderer.domElement.addEventListener('lostpointercapture',()=>{if(pointerDrag){down=null;cancelPlacement();}});
+  renderer.domElement.addEventListener('pointercancel',()=>{down=null;if(resizeDrag)clearResizeDrag();else cancelPlacement();});
+  renderer.domElement.addEventListener('lostpointercapture',()=>{if(resizeDrag)clearResizeDrag();if(pointerDrag){down=null;cancelPlacement();}});
   renderer.domElement.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';});
   renderer.domElement.addEventListener('drop',async e=>{
     e.preventDefault();const catalog=e.dataTransfer.getData('application/pipesim-part');if(!catalog||state.placementPending)return;
@@ -2160,12 +2684,14 @@ if(renderer){let down=null;
     if(state.snap)point.divideScalar(state.snapSettings.translationMm).round().multiplyScalar(state.snapSettings.translationMm);
     point.z=Math.max(0,point.z);
     if(state.library[catalog].kind==='chain'){chainDialog(catalog,point.toArray());return;}
+    if(state.library[catalog].kind==='wheel'){wheelDialog(catalog,point.toArray());return;}
     try{const id=await addPart(catalog,point.toArray(),{origin:state.library[catalog].kind==='connector',quiet:true});
       const matches=dragCandidates([id]);if(matches.length)await offerConnection(matches,{},state.revision,false,id);else toast('Added '+id+'. Drag it onto a pipe or socket to connect.');
     }catch(error){toast(error.message,true);}
   });
 }
 $('#part-search').oninput=renderLibrary;$('#category').onchange=renderLibrary;$('#size-filter').onchange=renderLibrary;
+$('#wheel-button').onclick=()=>wheelDialog();
 $('#finalize-draft').onclick=()=>finalizeDrafts();
 $('#connection-snap-button').onclick=()=>{state.connectionSnap=!state.connectionSnap;updateSnapControls();clearSnapPreview();status(state.connectionSnap?'Connection snapping enabled · drag onto a pipe or socket':'Connection snapping disabled');};
 $('#snap-settings-button').onclick=snapSettingsDialog;
@@ -2185,7 +2711,7 @@ $('#delete-part').onclick=()=>{const id=state.selected;if(!id)return;if(draftRun
 $('#fit-view').onclick=fitView;$('#grid-button').onclick=()=>{grid.visible=!grid.visible;$('#grid-button').classList.toggle('active',grid.visible);};$('#ports-button').onclick=()=>{state.ports=!state.ports;$('#ports-button').classList.toggle('active',state.ports);ports.visible=true;updatePorts();};$('#snap-button').onclick=()=>{state.snap=!state.snap;updateSnapControls();};
 $$('[data-camera]').forEach(b=>b.onclick=()=>{const distance=camera.position.distanceTo(orbit.target);const vector=({top:new THREE.Vector3(.001,-.001,1),front:new THREE.Vector3(0,-1,.001),side:new THREE.Vector3(1,0,.001)})[b.dataset.camera];camera.position.copy(orbit.target).addScaledVector(vector.normalize(),distance);$('#view-title').textContent=b.dataset.camera[0].toUpperCase()+b.dataset.camera.slice(1)+' view';orbit.update();});
 $('#play-button').onclick=()=>{if(!state.recording){setMode('simulate');toast('Run a simulation to record a motion timeline.');return;}state.playing=!state.playing;$('#play-button').textContent=state.playing?'Ⅱ':'▶';};$('#reset-button').onclick=restore;$('#time-slider').oninput=e=>{state.playing=false;showFrame(+e.target.value);};
-$('#capture-frame').onclick=async()=>{if(!state.recording){toast('Record a simulation first.');return;}const frame=clone(state.recording.frames[state.frame]);const expanded=await api('snapshot',{frame});checkpoint();state.doc=expanded;changed();await resolve();toast('Captured this pose and adjusted the remaining joint limits. Compound human rotations may need anatomical review.');};
+$('#capture-frame').onclick=async()=>{if(!state.recording){toast('Record a simulation first.');return;}if(Object.keys(state.recording.beam_model||{}).length){toast('Bent beams are temporary simulation elements and cannot yet be captured as one straight design part.',true);return;}const frame=clone(state.recording.frames[state.frame]);const expanded=await api('snapshot',{frame});checkpoint();state.doc=expanded;changed();await resolve();toast('Captured this pose and adjusted the remaining joint limits. Compound human rotations may need anatomical review.');};
 $('#import-button').onclick=()=>$('#mesh-file').click();$('#mesh-file').onchange=e=>{const file=e.target.files[0];if(!file)return;modal('Import '+file.name,'<p>Provide the physical mass and convert the mesh coordinates to millimetres. Hollow parts can use separate collision geometry in the library editor.</p><div class="fields"><div class="field"><label>MASS kg</label><input id="import-mass" type="number" value="1" min="0.001"></div><div class="field"><label>SCALE TO mm</label><input id="import-scale" type="number" value="1" min="0.001"></div></div>',[{label:'Cancel',action:closeModal},{label:'Import part',primary:true,action:async()=>{const buffer=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<buffer.length;i+=32768)binary+=String.fromCharCode(...buffer.subarray(i,i+32768));const r=await api('import-mesh',{filename:file.name,data:btoa(binary),mass_kg:+$('#import-mass').value,scale:+$('#import-scale').value});checkpoint();state.doc=r.document;state.library=r.library;changed();renderLibrary();closeModal();await addPart(r.import.part);}}]);e.target.value='';};
 document.addEventListener('keydown',e=>{if(e.key==='Shift'&&!localRotationHeld){localRotationHeld=true;if(!dragStart)attachGizmo();}});
 document.addEventListener('keyup',e=>{if(e.key==='Shift'){localRotationHeld=false;if(!dragStart)attachGizmo();}});
@@ -2194,6 +2720,7 @@ document.addEventListener('keydown',e=>{
   const key=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey)&&key==='o'){e.preventDefault();if(!$('#modal').open)chooseDesignFile();return;}
   if(e.key==='Escape'&&dragStart){e.preventDefault();cancelPlacement();setTool('select');return;}
+  if(e.key==='Escape'&&resizeDrag){e.preventDefault();clearResizeDrag();return;}
   if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)||document.activeElement?.isContentEditable||$('#modal').open)return;
   if(state.placementPending&&(e.ctrlKey||e.metaKey))return;
   if((e.ctrlKey||e.metaKey)&&key==='z'){e.preventDefault();$('#undo').click();return;}
@@ -2209,6 +2736,15 @@ document.addEventListener('keydown',e=>{
   const libraryHotkey=libraryHotkeyFromEvent(e);
   const catalog=libraryHotkey&&Object.keys(libraryHotkeys).find(id=>libraryHotkeys[id]===libraryHotkey&&state.library[id]);
   if(catalog){e.preventDefault();if(!e.repeat&&!state.busy&&!state.placementPending&&!dragStart)addLibraryCatalog(catalog);return;}
+  if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat&&state.mode==='design'){
+    const shortcuts=[[preferences.resizeHandle1GrowKey,'start',1],[preferences.resizeHandle1ShrinkKey,'start',-1],
+      [preferences.resizeHandle2GrowKey,'end',1],[preferences.resizeHandle2ShrinkKey,'end',-1]];
+    const match=shortcuts.find(([letter])=>letter===key);
+    if(match){const target=resizeTarget();if(target){e.preventDefault();
+      const length=target.chain?nextFlexibleShortcutLength({requestedLengthMm:target.length,pitchMm:target.pitch,
+        stepMm:preferences.resizeKeyStepMm,direction:match[2]}):target.length+match[2]*preferences.resizeKeyStepMm;
+      if(length!==null)requestResize(target,match[1],length,e.shiftKey);return;}}
+  }
   if(queueKeyboardNudge(e)){e.preventDefault();return;}
   if(state.placementPending)return;
   if(e.key==='Home'||key==='h')fitView();
@@ -2219,8 +2755,32 @@ document.addEventListener('keydown',e=>{
 });
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 let last=performance.now(),accumulator=0;
-function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();syncMirrorPreviews();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}renderer?.render(scene,camera);}requestAnimationFrame(tick);
-try{const response=await fetch('/api/bootstrap'),data=await response.json();if(!response.ok)throw new Error(data.error);token=data.token;state.doc=data.document;state.path=data.path;state.library={...data.library,...state.doc.definitions};state.examples=data.examples;state.selected=data.scene.parts.some(p=>p.id==='leg-1')?'leg-1':null;adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();renderInspector();updateHeader();fitView();if(data.api_version!==EDITOR_API_VERSION){status('Editor server update required');toast(SERVER_UPDATE_MESSAGE,true);}else status('Workspace ready · all changes stay local');}catch(e){toast(e.message,true);status('Workspace could not be opened');}
+function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();syncMirrorPreviews();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}positionResizeLabels();renderer?.render(scene,camera);}requestAnimationFrame(tick);
+async function startupDesign(bootstrap){
+  if(preferences.startup==='empty'){
+    const document={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Untitled creation',parts:[],joints:[],anchors:[]};
+    const path='designs/untitled.pipe.yaml';
+    const result=await api('resolve',{document,path});
+    return {...bootstrap,document,path,scene:result,auto_symmetry:false,mirror_pose_error:null};
+  }
+  if(preferences.startup==='autosave'){
+    try{
+      const list=await fetch('/api/autosaves?directory='+encodeURIComponent(preferences.autosaveDirectory));
+      if(list.ok){const records=(await list.json()).autosaves;if(records.length){
+        const response=await fetch('/api/autosave?directory='+encodeURIComponent(preferences.autosaveDirectory)+'&path='+encodeURIComponent(records[0].path));
+        if(response.ok)return {...bootstrap,...await response.json()};
+      }}
+    }catch{}
+  }
+  let path=preferences.startup==='example'?preferences.startupExample||bootstrap.examples?.[0]:null;
+  if(preferences.startup==='workspace')try{path=window.localStorage.getItem('pipesim.last-saved-path.v1');}catch{}
+  if(path&&path!==bootstrap.path){
+    const response=await fetch('/api/open?path='+encodeURIComponent(path));
+    if(response.ok)return {...bootstrap,...await response.json()};
+  }
+  return bootstrap;
+}
+try{const response=await fetch('/api/bootstrap'),bootstrap=await response.json();if(!response.ok)throw new Error(bootstrap.error);token=bootstrap.token;serverApiVersion=bootstrap.api_version;const data=await startupDesign(bootstrap);state.doc=data.document;state.path=data.path;state.library={...data.library,...state.doc.definitions};state.examples=bootstrap.examples;state.dirty=!!(data.autosaved||data.auto_symmetry);state.mirrorPoseError=data.mirror_pose_error||null;state.selected=data.scene.parts.some(p=>p.id==='leg-1')?'leg-1':null;adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();renderInspector();updateHeader();setTool(preferences.defaultTool);if(preferences.fitOnOpen)fitView();$('#grid-button').classList.toggle('active',grid.visible);$('#ports-button').classList.toggle('active',state.ports);if(state.dirty)scheduleAutosave();const notice=compatibilityMessage(serverApiVersion);if(notice){status(serverApiVersion>EDITOR_API_VERSION?'Editor page update required':'Editor server update required');toast(notice,true);}else status(data.autosaved?'Recovered autosave · Save to keep this version':'Workspace ready · all changes stay local');if(state.mirrorPoseError)toast(state.mirrorPoseError,true);}catch(e){toast(e.message,true);status('Workspace could not be opened');}
 
 function nearbyPanelBoltHoles(panel){
   const box=panel.geometry.find(shape=>shape.type==='box'&&shape.size_mm?.length===3);
@@ -2238,7 +2798,8 @@ function nearbyPanelBoltHoles(panel){
     if(fitting.id===panel.id||fitting.draft)continue;
     const object=partObjects.get(fitting.id);if(!object)continue;
     for(const [portName,port] of Object.entries(fitting.ports||{})){
-      if(port.type!=='bolt')continue;
+      // Swivel fittings expose their bolt-sized through bore as an eye port.
+      if(port.type!=='bolt'&&(port.type!=='eye'||!(port.diameter_mm>0)))continue;
       const used=occupied.get(fitting.id+'/'+portName)||0;
       if(used>=(port.capacity||1))continue;
       const world=new THREE.Vector3(...(port.position_mm||[0,0,0])).applyMatrix4(object.matrix);
@@ -2285,12 +2846,83 @@ function fastenPanelDialog(panel){
   ]);
 }
 
+function jointCreateDialog(){
+  const parts=state.scene.parts,selected=parts.find(part=>part.id===state.selected);
+  if(!selected||parts.length<2){toast('Add a second part first.');return;}
+  const usable=part=>Object.entries(part.ports||{}).filter(([name,port])=>port.type!=='socket'&&!socketOccupied(state.scene,part.id,name));
+  const position=(part,port)=>new THREE.Vector3(...port.position_mm).applyMatrix4(partObjects.get(part.id).matrix);
+  const complement=usable(selected).flatMap(([firstName,first])=>{
+    if(!['eye','clevis'].includes(first.type)||first.assembly!=='bolt')return [];
+    return parts.flatMap(part=>part.id===selected.id?[]:usable(part)
+      .filter(([,port])=>['eye','clevis'].includes(port.type)&&port.type!==first.type&&port.assembly==='bolt'&&
+        Math.abs((first.diameter_mm||0)-(port.diameter_mm||0))<=1)
+      .map(([name,port])=>({part,name,firstName,distance:position(selected,first).distanceTo(position(part,port))})));
+  }).sort((a,b)=>a.distance-b.distance)[0];
+  const other=complement?.part||parts.find(part=>part.id!==selected.id);
+  const options=parts.map(part=>`<option value="${esc(part.id)}">${esc(part.id)} · ${esc(part.label||part.catalog||part.kind)}</option>`).join('');
+  const raw={id:'attachment-'+(state.doc.joints?.length||0),type:'fixed',
+    a:{part:selected.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},
+    b:{part:other.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},
+    metadata:{hardware:'Specify the actual bolt, bracket or connector and its installation method'}};
+  const revision=state.revision;let preview=null,request=0;
+  modal('Add joint or attachment',`<p>Choose the parts and their attachment ports. The preview aligns the port centres and axes, including hinge bolt holes.</p>
+    <div class="single-field"><label for="joint-part-a">FIRST PART</label><select id="joint-part-a">${options}</select></div>
+    <div class="single-field"><label for="joint-port-a">ATTACHMENT PORT</label><select id="joint-port-a"></select></div>
+    <div class="single-field"><label for="joint-part-b">SECOND PART</label><select id="joint-part-b">${options}</select></div>
+    <div class="single-field"><label for="joint-port-b">ATTACHMENT PORT</label><select id="joint-port-b"></select></div>
+    <div class="fields"><div class="field"><label for="joint-create-type">JOINT</label><select id="joint-create-type"><option value="revolute">Hinge · rotates</option><option value="fixed">Fixed</option><option value="spherical">Ball · rotates freely</option></select></div>
+    <div class="field"><label for="joint-create-move">PARTS TO MOVE</label><select id="joint-create-move"><option value="auto">Automatic</option><option value="a">First connected body</option><option value="b">Second connected body</option></select></div></div>
+    <p id="joint-create-status" role="status">Checking the selected ports…</p>
+    <details><summary>Advanced joint JSON</summary><p>Use this for custom attachment frames or other joint types.</p><textarea id="joint-source" spellcheck="false"></textarea><button class="inspect-action secondary" id="joint-apply-json">Apply JSON joint</button></details>`,[
+    {label:'Cancel',action:closeModal},
+    {label:'Join selected ports',primary:true,action:async()=>{
+      if(!preview||revision!==state.revision)throw new Error('Refresh the connection preview first.');
+      const payload=values();const result=await api('connect-ports',payload);
+      closeModal();await acceptPlacement(result,revision);toast('Joint created at the selected ports.');
+    }}]);
+  const join=$('#modal-actions .primary');join.disabled=true;
+  $('#joint-part-a').value=selected.id;$('#joint-part-b').value=other.id;
+  $('#joint-create-type').value=complement?'revolute':'fixed';
+  $('#joint-source').value=JSON.stringify(raw,null,2);
+  $('#joint-apply-json').onclick=async()=>{
+    try{const edited=JSON.parse($('#joint-source').value);
+      await mutate(()=>{state.doc.joints||=[];state.doc.joints.push(edited);});closeModal();
+    }catch(error){toast(error.message,true);}
+  };
+  function fillPort(partField,portField,preferred){
+    const part=parts.find(item=>item.id===$(partField).value),ports=part?usable(part):[];
+    $(portField).innerHTML=ports.length?ports.map(([name,port])=>`<option value="${esc(name)}">${esc(name)} · ${esc(port.type)}</option>`).join(''):'<option value="">No free attachment ports</option>';
+    if(ports.some(([name])=>name===preferred))$(portField).value=preferred;
+    else if(ports.some(([name])=>name==='hinge'))$(portField).value='hinge';
+  }
+  function values(){return {a:{part:$('#joint-part-a').value,port:$('#joint-port-a').value},
+    b:{part:$('#joint-part-b').value,port:$('#joint-port-b').value},
+    type:$('#joint-create-type').value,move:$('#joint-create-move').value};}
+  async function refresh(){
+    const current=++request;preview=null;join.disabled=true;clearSnapPreview();
+    const payload=values();if(!payload.a.port||!payload.b.port||payload.a.part===payload.b.part){
+      $('#joint-create-status').textContent='Choose two different parts with free attachment ports.';return;}
+    $('#joint-create-status').textContent='Checking fit and existing connections…';
+    try{const result=await api('connect-ports',{...payload,preview:true});
+      if(current!==request||revision!==state.revision)return;
+      preview=result;join.disabled=false;showPosePreview(result.poses);
+      $('#joint-create-status').textContent=`Ready: ${result.gap_mm.toFixed(1)} mm between ports. ${result.move?'The '+(result.move==='a'?'first':'second')+' connected body moves into place.':'Both bodies stay fixed.'}`;
+    }catch(error){if(current===request)$('#joint-create-status').textContent=error.message;}
+  }
+  $('#joint-part-a').onchange=()=>{fillPort('#joint-part-a','#joint-port-a');refresh();};
+  $('#joint-part-b').onchange=()=>{fillPort('#joint-part-b','#joint-port-b');refresh();};
+  for(const id of ['#joint-port-a','#joint-port-b','#joint-create-type','#joint-create-move'])$(id).onchange=refresh;
+  reviewCleanup=()=>{request++;clearSnapPreview();};
+  fillPort('#joint-part-a','#joint-port-a',complement?.firstName);
+  fillPort('#joint-part-b','#joint-port-b',complement?.name);
+  refresh();
+}
 function jointDialog(id=null){
   const old=id?state.doc.joints?.find(j=>j.id===id):null;
   if(old?.type==='socket')return connectDialog(old.a.part,old.a.port,id);
   if(id&&!old){toast('Expand this object before editing its joints.');return;}
+  if(!old)return jointCreateDialog();
   const others=state.scene.parts.filter(p=>p.id!==state.selected);
-  if(!old&&!others.length){toast('Add a second part first.');return;}
   const selected=state.scene.parts.find(p=>p.id===state.selected), other=others[0];
   const pivot=new THREE.Vector3(...selected.pose.position_mm), local=other?pivot.clone().applyMatrix4(partObjects.get(other.id).matrix.clone().invert()):pivot;
   const value=old||{id:'attachment-'+(state.doc.joints?.length||0),type:'fixed',a:{part:selected.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},b:{part:other.id,frame:{position_mm:local.toArray(),axis:[0,0,1]}},metadata:{hardware:'Specify the actual bolt, bracket or connector and its installation method'}};

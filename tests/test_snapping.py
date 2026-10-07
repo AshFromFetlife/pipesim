@@ -64,6 +64,17 @@ def test_tee_modes_cannot_share_one_bore(blank,factory):
     assert any(i['code']=='SHARED_BORE_OCCUPIED' for i in validate(factory(invalid),collisions=False)['issues'])
 
 
+def test_one_exact_pipe_cannot_use_two_sockets_of_one_connector(blank,factory):
+    doc=chosen(connection_options(factory(two_parts(blank,'TC161C')),'pipe','fitting','through',at_mm=500))
+    with pytest.raises(DocumentError,match='one pipe cannot occupy two sockets'):
+        connection_options(factory(doc),'pipe','fitting','cross',at_mm=500)
+    invalid=copy.deepcopy(doc)
+    duplicate=copy.deepcopy(invalid['joints'][0])
+    duplicate['id']='duplicate';duplicate['a']['port']='cross'
+    invalid['joints'].append(duplicate)
+    assert any(i['code']=='DUPLICATE_CONNECTOR' for i in validate(factory(invalid),collisions=False)['issues'])
+
+
 def test_end_insertion_cannot_be_used_as_middle_station(blank):
     with pytest.raises(DocumentError,match='through socket'):
         connect_member(two_parts(blank,'TC104C'),'.','pipe','fitting','run_end',insertion_mm=500)

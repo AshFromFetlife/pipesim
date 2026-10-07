@@ -141,10 +141,12 @@ def object_components(instance,library=None):
     components=copy.deepcopy(instance['components'])
     reference=components.get('parameter_reference',instance.get('parameters',{}))
     parameters=instance.get('parameters',{})
-    if parameters==reference: return components
     if instance['template']=='chain':
-        from .chain import generate
-        return generate(parameters,library,components)
+        from .chain import generate, sync_profile_strength
+        if parameters!=reference:
+            components=generate(parameters,library,components)
+        return sync_profile_strength(components,parameters,library)
+    if parameters==reference: return components
     if instance['template']!='human':
         raise DocumentError('Edit the saved components of this object to change its dimensions')
     from .human import body_girth_scales, humanoid
@@ -217,24 +219,50 @@ def restore_objects(original, document, base, library, poses=None):
 
 def move_object(assembly, object_id, target, *, preview=False):
     from .posing import _editable
-    from .snapping import move_document
+    from .snapping import (apply_rigid_draft_follow, check_rigid_draft_follow,
+                           move_document, rigid_draft_follow)
     instance=next((o for o in assembly.doc.get('objects',[]) if o['id']==object_id),None)
     if instance is None: raise DocumentError('Select a grouped object to move as a whole')
     limited=False
     if instance.get('symmetry'):
         from .human_symmetry import project_object_pose
-        projected=project_object_pose(target,instance['symmetry'])
+        projected=project_object_pose(target,instance['symmetry'],instance.get('pose'))
         limited=not np.allclose(transform(projected),transform(target),atol=1e-7,rtol=0)
         target=projected
     delta=transform(target)@np.linalg.inv(transform(instance.get('pose')))
     members={pid for pid in assembly.parts if pid.startswith(object_id+'/')}
     poses={pid:pose_of(delta@assembly.parts[pid].matrix) for pid in members
            if not np.allclose(delta@assembly.parts[pid].matrix,assembly.parts[pid].matrix,atol=1e-7,rtol=0)}
+    if instance['template']=='chain' and poses and not assembly.doc.get('state',{}).get('joints'):
+        # A single-ended chain attached to a free connector can move as one
+        # rigid assembly. The chain's compact parent pose and the connector's
+        # authored pose must receive the same transform so the spherical joint
+        # never stretches. World anchors and reusable objects remain barriers.
+        component=set(members)
+        while True:
+            previous=len(component)
+            for joint in assembly.joints:
+                edge={joint['a']['part'],joint['b']['part']}
+                if edge&component: component|=edge
+            if len(component)==previous:break
+        hosts=component-members
+        direct={part['id'] for part in assembly.doc.get('parts',[])}
+        anchored={anchor['part'] for anchor in assembly.anchors}
+        if hosts and hosts<=direct and not anchored.intersection(component):
+            poses.update({pid:pose_of(delta@assembly.parts[pid].matrix) for pid in hosts
+                          if not np.allclose(delta@assembly.parts[pid].matrix,
+                                             assembly.parts[pid].matrix,atol=1e-7,rtol=0)})
+    poses,run_transforms=rigid_draft_follow(assembly,poses)
+    direct={part['id'] for part in assembly.doc.get('parts',[])}
     if preview:
         from .snapping import _movement_coordinates
         candidate=copy.copy(assembly);candidate.parts={p:copy.copy(v) for p,v in assembly.parts.items()}
         for pid in poses: candidate.parts[pid].matrix=delta@assembly.parts[pid].matrix
-        try: _movement_coordinates(assembly,candidate)
+        draft_doc=copy.deepcopy(assembly.doc)
+        apply_rigid_draft_follow(draft_doc,run_transforms)
+        try:
+            _movement_coordinates(assembly,candidate)
+            check_rigid_draft_follow(assembly,candidate,draft_doc,run_transforms)
         except DocumentError as exc:
             raise DocumentError(f'{exc}. Detach or loosen the attachment in Connections to structure before moving the whole object.') from exc
         return {'poses':poses,'moved':list(poses),'limited':limited,
@@ -242,7 +270,8 @@ def move_object(assembly, object_id, target, *, preview=False):
     document=copy.deepcopy(assembly.doc)
     if poses:
         try:
-            if instance['template']=='chain' and not assembly.doc.get('state',{}).get('joints'):
+            if (instance['template']=='chain' and not assembly.doc.get('state',{}).get('joints')
+                    and set(poses)-members<=direct):
                 # A whole-chain move only changes its parent pose, keeping long
                 # unposed chains compact and avoiding expansion/rebasing work.
                 from .snapping import _movement_coordinates
@@ -250,13 +279,19 @@ def move_object(assembly, object_id, target, *, preview=False):
                 for pid in poses: candidate.parts[pid].matrix=delta@assembly.parts[pid].matrix
                 _movement_coordinates(assembly,candidate)
                 next(o for o in document['objects'] if o['id']==object_id)['pose']=copy.deepcopy(target)
+                for spec in document.get('parts',[]):
+                    if spec['id'] in poses: spec['pose']=poses[spec['id']]
+                apply_rigid_draft_follow(document,run_transforms)
+                check_rigid_draft_follow(assembly,candidate,document,run_transforms)
                 document.pop('results',None);document.pop('build_plan',None)
                 return {'document':document,'poses':poses,'moved':list(poses),'limited':limited,'message':'Whole chain moved; shape preserved'}
-            editable=_editable(assembly,members)
+            editable=_editable(assembly,set(poses))
             document=move_document(editable,poses)
         except DocumentError as exc:
             raise DocumentError(f'{exc}. Detach or loosen the attachment in Connections to structure before moving the whole object.') from exc
         document=restore_objects(assembly.doc,document,assembly.base,assembly.library,{object_id:target})
+    if instance.get('symmetry'):
+        next(o for o in document['objects'] if o['id']==object_id)['symmetry']['rotation_deg'] = list(target['rotation_deg'])
     return {'document':document,'poses':poses,'moved':list(poses),'limited':limited,
             'message':'The human stays on its mirror line' if limited else 'Whole object moved; limb pose preserved'}
 

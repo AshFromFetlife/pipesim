@@ -59,6 +59,24 @@ def _joint(index, strength=None):
     return joint
 
 
+def sync_profile_strength(components, parameters, library):
+    """Keep posed compact-line joints rated by their selected material profile.
+
+    Saved components retain link poses and geometry. Their generated internal
+    joints are material defaults, so a corrected catalog rating must also
+    reach an existing posed or attached line when it is opened again.
+    """
+    strength = dimensions(parameters, library)['break_force_n']
+    for joint in components.get('joints', []):
+        if not joint.get('metadata', {}).get('chain_link'):
+            continue
+        if strength is None:
+            joint.pop('break_force_n', None)
+        else:
+            joint['break_force_n'] = strength
+    return components
+
+
 def generate(parameters, library, components=None):
     """Grow at the free end; retained links keep their edited geometry and pose."""
     from .math3d import align_axis
@@ -173,13 +191,37 @@ def pose_chain(assembly, instance, selected, desired, mode='translate', endpoint
     nodes = np.array([links[0].frame({'port': 'b'})[0]]+[p.frame({'port': 'a'})[0] for p in links])
     vectors = np.diff(nodes, axis=0);lengths = np.linalg.norm(vectors, axis=1)
     if np.any(lengths < 1e-6): return None
-    pinned_links = {a['part'] for a in assembly.anchors if a['part'] in members}
-    pinned_links |= {j[e]['part'] for j in assembly.joints for e in ('a','b')
-                     if j[e]['part'] in members and not {j['a']['part'],j['b']['part']} <= members}
     pinned = {}
-    for i, name in enumerate(names):
-        if name in pinned_links:
-            pinned[i] = nodes[i].copy();pinned[i+1] = nodes[i+1].copy()
+    locked_links = set()
+    def lock_link(name):
+        i = names.index(name)
+        pinned[i] = nodes[i].copy();pinned[i+1] = nodes[i+1].copy()
+        locked_links.add(name)
+    for anchor in assembly.anchors:
+        if anchor['part'] in members:
+            lock_link(anchor['part'])
+    for joint in assembly.joints:
+        if {joint['a']['part'],joint['b']['part']} <= members:
+            continue
+        for end in ('a','b'):
+            connection_endpoint = joint[end]
+            name = connection_endpoint['part']
+            if name not in members:
+                continue
+            if joint_kind(joint) != 'spherical':
+                lock_link(name)
+                continue
+            part = assembly.parts[name]
+            local = part.local_frame(connection_endpoint)[0]
+            i = names.index(name)
+            for port, node in (('b', i), ('a', i+1)):
+                if np.linalg.norm(local-part.local_frame({'port':port})[0]) < 1e-4:
+                    pinned[node] = nodes[node].copy()
+                    break
+            else:
+                # An interior attachment cannot be represented by a chain
+                # node without adding a new segment at that station.
+                lock_link(name)
     if not pinned: pinned[0] = nodes[0].copy()
     aim = index if endpoint == 'b' else index+1
     local = links[index].local_frame({'port': endpoint or 'a'})[0]
@@ -263,7 +305,7 @@ def pose_chain(assembly, instance, selected, desired, mode='translate', endpoint
         for i in range(first-1,-1,-1): result[i]=result[i+1]-left_delta@vectors[i]
         posed=copy.copy(assembly);posed.parts={pid:copy.copy(p) for pid,p in assembly.parts.items()}
         for i, part in enumerate(links):
-            if part.id in pinned_links: continue
+            if part.id in locked_links: continue
             matrix=part.matrix.copy()
             matrix[:3,:3]=align_axis(vectors[i],result[i+1]-result[i])@matrix[:3,:3]
             if mode=='rotate' and i==index and fraction==1: matrix[:3,:3]=desired[:3,:3]

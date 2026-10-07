@@ -1,4 +1,7 @@
 import copy
+import os
+import random
+import secrets
 from pathlib import Path
 
 import numpy as np
@@ -67,6 +70,63 @@ def test_force_can_loosen_and_retighten_one_connector_without_changing_lengths(f
     assert not option['adjustments']['resized']
     assert option['joint']['metadata']['assembly_adjustments']==option['adjustments']
     assert frame.doc==original
+
+
+FORCE_POSE_SEEDS = tuple(range(8)) + tuple(secrets.randbits(64) for _ in range(4))
+
+
+@pytest.mark.parametrize('case_seed', FORCE_POSE_SEEDS)
+def test_force_fits_solvable_frame_in_arbitrary_world_orientations(frame,factory,case_seed):
+    """A global rigid transform cannot turn a solvable fitting into an error."""
+    rng = random.Random(case_seed)
+    delta = transform({'position_mm': [rng.uniform(-1200,1200),rng.uniform(-1200,1200),
+                                       rng.uniform(1000,2500)],
+                       'rotation_deg': [rng.uniform(-180,180) for _ in range(3)]})
+    doc = copy.deepcopy(frame.doc)
+    for part in doc['parts']:
+        part['pose'] = pose_of(delta @ frame.parts[part['id']].matrix)
+    before = factory(doc)
+    try:
+        option = chosen(connect(before,force=True,tolerance_mm=.03,
+                                force_options={'unlock_connectors':1,
+                                               'resize_members':1,
+                                               'max_length_change_mm':2}))
+        verify(before,option,factory,unlock=1,resize=1,maximum=2)
+        assert option['gap_mm'] < .03
+    except Exception as error:
+        pytest.fail(f'force case_seed={case_seed}: {error}')
+
+
+FORCE_LENGTH_SEEDS = tuple(int(seed) for seed in os.environ.get(
+    'PIPESIM_FORCE_LENGTH_SEEDS',
+    ','.join(map(str, range(8))) + ',' +
+    ','.join(str(secrets.randbits(64)) for _ in range(4))
+).split(',') if seed)
+
+
+@pytest.mark.parametrize('case_seed', FORCE_LENGTH_SEEDS)
+def test_force_recovers_random_small_loop_length_errors(frame,factory,case_seed):
+    """Keep the existing joints exact while changing a closing loop span."""
+    rng = random.Random(case_seed)
+    offset = rng.choice((-1, 1))*rng.uniform(1.5, 9.5)
+    doc = copy.deepcopy(frame.doc)
+    arm = next(part for part in doc['parts'] if part['id'] == 'left-arm')
+    elbow = next(part for part in doc['parts'] if part['id'] == 'elbow')
+    arm['parameters']['length_mm'] += offset
+    arm['pose']['position_mm'][0] += offset/2
+    elbow['pose']['position_mm'][0] += offset
+    before = factory(doc)
+    # Before closure the two mating parts can overlap without a joint yet.
+    assert validate(before,collisions=False)['valid']
+    try:
+        option = chosen(connect(before,force=True,tolerance_mm=.03,
+                                force_options={'resize_members':1,
+                                               'max_length_change_mm':12}))
+        after = verify(before,option,factory,resize=1,maximum=12)
+        assert option['gap_mm'] < .03
+        assert after.parts['left-arm'].length == pytest.approx(400,abs=.03)
+    except Exception as error:
+        pytest.fail(f'force length case_seed={case_seed}, offset={offset:.3f}: {error}')
 
 
 @pytest.mark.parametrize('rotated',[False,True])

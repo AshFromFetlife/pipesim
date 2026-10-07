@@ -6,9 +6,10 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from .document import Assembly, DocumentError, joint_kind, substitute
-from .math3d import UnionFind, axis_frame, pose_of, unit, vec
+from .math3d import UnionFind, axis_frame, pose_of, transform, unit, vec
 
 THROUGH_REPAIR_MARGIN_MM = 0.1
+THROUGH_ENGAGEMENT_ROUNDOFF_MM = 0.001
 THROUGH_INFER_ALLOWANCE_MM = 1.0
 THROUGH_AXIS_TOLERANCE_DEG = float(np.degrees(np.arccos(.999)))
 
@@ -73,7 +74,7 @@ def _socket(assembly, attachment):
     return connector, socket, mouth, unit(axis)
 
 
-def _check_attachment(assembly, run, attachment, other_runs):
+def _check_attachment(assembly, run, attachment, other_runs, *, allow_existing_pair=False):
     connector, socket, _, _ = _socket(assembly, attachment)
     section = _definition(assembly, run, max(1., float(np.linalg.norm(vec(run['end_mm'])-vec(run['start_mm']))))).get('section', {})
     profile = 'round' if section.get('type') in ('tube', 'round', 'circle') else section.get('profile', section.get('type'))
@@ -97,6 +98,8 @@ def _check_attachment(assembly, run, attachment, other_runs):
         for used in other.get('attachments', []):
             if used is attachment or used['connector'] != connector.id:
                 continue
+            if other is run and not allow_existing_pair:
+                raise DocumentError(f"{run['id']} is already attached to {connector.id}; one pipe cannot occupy two sockets of the same connector")
             port = connector.ports[used['port']]
             if used['port'] == attachment['port'] or used['port'] in socket.get('excludes', []) or attachment['port'] in port.get('excludes', []):
                 raise DocumentError('This socket or its shared bore is occupied by a draft run')
@@ -147,6 +150,14 @@ def _layout(assembly, run):
     else:
         end = start + unit(end-start)*working_length
     conflicts = []
+    seen_connectors = set()
+    for attachment in attachments:
+        connector = attachment['connector']
+        if connector in seen_connectors:
+            conflicts.append({'run': run['id'], 'connector': connector,
+                              'code': 'DUPLICATE_CONNECTOR',
+                              'message': f'{run["id"]} occupies two sockets of {connector}; detach one connection'})
+        seen_connectors.add(connector)
     length = float(np.linalg.norm(end-start))
     if length <= 1e-6:
         start = bound['start'][0]
@@ -184,12 +195,17 @@ def _layout(assembly, run):
         angular = float(np.degrees(np.arccos(np.clip(abs(direction @ axis), -1, 1))))
         half = socket.get('engagement_mm', 0)/2
         short = max(half-station, station-(length-half), 0.)
-        if gap > 1 or angular > THROUGH_AXIS_TOLERANCE_DEG or short > 0:
-            reason = (f'Through socket needs {short:.3f} mm more pipe engagement' if short > 0 else
+        if gap > 1 or angular > THROUGH_AXIS_TOLERANCE_DEG or short > THROUGH_ENGAGEMENT_ROUNDOFF_MM:
+            reason = (f'Through socket needs {short:.3f} mm more pipe engagement' if short > THROUGH_ENGAGEMENT_ROUNDOFF_MM else
                       f'Through socket axis differs by {angular:.3f}Â°' if angular > THROUGH_AXIS_TOLERANCE_DEG else
                       f'Through socket misses the pipe centreline by {gap:.3f} mm')
             conflicts.append({'run': run['id'], 'connector': connector.id, 'port': attachment['port'], 'code': 'THROUGH_FIT',
-                              'residual_mm': round(max(gap, short), 3), 'residual_deg': round(angular, 3), 'message': reason})
+                              'residual_mm': round(max(gap, short), 3),
+                              'radial_gap_mm': round(gap, 3),
+                              'radial_gap_exact_mm': gap,
+                              'engagement_short_mm': round(short, 3),
+                              'residual_deg': round(angular, 3),
+                              'axis_error_exact_deg': angular, 'message': reason})
         through.append((attachment, station))
     matrix = np.eye(4)
     matrix[:3, :3] = axis_frame(direction) @ Rotation.from_euler('z', run.get('roll_deg', 0), degrees=True).as_matrix()
@@ -249,24 +265,141 @@ def _inferred_through(assembly, allow_near=False):
                   'runs': [run_id for run_id, _ in candidates],
                   'message': f'{connector}/{port} aligns with more than one draft pipe; choose its intended connection'}
                  for (connector, port), candidates in by_socket.items() if len(candidates) > 1]
+    by_pair = {}
+    for run_id, attachment in unique:
+        by_pair.setdefault((run_id, attachment['connector']), []).append(attachment['port'])
+    for (run_id, connector), ports in by_pair.items():
+        if len(ports) > 1:
+            ambiguous.append({'code': 'AMBIGUOUS_CONNECTOR', 'connector': connector,
+                              'runs': [run_id], 'ports': ports,
+                              'message': f'{run_id} aligns with multiple sockets of {connector}; choose one socket'})
+    unique = [(run_id, attachment) for run_id, attachment in unique
+              if len(by_pair[run_id, attachment['connector']]) == 1]
     return unique, ambiguous, near
 
 
 def preview(assembly):
     """Small visual proxies; the resolved Assembly remains exact-only."""
+    from .symmetry import mirror_run_conflict
     result = []
+    planes = {run['id']: group.get('mirrors', []) for group in assembly.doc.get('draft_subassemblies', [])
+              for run in group['runs']}
     for run in runs(assembly.doc):
         layout = _layout(assembly, run)
+        conflicts = list(layout['conflicts'])
+        for plane in planes.get(run['id'], []):
+            conflict = mirror_run_conflict(layout, plane, plane.get('run_modes', {}).get(run['id'], 'free'))
+            if conflict:
+                conflicts.append({'run': run['id'], 'plane': plane['id'], **conflict})
         definition = _definition(assembly, run, layout['length'])
         result.append({'id': run['id'], 'label': run['id']+' · draft', 'catalog': run['catalog'], 'kind': 'member',
                        'draft': True, 'pose': layout['pose'], 'geometry': definition['geometry'],
                        'ports': {}, 'section': definition.get('section', {}), 'length_mm': layout['length'],
-                       'mass_kg': 0., 'color': '#5ba9b5' if not layout['conflicts'] else '#cf815d',
-                       'conflicts': layout['conflicts'], 'attachments': run.get('attachments', [])})
+                       'mass_kg': 0., 'color': '#5ba9b5' if not conflicts else '#cf815d',
+                       'conflicts': conflicts, 'attachments': run.get('attachments', [])})
     return result
 
 
-def validate_drafts(assembly):
+def _mirror_conflicts(assembly, selected):
+    from .symmetry import mirror_run_conflict
+
+    conflicts = []
+    for group in selected:
+        for run in group['runs']:
+            layout = _layout(assembly, run)
+            for plane in group.get('mirrors', []):
+                conflict = mirror_run_conflict(layout, plane,
+                    plane.get('run_modes', {}).get(run['id'], 'free'))
+                if conflict:
+                    conflicts.append({'run': run['id'], 'plane': plane['id'], **conflict})
+    return conflicts
+
+
+def _align_free_mirror_runs(assembly, selected):
+    """Project unconstrained draft spans onto their requested mirror geometry.
+
+    The raw endpoints are the whole pose for an unattached run. A one-ended,
+    unlocked centered run can instead change its working length around the
+    socket without moving that connector.
+    """
+    from .symmetry import AXES, mirror_run_conflict
+
+    document = copy.deepcopy(assembly.doc)
+    selected_ids = {run['id'] for group in selected for run in group['runs']}
+    moved = set()
+    for group in document.get('draft_subassemblies', []):
+        for run in group['runs']:
+            if run['id'] not in selected_ids:
+                continue
+            planes = [(plane, plane.get('run_modes', {}).get(run['id'], 'free'))
+                      for plane in group.get('mirrors', [])]
+            planes = [(plane, mode) for plane, mode in planes if mode != 'free' and
+                      mirror_run_conflict(_layout(assembly, run), plane, mode)]
+            if not planes:
+                continue
+            attachments = run.get('attachments', [])
+            bound = [item for item in attachments if item.get('end') in ('start', 'end')]
+            if not attachments:
+                centered = [plane for plane, mode in planes if mode == 'centered']
+                all_centered = [plane for plane in group.get('mirrors', [])
+                                if plane.get('run_modes', {}).get(run['id']) == 'centered']
+                if len(all_centered) > 1:
+                    continue
+                in_plane = [plane for plane in group.get('mirrors', [])
+                            if plane.get('run_modes', {}).get(run['id']) == 'in_plane']
+                start, end = vec(run['start_mm']), vec(run['end_mm'])
+                direction = end-start
+                length = float(run.get('locked_length_mm', np.linalg.norm(direction)))
+                midpoint = (start+end)/2
+                for plane in in_plane:
+                    axis = AXES[plane['axis']]
+                    midpoint[axis] = plane['offset_mm']
+                    direction[axis] = 0
+                if all_centered:
+                    plane = all_centered[0]
+                    axis = AXES[plane['axis']]
+                    sign = 1 if end[axis] >= start[axis] else -1
+                    midpoint[axis] = plane['offset_mm']
+                    direction = np.zeros(3)
+                    direction[axis] = sign
+                elif np.linalg.norm(direction) <= 1e-9:
+                    available = next((axis for axis in range(3)
+                                      if all(AXES[plane['axis']] != axis for plane in in_plane)), None)
+                    if available is None:
+                        continue
+                    direction[available] = 1
+                direction = unit(direction)
+                run['start_mm'] = (midpoint-direction*length/2).tolist()
+                run['end_mm'] = (midpoint+direction*length/2).tolist()
+                moved.add(run['id'])
+            elif len(bound) == 1 and run.get('locked_length_mm') is None:
+                attachment = bound[0]
+                _, socket, mouth, axis_direction = _socket(assembly, attachment)
+                depth = attachment.get('insertion_mm', min(30., socket['engagement_mm']*.8))
+                point = mouth-axis_direction*depth
+                for plane, mode in planes:
+                    if mode != 'centered':
+                        continue
+                    axis = AXES[plane['axis']]
+                    component = axis_direction[axis]
+                    if abs(component) < .99999:
+                        continue
+                    length = 2*(plane['offset_mm']-point[axis])/component
+                    if length <= 1e-6:
+                        continue
+                    other = point+axis_direction*length
+                    start, end = ((point, other) if attachment['end'] == 'start'
+                                  else (other, point))
+                    run['start_mm'] = start.tolist()
+                    run['end_mm'] = end.tolist()
+                    moved.add(run['id'])
+    if not moved:
+        return assembly, set()
+    return Assembly.from_doc(document, assembly.base, assembly.library,
+                             validate_mirror_geometry=False), moved
+
+
+def validate_drafts(assembly, *, validate_mirror_geometry=True):
     """Reject broken graph references while allowing geometric closure residuals."""
     groups = assembly.doc.get('draft_subassemblies', [])
     group_ids = [group['id'] for group in groups]
@@ -282,26 +415,28 @@ def validate_drafts(assembly):
             raise DocumentError(f"{run['id']}: preview span must be positive")
         _definition(assembly, run, span)
         for attachment in run.get('attachments', []):
-            _check_attachment(assembly, run, attachment, all_runs)
+            _check_attachment(assembly, run, attachment, all_runs, allow_existing_pair=True)
     if any(group.get('mirrors') for group in groups):
         from .symmetry import validate_mirrors
-        validate_mirrors(assembly)
+        validate_mirrors(assembly,geometry=validate_mirror_geometry)
 
 
 def _relax(assembly, selected, cancelled=None):
-    """Solve free exact components as rigid poses against the whole draft graph.
+    """Solve free exact components and through-only draft runs together.
 
     Existing joints and anchors are hard boundaries. Each free component moves
-    together, so its finished joints retain their original geometry. A sparse
-    warm-started solve closes positions and axes in one batch.
+    together, so its finished joints retain their original geometry. Through-only
+    runs have no end socket to derive their centreline; their preview pose is
+    therefore a solve variable, while their working length stays fixed.
     """
     from scipy.optimize import least_squares
     from scipy.sparse import lil_matrix
     from scipy.spatial.transform import Rotation
     from .symmetry import AXES
 
-    if not any(_layout(assembly, run)['conflicts'] for group in selected for run in group['runs']):
-        return assembly, {}, {}
+    if (not any(_layout(assembly, run)['conflicts'] for group in selected for run in group['runs'])
+            and not _mirror_conflicts(assembly, selected)):
+        return assembly, {}, {}, set()
     _check_cancelled(cancelled)
 
     graph = UnionFind(assembly.parts)
@@ -315,19 +450,47 @@ def _relax(assembly, selected, cancelled=None):
     direct = {p['id'] for p in assembly.doc.get('parts', [])}
     movable = [group for group in graph.groups() if requested.intersection(group) and
                not anchored.intersection(group) and not held.intersection(group) and set(group) <= direct]
-    if not movable:
-        return assembly, {}, {}
     index = {pid: i for i, group in enumerate(movable) for pid in group}
+    connector_usage = {}
+    through_only_ids = set()
+    for group in selected:
+        for run in group['runs']:
+            if run.get('attachments') and all(a.get('end') not in ('start', 'end')
+                                              for a in run['attachments']):
+                through_only_ids.add(run['id'])
+            for attachment in run.get('attachments', []):
+                connector_usage.setdefault(attachment['connector'], set()).add(run['id'])
+    mirror_runs = {conflict['run'] for conflict in _mirror_conflicts(assembly, selected)}
+    free_runs = [run for group in selected for run in group['runs']
+                 if run.get('attachments') and
+                 (run['id'] in mirror_runs or
+                  any(c['code'] == 'THROUGH_FIT' and
+                      (c['radial_gap_exact_mm'] > 1 or
+                       c['axis_error_exact_deg'] > THROUGH_AXIS_TOLERANCE_DEG)
+                      for c in _layout(assembly, run)['conflicts'])) and
+                 not any(a.get('end') in ('start', 'end') for a in run['attachments']) and
+                 (len(run['attachments']) > 1 or
+                  any(len(connector_usage[a['connector']] & through_only_ids) > 1
+                      for a in run['attachments']) or
+                  all(a['connector'] not in index for a in run['attachments']))]
+    if not movable and not free_runs:
+        return assembly, {}, {}, set()
+    run_index = {run['id']: len(movable)+i for i, run in enumerate(free_runs)}
+    solved_runs = {run['id']: copy.deepcopy(run) for group in selected for run in group['runs']}
+    run_endpoints = {run['id']: (vec(run['start_mm']), vec(run['end_mm'])) for run in free_runs}
     working = copy.copy(assembly)
     working.parts = {pid: copy.copy(part) for pid, part in assembly.parts.items()}
     original = {pid: part.matrix.copy() for pid, part in assembly.parts.items()}
     pivots = [np.mean([original[pid][:3, 3] for pid in group], axis=0) for group in movable]
     specs = []
     for group in selected:
-        for run in group['runs']:
+        for original_run in group['runs']:
+            run = solved_runs[original_run['id']]
             attachments = run.get('attachments', [])
             ends = {a['end']: a for a in attachments if a.get('end') in ('start', 'end')}
             dependencies = {index[a['connector']] for a in attachments if a['connector'] in index}
+            if run['id'] in run_index:
+                dependencies.add(run_index[run['id']])
             if len(ends) == 1:
                 attachment = next(iter(ends.values()))
                 for plane in group.get('mirrors', []):
@@ -340,7 +503,13 @@ def _relax(assembly, selected, cancelled=None):
                         specs.append((run, 'mirror_axis', (attachment, axis, expected),
                                       {index[attachment['connector']]}, 3))
             for plane in group.get('mirrors', []):
-                if plane.get('run_modes', {}).get(run['id']) == 'in_plane' and dependencies:
+                mode = plane.get('run_modes', {}).get(run['id'])
+                if mode == 'centered' and run['id'] in run_index:
+                    specs.append((run, 'mirror_center', (AXES[plane['axis']], plane['offset_mm'],
+                                                        1 if run['end_mm'][AXES[plane['axis']]] >=
+                                                        run['start_mm'][AXES[plane['axis']]] else -1),
+                                  dependencies, 4))
+                if mode == 'in_plane' and dependencies:
                     specs.append((run, 'mirror_plane', (AXES[plane['axis']], plane['offset_mm']),
                                   dependencies, 2))
             if 'start' in ends and 'end' in ends:
@@ -351,8 +520,8 @@ def _relax(assembly, selected, cancelled=None):
             if run.get('locked_length_mm') is not None and attachments:
                 specs.append((run, 'length', None, dependencies, 1))
     if not specs:
-        return assembly, {}, {}
-    count = 6*len(movable)
+        return assembly, {}, {}, set()
+    count = 6*(len(movable)+len(free_runs))
     rows = sum(spec[4] for spec in specs)+count
     pattern = lil_matrix((rows, count), dtype=int)
     row = 0
@@ -373,6 +542,14 @@ def _relax(assembly, selected, cancelled=None):
                 matrix[:3, :3] = rotation @ matrix[:3, :3]
                 matrix[:3, 3] = pivot + rotation @ (matrix[:3, 3]-pivot) + delta
                 working.parts[pid].matrix = matrix
+        for run in free_runs:
+            variable = run_index[run['id']]
+            delta = x[6*variable:6*variable+3]
+            rotation = Rotation.from_rotvec(x[6*variable+3:6*variable+6]).as_matrix()
+            start, end = run_endpoints[run['id']]
+            pivot = (start+end)/2
+            solved_runs[run['id']]['start_mm'] = (pivot+rotation@(start-pivot)+delta).tolist()
+            solved_runs[run['id']]['end_mm'] = (pivot+rotation@(end-pivot)+delta).tolist()
         errors = []
         for run, kind, attachment, _, size in specs:
             try:
@@ -387,6 +564,11 @@ def _relax(assembly, selected, cancelled=None):
                 elif kind == 'mirror_plane':
                     axis_index, offset = attachment
                     errors.extend([(start[axis_index]-offset)*10, (end[axis_index]-offset)*10])
+                elif kind == 'mirror_center':
+                    axis_index, offset, sign = attachment
+                    target = np.zeros(3); target[axis_index] = sign
+                    errors.append(((start[axis_index]+end[axis_index])/2-offset)*10)
+                    errors.extend((direction-target)*100)
                 elif kind == 'ends':
                     first = next(a for a in run['attachments'] if a.get('end') == 'start')
                     last = next(a for a in run['attachments'] if a.get('end') == 'end')
@@ -409,7 +591,7 @@ def _relax(assembly, selected, cancelled=None):
                     errors.append(layout['length']-run['locked_length_mm'])
             except (DocumentError, ValueError):
                 errors.extend([1e6]*size)
-        for i in range(len(movable)):
+        for i in range(len(movable)+len(free_runs)):
             errors.extend(x[6*i:6*i+3]*1e-3)
             errors.extend(x[6*i+3:6*i+6]*.3)
         return np.asarray(errors, dtype=float)
@@ -419,8 +601,10 @@ def _relax(assembly, selected, cancelled=None):
     residual(solution.x)
     changed = {pid for i, group in enumerate(movable) for pid in group if
                np.linalg.norm(solution.x[6*i:6*i+6]) > 1e-5}
-    if not changed:
-        return assembly, {}, {}
+    changed_runs = {run['id'] for run in free_runs if
+                    np.linalg.norm(solution.x[6*run_index[run['id']]:6*run_index[run['id']]+6]) > 1e-5}
+    if not changed and not changed_runs:
+        return assembly, {}, {}, set()
     movement = {pid: float(np.linalg.norm(working.parts[pid].matrix[:3, 3]-original[pid][:3, 3]))
                 for pid in changed}
     rotations = {pid: float(np.degrees(np.linalg.norm(solution.x[6*index[pid]+3:6*index[pid]+6])))
@@ -429,14 +613,19 @@ def _relax(assembly, selected, cancelled=None):
     for part in document.get('parts', []):
         if part['id'] in changed:
             part['pose'] = pose_of(working.parts[part['id']].matrix)
+    for run in runs(document):
+        if run['id'] in changed_runs:
+            run['start_mm'] = solved_runs[run['id']]['start_mm']
+            run['end_mm'] = solved_runs[run['id']]['end_mm']
     if document.get('draft_subassemblies'):
         from .symmetry import fit_moved_centered_runs
         fit_moved_centered_runs(working, document, changed)
-    return Assembly.from_doc(document, assembly.base, assembly.library), movement, rotations
+    return Assembly.from_doc(document, assembly.base, assembly.library,
+                             validate_mirror_geometry=False), movement, rotations, changed_runs
 
 
 def _extend_unlocked_through_spans(assembly, selected):
-    """Give through-only draft pipes the small extra engagement their fittings need."""
+    """Extend free draft ends until every aligned through fitting has full support."""
     selected_ids = {run['id'] for group in selected for run in group['runs']}
     document = copy.deepcopy(assembly.doc)
     resized = {}
@@ -445,7 +634,8 @@ def _extend_unlocked_through_spans(assembly, selected):
             if run['id'] not in selected_ids or run.get('locked_length_mm') is not None:
                 continue
             attachments = run.get('attachments', [])
-            if not attachments or any(a.get('end') in ('start', 'end') for a in attachments):
+            bound_ends = {a['end'] for a in attachments if a.get('end') in ('start', 'end')}
+            if not attachments or len(bound_ends) == 2:
                 continue
             layout = _layout(assembly, run)
             start, end, length = layout['start'], layout['end'], layout['length']
@@ -461,32 +651,114 @@ def _extend_unlocked_through_spans(assembly, selected):
                 if gap > 1 or angular > THROUGH_AXIS_TOLERANCE_DEG:
                     continue
                 half = socket.get('engagement_mm', 0)/2
-                if station < half:
+                if station < half+THROUGH_REPAIR_MARGIN_MM:
                     before = max(before, half+THROUGH_REPAIR_MARGIN_MM-station)
-                if station > length-half:
+                if station > length-half-THROUGH_REPAIR_MARGIN_MM:
                     after = max(after, station+half+THROUGH_REPAIR_MARGIN_MM-length)
             if before <= 0 and after <= 0:
                 continue
             centered = any(plane.get('run_modes', {}).get(run['id']) == 'centered'
                            for plane in group.get('mirrors', []))
-            if centered:
+            if centered and not bound_ends:
                 before = after = max(before, after)
+            if 'start' in bound_ends:
+                before = 0.
+            if 'end' in bound_ends:
+                after = 0.
+            if before <= 0 and after <= 0:
+                continue
             run['start_mm'] = (start-direction*before).tolist()
             run['end_mm'] = (end+direction*after).tolist()
             resized[run['id']] = before+after
     if not resized:
         return assembly, {}
-    return Assembly.from_doc(document, assembly.base, assembly.library), resized
+    return Assembly.from_doc(document, assembly.base, assembly.library,
+                             validate_mirror_geometry=False), resized
+
+
+def _close_dangling_chain_gaps(assembly):
+    """Rejoin a free chain component displaced by an older connector edit.
+
+    A spherical joint constrains its frame origins. Removing that one joint
+    must separate the chain and its free payload from the host; translating the
+    whole separated component then closes the gap without changing any other
+    joint or draft run. Anchors, cycles, and partial object moves stay untouched.
+    """
+    prefixes=tuple(o['id']+'/' for o in assembly.doc.get('objects',[])
+                   if o.get('template')=='chain')
+    if not prefixes:return assembly,{},[]
+    moved={};closed=[]
+    joint_ids=[j['id'] for j in assembly.joints]
+    for joint_id in joint_ids:
+        joint=next(j for j in assembly.joints if j['id']==joint_id)
+        if joint_kind(joint)!='spherical':continue
+        ends=[joint[e]['part'] for e in ('a','b')]
+        chain=[pid for pid in ends if pid.startswith(prefixes)]
+        if len(chain)!=1:continue
+        chain_part=chain[0];host=ends[1] if ends[0]==chain_part else ends[0]
+        pa,pb,_=assembly.joint_frames(joint)
+        gap=float(np.linalg.norm(pb-pa))
+        if gap<=1.1:continue
+        adjacency={pid:set() for pid in assembly.parts}
+        for other in assembly.joints:
+            if other['id']==joint_id:continue
+            a,b=(other[e]['part'] for e in ('a','b'))
+            adjacency[a].add(b);adjacency[b].add(a)
+        component={chain_part};queue=[chain_part]
+        for pid in queue:
+            for neighbor in adjacency[pid]-component:
+                component.add(neighbor);queue.append(neighbor)
+        if host in component or any(a['part'] in component for a in assembly.anchors):continue
+        if any(a['connector'] in component for run in runs(assembly.doc)
+               for a in run.get('attachments',[])):continue
+        direct={p['id'] for p in assembly.doc.get('parts',[])}
+        object_members={o['id']:{pid for pid in assembly.parts
+                                  if pid.startswith(o['id']+'/') and pid not in direct}
+                        for o in assembly.doc.get('objects',[])}
+        if any(members&component and not members<=component
+               for members in object_members.values()):continue
+        delta=(pa-pb) if chain_part==ends[1] else (pb-pa)
+        document=copy.deepcopy(assembly.doc)
+        for part in document.get('parts',[]):
+            if part['id'] in component:
+                matrix=assembly.parts[part['id']].matrix.copy()
+                matrix[:3,3]+=delta
+                part['pose']=pose_of(matrix)
+        for obj in document.get('objects',[]):
+            if object_members[obj['id']] and object_members[obj['id']]<=component:
+                matrix=transform(obj.get('pose'))
+                matrix[:3,3]+=delta
+                obj['pose']=pose_of(matrix)
+        try:
+            candidate=Assembly.from_doc(document,assembly.base,assembly.library,
+                                        validate_mirror_geometry=False)
+        except DocumentError:
+            continue
+        def joint_gap(model,item):
+            a,b,_=model.joint_frames(item)
+            return float(np.linalg.norm(b-a))
+        previous={j['id']:joint_gap(assembly,j) for j in assembly.joints}
+        actual={j['id']:joint_gap(candidate,j) for j in candidate.joints}
+        if (actual[joint_id]>1.1 or
+                any(value>max(1.1,previous[jid])+1e-3 for jid,value in actual.items())):
+            continue
+        moved.update({pid:float(np.linalg.norm(delta)) for pid in component})
+        closed.append(joint_id)
+        assembly=candidate
+    return assembly,moved,closed
 
 
 def repair(assembly, subassembly=None, cancelled=None, run_id=None):
     """Close draft fit residuals without materializing runs or joints."""
     inferred, ambiguous, _ = _inferred_through(assembly, allow_near=True)
     possible = [(candidate_run, {'connector': conflict['connector'], 'port': conflict['port']})
-                for conflict in ambiguous for candidate_run in conflict['runs']]
+                for conflict in ambiguous if 'port' in conflict for candidate_run in conflict['runs']]
     groups = _scope(assembly, subassembly, run_id, [*inferred, *possible])
     selected = {run['id'] for group in groups for run in group['runs']}
     conflicts = [conflict for conflict in ambiguous if selected.intersection(conflict['runs'])]
+    conflicts.extend(conflict for group in groups for run in group['runs']
+                     for conflict in _layout(assembly, run)['conflicts']
+                     if conflict['code'] == 'DUPLICATE_CONNECTOR')
     if conflicts:
         return {'status': 'conflict', 'conflicts': conflicts}
     inferred = [(candidate_run, attachment) for candidate_run, attachment in inferred if candidate_run in selected]
@@ -498,14 +770,22 @@ def repair(assembly, subassembly=None, cancelled=None, run_id=None):
         for candidate_run, attachment in inferred:
             run = next(run for run in runs(document) if run['id'] == candidate_run)
             run.setdefault('attachments', []).append(attachment)
-        assembly = Assembly.from_doc(document, assembly.base, assembly.library)
+        assembly = Assembly.from_doc(document, assembly.base, assembly.library,
+                                     validate_mirror_geometry=False)
         groups = _scope(assembly, subassembly, run_id)
-    repaired, moved, rotated = _relax(assembly, groups, cancelled)
+    assembly, _ = _extend_unlocked_through_spans(assembly, groups)
+    groups = _scope(assembly, subassembly, run_id)
+    assembly, aligned_runs = _align_free_mirror_runs(assembly, groups)
+    groups = _scope(assembly, subassembly, run_id)
+    repaired, moved, rotated, moved_runs = _relax(assembly, groups, cancelled)
+    moved_runs |= aligned_runs
     _check_cancelled(cancelled)
     repaired, _ = _extend_unlocked_through_spans(repaired, groups)
+    repaired, chain_moved, closed_chain_joints = _close_dangling_chain_gaps(repaired)
     groups = _scope(repaired, subassembly, run_id)
     conflicts = [conflict for group in groups for run in group['runs']
                  for conflict in _layout(repaired, run)['conflicts']]
+    conflicts.extend(_mirror_conflicts(repaired, groups))
     if conflicts:
         return {'status': 'conflict', 'conflicts': conflicts}
     resized = {}
@@ -514,25 +794,30 @@ def repair(assembly, subassembly=None, cancelled=None, run_id=None):
             difference = _layout(repaired, run)['length']-original_lengths[run['id']]
             if abs(difference) > 1e-5:
                 resized[run['id']] = difference
-    if not inferred and not moved and not rotated and not resized:
+    if not inferred and not moved and not rotated and not moved_runs and not resized and not closed_chain_joints:
         return {'status': 'aligned'}
     document = copy.deepcopy(repaired.doc)
     document.pop('results', None); document.pop('build_plan', None)
     _check_cancelled(cancelled)
     return {'status': 'repaired', 'document': document,
-            'moved_parts_mm': moved, 'rotated_parts_deg': rotated,
-            'resized_runs_mm': resized, 'inferred_through_connections': len(inferred)}
+            'moved_parts_mm': {**moved,**chain_moved}, 'rotated_parts_deg': rotated,
+            'moved_runs': sorted(moved_runs),
+            'resized_runs_mm': resized, 'inferred_through_connections': len(inferred),
+            'rejoined_chain_attachments': closed_chain_joints}
 
 
 def finalize(assembly, subassembly=None, check_collisions=True, cancelled=None, run_id=None, include_run_ids=()):
     """Materialize a draft group atomically or return all closure conflicts."""
     inferred, ambiguous, near = _inferred_through(assembly)
     possible = [(candidate_run, {'connector': conflict['connector'], 'port': conflict['port']})
-                for conflict in ambiguous for candidate_run in conflict['runs']]
+                for conflict in ambiguous if 'port' in conflict for candidate_run in conflict['runs']]
     groups = _scope(assembly, subassembly, run_id, [*inferred, *possible], include_run_ids)
     selected = {run['id'] for group in groups for run in group['runs']}
     conflicts = [conflict for conflict in ambiguous if selected.intersection(conflict['runs'])]
     conflicts.extend(conflict for conflict in near if conflict['run'] in selected)
+    conflicts.extend(conflict for group in groups for run in group['runs']
+                     for conflict in _layout(assembly, run)['conflicts']
+                     if conflict['code'] == 'DUPLICATE_CONNECTOR')
     if conflicts:
         return {'status': 'conflict', 'conflicts': conflicts}
     inferred = [(candidate_run, attachment) for candidate_run, attachment in inferred if candidate_run in selected]
@@ -545,14 +830,19 @@ def finalize(assembly, subassembly=None, check_collisions=True, cancelled=None, 
             except DocumentError as exc:
                 return {'status': 'conflict', 'conflicts': [{'run': candidate_run, 'code': 'THROUGH_FIT', 'message': str(exc)}]}
             run.setdefault('attachments', []).append(attachment)
-        assembly = Assembly.from_doc(document, assembly.base, assembly.library)
+        assembly = Assembly.from_doc(document, assembly.base, assembly.library,
+                                     validate_mirror_geometry=False)
         groups = _scope(assembly, subassembly, run_id, include_run_ids=include_run_ids)
     _check_cancelled(cancelled)
-    assembly, moved, rotated = _relax(assembly, groups, cancelled)
+    assembly, _ = _extend_unlocked_through_spans(assembly, groups)
+    groups = _scope(assembly, subassembly, run_id, include_run_ids=include_run_ids)
+    assembly, _ = _align_free_mirror_runs(assembly, groups)
+    groups = _scope(assembly, subassembly, run_id, include_run_ids=include_run_ids)
+    assembly, moved, rotated, moved_runs = _relax(assembly, groups, cancelled)
     assembly, _ = _extend_unlocked_through_spans(assembly, groups)
     groups = _scope(assembly, subassembly, run_id, include_run_ids=include_run_ids)
     document = copy.deepcopy(assembly.doc)
-    conflicts = []
+    conflicts = _mirror_conflicts(assembly, groups)
     for group in groups:
         for run in group['runs']:
             _check_cancelled(cancelled)
@@ -583,12 +873,19 @@ def finalize(assembly, subassembly=None, check_collisions=True, cancelled=None, 
     selected = {run['id'] for group in groups for run in group['runs']}
     for group in document['draft_subassemblies']:
         group['runs'] = [run for run in group['runs'] if run['id'] not in selected]
+        remaining = {run['id'] for run in group['runs']}
+        for plane in group.get('mirrors', []):
+            plane['run_modes'] = {run_id: mode for run_id, mode in plane.get('run_modes', {}).items()
+                                  if run_id in remaining}
     document['draft_subassemblies'] = [group for group in document['draft_subassemblies'] if group['runs']]
     if not document['draft_subassemblies']:
         del document['draft_subassemblies']
     document.pop('results', None); document.pop('build_plan', None)
     _check_cancelled(cancelled)
-    finished = Assembly.from_doc(document, assembly.base, assembly.library)
+    finished = Assembly.from_doc(document, assembly.base, assembly.library,
+                                 validate_mirror_geometry=False)
+    finished, chain_moved, closed_chain_joints = _close_dangling_chain_gaps(finished)
+    document=finished.doc
     from .validation import validate
     validation_doc = copy.deepcopy(document)
     validation_doc.pop('draft_subassemblies', None)
@@ -600,8 +897,9 @@ def finalize(assembly, subassembly=None, check_collisions=True, cancelled=None, 
     if conflicts:
         return {'status': 'conflict', 'conflicts': conflicts}
     return {'status': 'finalized', 'document': document, 'lengths_mm': {p: finished.parts[p].length for p in added},
-            'moved_parts_mm': moved, 'rotated_parts_deg': rotated,
-            'inferred_through_connections': len(inferred)}
+            'moved_parts_mm': {**moved,**chain_moved}, 'rotated_parts_deg': rotated,
+            'inferred_through_connections': len(inferred),
+            'rejoined_chain_attachments': closed_chain_joints}
 
 
 def reopen(assembly, members):

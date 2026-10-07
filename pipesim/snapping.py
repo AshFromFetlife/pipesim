@@ -72,7 +72,113 @@ def _movement_coordinates(before, after):
     return coordinates
 
 
+def rigid_draft_follow(assembly, poses):
+    """Carry a free draft attachment graph through one rigid exact-body move.
+
+    Draft runs are not Assembly parts, so the exact joint mechanism cannot see
+    them. A connector with a dangling chain and a draft through-run is one
+    movable structure only when every already-moving exact joint component has
+    the same rigid transform. Articulated edits and anchored graphs retain their
+    existing, more constrained behavior.
+    """
+    from .drafting import runs
+
+    result=dict(poses)
+    draft_runs=runs(assembly.doc)
+    if not result or not draft_runs: return result,{}
+    mirror_modes={run['id']: [plane.get('run_modes',{}).get(run['id'],'free')
+                              for plane in group.get('mirrors',[])]
+                  for group in assembly.doc.get('draft_subassemblies',[])
+                  for run in group['runs']}
+    exact={pid:set() for pid in assembly.parts}
+    graph={pid:set() for pid in assembly.parts}
+    for run in draft_runs: graph[run['id']]=set()
+    for joint in assembly.joints:
+        a,b=joint['a']['part'],joint['b']['part']
+        exact[a].add(b);exact[b].add(a)
+        graph[a].add(b);graph[b].add(a)
+    for run in draft_runs:
+        for attachment in run.get('attachments',[]):
+            connector=attachment['connector']
+            graph[run['id']].add(connector);graph[connector].add(run['id'])
+
+    anchored={anchor['part'] for anchor in assembly.anchors}
+    visited=set();transforms={}
+    for seed in poses:
+        if seed in visited: continue
+        component={seed};queue=[seed]
+        for node in queue:
+            for other in graph[node]-component:
+                component.add(other);queue.append(other)
+        visited.update(component)
+        contained_runs={run['id'] for run in draft_runs if run['id'] in component}
+        if not contained_runs or component&anchored: continue
+        # A constrained run may change its working span or insertion depth
+        # when a fitting moves. Let the mirror fitter handle that motion;
+        # translating the whole run would move its midpoint off the plane.
+        if any(mode!='free' for run_id in contained_runs
+               for mode in mirror_modes.get(run_id,())):
+            continue
+        moved=[pid for pid in component if pid in result and pid in assembly.parts]
+        if not moved: continue
+        delta=transform(result[moved[0]])@np.linalg.inv(assembly.parts[moved[0]].matrix)
+        if any(not np.allclose(transform(result[pid])@np.linalg.inv(assembly.parts[pid].matrix),
+                               delta,atol=1e-5,rtol=0) for pid in moved[1:]):
+            continue
+        # A partially moved exact mechanism is an articulation, not a rigid
+        # structure. The draft graph must not turn such an edit into a drag of
+        # all its other limbs or links.
+        exact_seen=set();articulated=False
+        for pid in moved:
+            if pid in exact_seen: continue
+            exact_component={pid};exact_queue=[pid]
+            for node in exact_queue:
+                for other in exact[node]-exact_component:
+                    exact_component.add(other);exact_queue.append(other)
+            exact_seen.update(exact_component)
+            if any(part not in result for part in exact_component):
+                articulated=True;break
+        if articulated: continue
+        for pid in component & assembly.parts.keys():
+            if pid not in result:
+                result[pid]=pose_of(delta@assembly.parts[pid].matrix)
+        transforms.update({run_id:delta for run_id in contained_runs})
+    return result,transforms
+
+
+def apply_rigid_draft_follow(doc, transforms):
+    """Write the same world transform to both endpoints of followed runs."""
+    if not transforms: return
+    from .drafting import runs
+
+    for run in runs(doc):
+        delta=transforms.get(run['id'])
+        if delta is None: continue
+        for endpoint in ('start_mm','end_mm'):
+            run[endpoint]=(delta[:3,:3]@np.asarray(run[endpoint],dtype=float)+delta[:3,3]).tolist()
+
+
+def check_rigid_draft_follow(before, posed, document, transforms):
+    """Reject a new fit or mirror conflict after a rigid draft graph move."""
+    if not transforms: return
+    from .drafting import preview
+
+    def by_key(assembly):
+        return {(conflict.get('run'),conflict.get('code'),conflict.get('connector'),
+                 conflict.get('port'),conflict.get('plane')):conflict
+                for item in preview(assembly) for conflict in item['conflicts']}
+
+    original=by_key(before)
+    candidate=copy.copy(posed);candidate.doc=document
+    for key,conflict in by_key(candidate).items():
+        old=original.get(key)
+        if old is None or any(float(conflict.get(field,0))>float(old.get(field,0))+1e-6
+                              for field in ('residual_mm','residual_deg')):
+            raise DocumentError(conflict['message'])
+
+
 def move_document(assembly, poses):
+    poses,run_transforms=rigid_draft_follow(assembly,poses)
     posed=_pose_changes(assembly,poses)
     coordinates=_movement_coordinates(assembly,posed)
     doc=copy.deepcopy(assembly.doc)
@@ -80,7 +186,12 @@ def move_document(assembly, poses):
         if spec['id'] in poses: spec['pose']=pose_of(posed.parts[spec['id']].matrix)
     if doc.get('draft_subassemblies'):
         from .symmetry import fit_moved_centered_runs
-        fit_moved_centered_runs(posed, doc, set(poses))
+        apply_rigid_draft_follow(doc,run_transforms)
+        moved_with_runs={attachment['connector'] for run in doc['draft_subassemblies']
+                         for item in run['runs'] if item['id'] in run_transforms
+                         for attachment in item.get('attachments',[])}
+        fit_moved_centered_runs(posed, doc, set(poses)-moved_with_runs)
+        check_rigid_draft_follow(assembly,posed,doc,run_transforms)
     if coordinates:
         # Rebase the authored zero and remaining joint travel, including drives,
         # without expanding unrelated reusable objects in the user's document.

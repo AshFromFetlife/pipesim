@@ -43,6 +43,56 @@ def test_draft_connections_materialize_one_exact_cut_length():
     assert len(finished.joints) == 2
 
 
+def test_one_draft_pipe_cannot_use_two_sockets_of_one_connector():
+    doc = design()
+    doc['parts'].append({'id': 'double', 'body': {'kind': 'connector', 'mass_kg': .2,
+                         'geometry': [{'type': 'sphere', 'radius_mm': 6}],
+                         'ports': {name: {'type': 'socket', 'through': True, 'profile': 'round',
+                                          'diameter_mm': 42.4, 'position_mm': [x, 0, 0],
+                                          'axis': [1, 0, 0], 'engagement_mm': 30}
+                                   for name, x in [('first', -30), ('second', 30)]}},
+                         'pose': {'position_mm': [500, 0, 100]}})
+    ambiguous = Assembly.from_doc(copy.deepcopy(doc))
+    assert any(c['code'] == 'AMBIGUOUS_CONNECTOR' for c in repair(ambiguous)['conflicts'])
+    assert any(c['code'] == 'AMBIGUOUS_CONNECTOR' for c in finalize(ambiguous)['conflicts'])
+    doc = connect(Assembly.from_doc(doc), 'tube-1', 'double', 'first')
+    with pytest.raises(DocumentError, match='one pipe cannot occupy two sockets'):
+        connect(Assembly.from_doc(doc), 'tube-1', 'double', 'second')
+    # Existing invalid drafts remain openable and savable so their attachment can be removed.
+    doc['draft_subassemblies'][0]['runs'][0]['attachments'].append(
+        {'connector': 'double', 'port': 'second'})
+    assembly = Assembly.from_doc(doc)
+    assert any(c['code'] == 'DUPLICATE_CONNECTOR' for c in preview(assembly)[0]['conflicts'])
+    assert any(c['code'] == 'DUPLICATE_CONNECTOR' for c in repair(assembly)['conflicts'])
+    assert any(c['code'] == 'DUPLICATE_CONNECTOR' for c in finalize(assembly)['conflicts'])
+
+
+def test_repair_uses_unrounded_through_gap_at_display_tolerance():
+    doc = design()
+    doc['parts'] = [{'id': 'through', 'body': {'kind': 'connector', 'mass_kg': .2,
+                     'geometry': [{'type': 'sphere', 'radius_mm': 6,
+                                   'position_mm': [0, 80, 0]}],
+                     'ports': {'bore': {'type': 'socket', 'through': True,
+                                        'profile': 'round', 'diameter_mm': 42.4,
+                                        'axis': [1, 0, 0], 'engagement_mm': 40}}},
+                     'pose': {'position_mm': [500, 0, 100]}}]
+    doc['anchors'] = [{'part': 'through', 'surface': 'fixture'}]
+    run = doc['draft_subassemblies'][0]['runs'][0]
+    run['start_mm'] = [0, 1.0004, 100]
+    run['end_mm'] = [1000, 1.0004, 100]
+    run['attachments'] = [{'connector': 'through', 'port': 'bore'}]
+    conflict = preview(Assembly.from_doc(doc))[0]['conflicts'][0]
+    assert conflict['code'] == 'THROUGH_FIT'
+    assert conflict['radial_gap_mm'] == 1.0
+    assert conflict['radial_gap_exact_mm'] > 1.0
+
+    result = repair(Assembly.from_doc(doc))
+    assert result['status'] == 'repaired', result
+    assert not preview(Assembly.from_doc(result['document']))[0]['conflicts']
+    finalized = finalize(Assembly.from_doc(result['document']))
+    assert finalized['status'] == 'finalized', finalized
+
+
 def test_finished_pipe_returns_to_draft_with_its_span_and_socket_graph():
     doc = design()
     doc = connect(Assembly.from_doc(doc), 'tube-1', 'left', 'socket', 'start', 20)
@@ -512,6 +562,68 @@ def test_repair_keeps_mirror_axis_while_closing_a_connected_end_mismatch():
     assert 'tube-c-2-copy-14' in result['resized_runs_mm']
 
 
+def test_repair_rotates_crossed_fittings_and_through_only_bridge_together():
+    path = Path(__file__).parent/'fixtures'/'draft-cross-repair.pipe.yaml'
+    doc = yaml.safe_load(path.read_text(encoding='utf-8'))
+    original = copy.deepcopy(doc)
+    assembly = Assembly.from_doc(doc)
+    before = next(part for part in preview(assembly) if part['id'] == 'bridge')
+    assert before['conflicts'][0]['code'] == 'THROUGH_FIT'
+    assert before['conflicts'][0]['residual_mm'] > 18
+    direct = finalize(assembly, run_id='bridge', check_collisions=False)
+    assert direct['status'] == 'finalized', direct
+    result = repair(assembly, run_id='bridge')
+    assert result['status'] == 'repaired', result
+    assert doc == original
+    repaired = Assembly.from_doc(result['document'])
+    assert all(not part['conflicts'] for part in preview(repaired))
+    assert 'bridge' in result['moved_runs']
+    for part in ('cross0', 'cross1'):
+        assert 4 < result['rotated_parts_deg'][part] < 6
+    for part in ('anchor0', 'anchor1'):
+        assert np.allclose(repaired.parts[part].matrix, assembly.parts[part].matrix)
+    exact = finalize(repaired, run_id='bridge', check_collisions=False)
+    assert exact['status'] == 'finalized', exact
+
+
+def test_repair_moves_a_through_only_draft_pipe_between_fixed_fittings():
+    doc = design()
+    doc['parts'] = [{'id': pid, 'body': {'kind': 'connector', 'mass_kg': .2,
+                     'geometry': [{'type': 'sphere', 'radius_mm': 6}],
+                     'ports': {'bore': {'type': 'socket', 'through': True, 'profile': 'round',
+                                        'diameter_mm': 42.4, 'position_mm': [0, 0, 0],
+                                        'axis': [1, 0, 0], 'engagement_mm': 34}}},
+                     'pose': {'position_mm': [x, 0, 100]}}
+                    for pid, x in [('first', 200), ('second', 800)]]
+    doc['anchors'] = [{'part': pid, 'surface': 'fixture'} for pid in ('first', 'second')]
+    run = runs(doc)[0]
+    run['start_mm'] = [0, 5, 100]
+    run['end_mm'] = [1000, 5, 100]
+    run['attachments'] = [{'connector': pid, 'port': 'bore'} for pid in ('first', 'second')]
+    result = repair(Assembly.from_doc(doc))
+    assert result['status'] == 'repaired', result
+    assert result['moved_parts_mm'] == {}
+    assert result['moved_runs'] == ['tube-1']
+    assert preview(Assembly.from_doc(result['document']))[0]['conflicts'] == []
+
+
+def test_partial_finalization_removes_mirror_modes_for_finished_runs():
+    doc = design()
+    group = doc['draft_subassemblies'][0]
+    second = copy.deepcopy(group['runs'][0])
+    second['id'] = 'tube-2'
+    second['start_mm'][1] = second['end_mm'][1] = 500
+    group['runs'].append(second)
+    group['mirrors'] = [{'id': 'scene-x', 'axis': 'x', 'offset_mm': 0,
+                         'run_modes': {'tube-1': 'free', 'tube-2': 'free'}}]
+    result = finalize(Assembly.from_doc(doc), run_id='tube-1', check_collisions=False)
+    assert result['status'] == 'finalized', result
+    remaining = result['document']['draft_subassemblies'][0]
+    assert remaining['mirrors'][0]['run_modes'] == {'tube-2': 'free'}
+    assert [run['id'] for run in remaining['runs']] == ['tube-2']
+    Assembly.from_doc(result['document'])
+
+
 def test_draft_through_axis_allowance_matches_exact_validation():
     doc = design()
     doc['parts'] = [{'id': 'through', 'body': {'kind': 'connector', 'mass_kg': .2,
@@ -586,10 +698,10 @@ def test_editor_cancels_draft_operation_before_committing(editor, monkeypatch, o
 
     entered, release = threading.Event(), threading.Event()
     original = Handler.assembly
-    def paused_assembly(handler, document, base):
+    def paused_assembly(handler, document, base, **kwargs):
         entered.set()
         assert release.wait(10)
-        return original(handler, document, base)
+        return original(handler, document, base, **kwargs)
     monkeypatch.setattr(Handler, 'assembly', paused_assembly)
     result = []
     def run():

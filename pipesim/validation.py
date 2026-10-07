@@ -34,6 +34,37 @@ class CollisionWorld:
     def __enter__(self): return self
     def __exit__(self,*args): self.close()
 
+
+def _socket_interface_contact(assembly, joint, contact):
+    """Whether a collision contact lies in this joint's occupied socket bore.
+
+    Bullet treats a mirrored STL fitting as a convex hull, so the deliberately
+    inserted member can penetrate its collision proxy by the full insertion
+    depth. Bound the exception to the declared socket and insertion segment;
+    another interference between the same two parts must still be reported.
+    """
+    connector = assembly.parts[joint['a']['part']]
+    socket = connector.ports[joint['a']['port']]
+    mouth, axis = connector.frame(joint['a'])
+    if socket.get('through'):
+        half = float(socket.get('engagement_mm', 0))/2
+        axial_low, axial_high = -half, half
+    else:
+        axial_low = -float(joint.get('insertion_mm', 0))
+        axial_high = 0.
+    # Allow the outer wall and Bullet's contact margin around the bore, while
+    # retaining clearance checks for the remainder of the fitting and pipe.
+    radial_limit = float(socket.get('diameter_mm', 0))/2 + max(
+        5., float(socket.get('clearance_mm', 0)) + 2.)
+    for point_metres in (contact[5], contact[6]):
+        relative = np.asarray(point_metres)*1000 - mouth
+        axial = float(relative @ axis)
+        radial = float(np.linalg.norm(relative-axis*axial))
+        if not axial_low-2 <= axial <= axial_high+2 or radial > radial_limit:
+            return False
+    return True
+
+
 def support(assembly,subset=None,tolerance_mm=1.,cancelled=None):
     """Quasi-static gravity support polygon for each currently rigid component.
 
@@ -73,12 +104,12 @@ def support(assembly,subset=None,tolerance_mm=1.,cancelled=None):
 
 def validate(assembly,collisions=True,build=False,cancelled=None):
     assembly.require_finished('validation')
-    from .drafting import _check_cancelled
+    from .drafting import THROUGH_ENGAGEMENT_ROUNDOFF_MM, _check_cancelled
     _check_cancelled(cancelled)
     issues=[]
     def issue(code,message,parts=(),severity='error',**details):
         issues.append({'code':code,'severity':severity,'message':message,'parts':list(parts),**details})
-    occupied={}; member_ends={}
+    occupied={}; member_ends={}; socket_pairs={}
     for p in assembly.parts.values():
         _check_cancelled(cancelled)
         try:
@@ -118,6 +149,7 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
             port=a.ports.get(j['a'].get('port',''),{})
             if port.get('type')!='socket' or b.kind!='member':
                 issue('SOCKET_ENDPOINTS','Socket a must be a connector socket and b a member',[a.id,b.id],joint=j['id']); continue
+            socket_pairs.setdefault((a.id,b.id),[]).append(j['id'])
             section=b.section; diameter=section.get('diameter_mm')
             if diameter is None or abs(diameter-port.get('diameter_mm',0))>.6:
                 issue('PROFILE_MISMATCH','Member cross-section does not match the socket bore',[a.id,b.id],joint=j['id'])
@@ -141,8 +173,14 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
                 station=float((mouth-b.matrix[:3,3])@b.matrix[:3,2]+b.length/2)
                 declared_station=j['b'].get('at_mm',0 if j['b'].get('end')=='start' else b.length)
                 half=port.get('engagement_mm',0)/2
-                if min(station,declared_station)<half or max(station,declared_station)>b.length-half:
-                    issue('THROUGH_ENGAGEMENT','Pipe must span the full through socket',[a.id,b.id],joint=j['id'])
+                # Draft cuts and stations are stored to six decimal places while
+                # part poses are rounded separately. Reconstructing a rotated
+                # frame can move an exactly flush cut by a fraction of a micron.
+                shortfall=max(half-min(station,declared_station),
+                              max(station,declared_station)-(b.length-half),0.)
+                if shortfall>THROUGH_ENGAGEMENT_ROUNDOFF_MM:
+                    issue('THROUGH_ENGAGEMENT','Pipe must span the full through socket',[a.id,b.id],
+                          joint=j['id'],shortfall_mm=shortfall)
             if not j.get('locked',False): issue('LOOSE_SCREW','Socket can slide and rotate because its screw is loose',[a.id,b.id],'warning',joint=j['id'])
         for key,values in j.get('limits',{}).items():
             pairs=values if key=='rotation_deg' else [values]
@@ -160,6 +198,9 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
         for other in assembly.parts[pid].ports[port].get('excludes',[]):
             if (pid,other) in occupied and port<other:
                 issue('SHARED_BORE_OCCUPIED',f'{pid}/{port} and {other} use the same bore; choose continuous pipe or two pipe ends',[pid],joints=jids+occupied[pid,other])
+    for (connector,member),jids in socket_pairs.items():
+        if len(jids)>1:
+            issue('DUPLICATE_CONNECTOR',f'{member} occupies multiple sockets of {connector}; detach all but one',[member,connector],joints=jids)
     for (pid,end),jids in member_ends.items():
         if len(jids)>1: issue('END_OCCUPIED',f'{pid} {end} is terminated more than once',[pid],joints=jids)
     for load in assembly.doc.get('loads',[]):
@@ -183,6 +224,10 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
                 overlaps=[c for c in contacts if c[8]*1000 < -1.]
                 if not overlaps: continue
                 pair=joints_by_pair.get(frozenset([a,b]),[])
+                sockets=[j for j in pair if j.get('type')=='socket']
+                overlaps=[c for c in overlaps if not any(
+                    _socket_interface_contact(assembly,j,c) for j in sockets)]
+                if not overlaps: continue
                 # Adjacent humanoid capsules overlap at anatomical joint caps by design.
                 if pair and assembly.parts[a].kind=='human' and assembly.parts[b].kind=='human': continue
                 # Explicit bolt/glue mounting interfaces may overlap only near the declared frame.
