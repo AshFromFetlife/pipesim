@@ -383,6 +383,9 @@ def resize_drag(assembly,identifier,length_mm,side,behavior='follow',capture_mm=
         new_point,_=after.parts[new_id].frame({'port':new_port})
         delta=old_point-new_point
         if np.linalg.norm(delta)>1e-6:
+            for anchor in after.anchors:
+                if anchor['part'].startswith(identifier+'/'):
+                    raise DocumentError(f'{anchor["part"]} is anchored and cannot follow this endpoint')
             from .grouping import move_object
             obj=next(o for o in doc['objects'] if o['id']==identifier)
             pose=copy.deepcopy(obj.get('pose',{}))

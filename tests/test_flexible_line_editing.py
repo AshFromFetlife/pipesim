@@ -2,6 +2,7 @@
 import copy
 
 import numpy as np
+import pytest
 
 from pipesim.document import Assembly
 from pipesim.grouping import attach_part, update_object_parameters
@@ -34,15 +35,18 @@ def assert_attached(assembly):
         assert np.linalg.norm(a-b) < .05, joint['id']
 
 
-def test_change_profile_keeps_existing_attachment_ids_and_support(factory, blank):
+@pytest.mark.parametrize('catalog,count', [('generic.rope-nylon-10',8),
+                                           ('generic.strap-seatbelt-65',8),
+                                           ('generic.chain-heavy-100',3)])
+def test_change_profile_keeps_existing_attachment_ids_and_support(factory, blank, catalog, count):
     before = attached_line(factory, blank)
     doc = update_object_parameters(before, 'line',
-                                   {'length_mm':200, 'link_catalog':'generic.rope-nylon-10'})
+                                   {'length_mm':200, 'link_catalog':catalog})
     after = factory(doc)
     assert [j['id'] for j in doc['joints']] == ['top','bottom']
-    assert len([p for p in after.parts if p.startswith('line/')]) == 8
-    assert all(after.parts[f'line/link-{i}'].spec['catalog']=='generic.rope-nylon-10'
-               for i in range(1,9))
+    assert len([p for p in after.parts if p.startswith('line/')]) == count
+    assert all(after.parts[f'line/link-{i}'].spec['catalog']==catalog
+               for i in range(1,count+1))
     assert doc['anchors'] == before.doc['anchors']
     assert_attached(after)
 
@@ -135,4 +139,38 @@ def test_extending_attached_end_keeps_attachment_at_new_tip(factory, blank):
     bottom = next(j for j in after.doc['joints'] if j['id']=='bottom')
     assert bottom['b']['part']=='line/link-14'
     assert np.allclose(after.parts['weight'].matrix[:3,3], [0,0,120], atol=.05)
+    assert_attached(after)
+
+
+def test_changing_profile_preserves_an_interior_attachment_offset(factory, blank):
+    before = attached_line(factory, blank)
+    before.doc['joints'] = []
+    before = factory(before.doc)
+    point,_ = before.parts['line/link-5'].frame({'frame':{'position_mm':[3,0,0]}})
+    before.doc['parts'].append({'id':'tag','catalog':'generic.d-link',
+                                'pose':{'position_mm':point.tolist()}})
+    before.doc['joints'] = [{'id':'tag-joint','type':'spherical',
+                             'a':{'part':'tag','port':'eye'},
+                             'b':{'part':'line/link-5',
+                                  'frame':{'position_mm':[3,0,0]}}}]
+    before = factory(before.doc)
+    after = factory(update_object_parameters(before,'line',
+                    {'length_mm':200,'link_catalog':'generic.rope-nylon-10'}))
+    assert_attached(after)
+    endpoint = after.doc['joints'][0]['b']
+    assert endpoint['part']=='line/link-4'
+    assert np.linalg.norm(np.array(endpoint['frame']['position_mm'])[:2]) > 2.9
+
+
+def test_switching_link_type_rotates_a_free_fixed_fitting_with_the_line(factory, blank):
+    before = attached_line(factory, blank, catalog='generic.chain-link')
+    before.doc['joints'][1]['type'] = 'fixed'
+    before = factory(before.doc)
+    old_relative = (np.linalg.inv(before.parts['line/link-10'].matrix)@
+                    before.parts['weight'].matrix)
+    after = factory(update_object_parameters(before,'line',
+                    {'length_mm':200,'link_catalog':'generic.chain-heavy-100'}))
+    new_relative = (np.linalg.inv(after.parts['line/link-3'].matrix)@
+                    after.parts['weight'].matrix)
+    assert np.allclose(new_relative[:3,:3],old_relative[:3,:3],atol=1e-6)
     assert_attached(after)

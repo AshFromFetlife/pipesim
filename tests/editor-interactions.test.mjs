@@ -3225,11 +3225,36 @@ test('Duplicate N defaults to copying the complete chain from either selected en
   }finally{await ui.close();}
 });
 
-test('shortening a chain reports the attachment to release without changing it',async()=>{
+test('shortening an anchored chain keeps its fixing and remains undoable',async()=>{
   const doc=chainDesign();doc.anchors=[{part:'chain/link-25',surface:'ceiling'}];const ui=await editor(doc);try{
     selectChain(ui,'start');const before=structuredClone(ui.state.doc);changeInput(ui,'#chain-length',100);
-    await ui.wait(()=>ui.document.querySelector('#toast').textContent.includes('chain/link-25')&&!ui.state.placementPending);
-    assert.deepEqual(ui.state.doc,before);assert.equal(ui.state.undo.length,0);assert.equal(ui.document.querySelector('#chain-length').value,'500');
+    await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm===100&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.anchors[0].part,'chain/link-5');
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm===500);
+    assert.deepEqual(ui.state.doc.objects,before.objects);
+    assert.deepEqual(ui.state.doc.anchors,before.anchors);
+  }finally{await ui.close();}
+});
+
+test('attached flexible line changes material and length without rebuilding connections',async()=>{
+  const doc=chainDesign(10);
+  doc.objects[0].parameters.link_catalog='generic.rope-jute-6';
+  doc.parts=[{id:'support',catalog:'generic.d-link',pose:{position_mm:[0,0,400]}},
+             {id:'weight',catalog:'generic.d-link',pose:{position_mm:[0,0,200]}}];
+  doc.anchors=[{part:'support',surface:'fixture'}];
+  doc.joints=[{id:'top',type:'spherical',a:{part:'support',port:'eye'},b:{part:'chain/link-1',port:'b'}},
+              {id:'bottom',type:'spherical',a:{part:'weight',port:'eye'},b:{part:'chain/link-10',port:'a'}}];
+  const ui=await editor(doc);try{
+    selectChain(ui,'start');changeInput(ui,'#chain-profile','generic.rope-nylon-10');
+    await ui.wait(()=>ui.state.doc.objects[0].parameters.link_catalog==='generic.rope-nylon-10'&&!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc.joints.map(j=>j.id),['top','bottom']);
+    changeInput(ui,'#chain-length',120);
+    await ui.wait(()=>ui.state.doc.objects[0].parameters.length_mm===120&&!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc.joints.map(j=>j.id),['top','bottom']);
+    assert.equal(ui.state.doc.joints[1].b.part,'chain/link-5');
+    assert.equal(ui.state.doc.anchors[0].part,'support');
+    assert.equal(ui.state.undo.length,2);
   }finally{await ui.close();}
 });
 

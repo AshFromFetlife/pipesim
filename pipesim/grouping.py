@@ -330,6 +330,7 @@ def update_object_parameters(assembly, object_id, parameters):
     if instance is None: raise DocumentError('Select an object to edit')
     if instance['template']=='chain':
         from .chain import resize
+        from .document import joint_kind
         doc=resize(assembly,object_id,parameters)
         after=Assembly.from_doc(doc,assembly.base,assembly.library)
         for joint in doc.get('joints',[]):
@@ -341,11 +342,19 @@ def update_object_parameters(assembly, object_id, parameters):
             a,b,_=after.joint_frames(joint)
             if np.linalg.norm(a-b)>max(.5,old_gap+.05):
                 raise DocumentError(f'{joint["id"]}: the shortened line cannot reach its attachment')
+            if before_joint is not None and joint_kind(joint)=='fixed':
+                old_relative=(np.linalg.inv(assembly.parts[before_joint['a']['part']].matrix)@
+                              assembly.parts[before_joint['b']['part']].matrix)
+                new_relative=(np.linalg.inv(after.parts[joint['a']['part']].matrix)@
+                              after.parts[joint['b']['part']].matrix)
+                if not np.allclose(old_relative[:3,:3],new_relative[:3,:3],atol=1e-5,rtol=0):
+                    raise DocumentError(f'{joint["id"]}: the fixed attachment cannot follow this edit')
         for old_anchor,new_anchor in zip(assembly.anchors,after.anchors):
             if not old_anchor['part'].startswith(object_id+'/'): continue
-            old=assembly.parts[old_anchor['part']].matrix[:3,3]
-            new=after.parts[new_anchor['part']].matrix[:3,3]
-            if np.linalg.norm(old-new)>.5:
+            old=assembly.parts[old_anchor['part']].matrix
+            new=after.parts[new_anchor['part']].matrix
+            if (np.linalg.norm(old[:3,3]-new[:3,3])>.5 or
+                    not np.allclose(old[:3,:3],new[:3,:3],atol=1e-5,rtol=0)):
                 raise DocumentError(f'world anchor on {old_anchor["part"]} cannot follow this length edit')
         doc.pop('results',None);doc.pop('build_plan',None)
         return doc

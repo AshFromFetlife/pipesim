@@ -109,7 +109,15 @@ def generate(parameters, library, components=None):
             parts = []
             for i in range(1, count+1):
                 matrix = np.eye(4)
-                matrix[:3, :3] = align_axis(a-b, nodes[i]-nodes[i-1])
+                source_index = min(len(saved), max(1, int(np.searchsorted(
+                    stations, (i-.5)*info['pitch_mm']))))
+                old_matrix = transform(saved[f'link-{source_index}'].get('pose'))
+                old_axis = old_matrix[:3,:3]@(old['a']-old['b'])
+                matrix[:3,:3] = (align_axis(old_axis, nodes[i]-nodes[i-1])@
+                                old_matrix[:3,:3]@align_axis(a-b, old['a']-old['b']))
+                if info['profile']=='chain' and old['profile']!='chain' and i%2==0:
+                    matrix[:3,:3] = matrix[:3,:3]@Rotation.from_rotvec(
+                        (a-b)/info['pitch_mm']*np.pi/2).as_matrix()
                 matrix[:3, 3] = nodes[i-1]-matrix[:3, :3]@b
                 parts.append({'id': f'link-{i}', 'catalog': info['link_catalog'], 'pose': pose_of(matrix)})
             result.update(parts=parts, joints=[_joint(i, info['break_force_n']) for i in range(1,count)],
@@ -182,7 +190,8 @@ def resize(assembly, object_id, parameters):
         # An attachment belongs to a station on the line, not to an incidental
         # link number. Keep its station when the pitch changes and clamp it to
         # the new free end when the line is shortened.
-        from .document import Assembly
+        from .document import Assembly, joint_kind
+        from .math3d import align_axis
         geometry = copy.deepcopy(document)
         geometry['joints'] = []
         geometry['anchors'] = []
@@ -206,7 +215,10 @@ def resize(assembly, object_id, parameters):
             along = station-(new_number-1)
             new_pid = object_id+f'/link-{new_number}'
             new_part = after.parts[new_pid]
-            position = new_info['b']+along*(new_info['a']-new_info['b'])
+            old_center = old_info['b']+fraction*(old_info['a']-old_info['b'])
+            radial_world = old_part.matrix[:3, :3]@(local-old_center)
+            position = (new_info['b']+along*(new_info['a']-new_info['b'])+
+                        new_part.matrix[:3, :3].T@radial_world)
             world_axis = old_part.matrix[:3, :3]@axis
             endpoint.clear()
             endpoint.update(part=new_pid, frame={'position_mm':position.tolist(),
@@ -219,8 +231,12 @@ def resize(assembly, object_id, parameters):
             anchor['part'] = reference['part']
         for load in document.get('loads', []):
             reference = {'part':load['part']}
+            if 'point_mm' in load:
+                reference['frame'] = {'position_mm':load['point_mm']}
             remap(reference)
             load['part'] = reference['part']
+            if 'point_mm' in load and 'frame' in reference:
+                load['point_mm'] = reference['frame']['position_mm']
         for record in document.get('metadata', {}).get('detached_attachments', []):
             remap(record['joint']['a']); remap(record['joint']['b'])
         line_anchors = [(old,new) for old,new in zip(assembly.anchors,document.get('anchors', []))
@@ -228,10 +244,9 @@ def resize(assembly, object_id, parameters):
         if len(line_anchors)==1:
             old_anchor,new_anchor = line_anchors[0]
             after = Assembly.from_doc(document, assembly.base, assembly.library)
-            delta = (assembly.parts[old_anchor['part']].matrix[:3,3]-
-                     after.parts[new_anchor['part']].matrix[:3,3])
-            pose = instance.setdefault('pose', {})
-            pose['position_mm'] = (np.array(pose.get('position_mm', [0,0,0]), float)+delta).tolist()
+            correction = (assembly.parts[old_anchor['part']].matrix @
+                          np.linalg.inv(after.parts[new_anchor['part']].matrix))
+            instance['pose'] = pose_of(correction@transform(instance.get('pose')))
         # A free part attached to the edited end follows it. Move the whole
         # connected external component, so other joints on that part remain
         # intact. Anchored hosts are handled by the geometry check below.
@@ -283,22 +298,38 @@ def resize(assembly, object_id, parameters):
                                 document = posed['document']
                                 document.setdefault('joints',[]).append(copy.deepcopy(joint))
                                 after = Assembly.from_doc(document, assembly.base, assembly.library)
+                                direct = {p['id']:p for p in document.get('parts', [])}
+                                objects = {o['id']:o for o in document.get('objects', []) if o['id'] != object_id}
                         except DocumentError:
                             pass
                 continue
             line_point,_ = after.parts[joint[line_side]['part']].frame(joint[line_side])
-            host_point,_ = after.parts[host_id].frame(joint[host_side])
-            delta = line_point-host_point
-            if np.linalg.norm(delta) > 1e-7:
+            kind = joint_kind(joint)
+            host_part = after.parts[host_id]
+            rotation = np.eye(3)
+            if kind == 'fixed':
+                previous = next((j for j in assembly.doc.get('joints', []) if j['id']==joint['id']),None)
+                if previous:
+                    old_line = assembly.parts[previous[line_side]['part']]
+                    new_line = after.parts[joint[line_side]['part']]
+                    rotation = new_line.matrix[:3,:3]@old_line.matrix[:3,:3].T
+            elif kind == 'revolute':
+                line_axis = after.parts[joint[line_side]['part']].frame(joint[line_side])[1]
+                host_axis = host_part.frame(joint[host_side])[1]
+                rotation = align_axis(host_axis,line_axis)
+            desired_host = host_part.matrix.copy()
+            desired_host[:3,:3] = rotation@host_part.matrix[:3,:3]
+            local,_ = host_part.local_frame(joint[host_side])
+            desired_host[:3,3] = line_point-desired_host[:3,:3]@local
+            delta_matrix = desired_host@np.linalg.inv(host_part.matrix)
+            if not np.allclose(delta_matrix,np.eye(4),atol=1e-7,rtol=0):
                 owners = {pid.split('/',1)[0] for pid in component if pid not in direct}
                 if any(owner not in objects for owner in owners):
                     continue
                 for pid in component & direct.keys():
-                    pose = direct[pid].setdefault('pose', {})
-                    pose['position_mm'] = (np.array(pose.get('position_mm', [0,0,0]), float)+delta).tolist()
+                    direct[pid]['pose'] = pose_of(delta_matrix@after.parts[pid].matrix)
                 for owner in owners:
-                    pose = objects[owner].setdefault('pose', {})
-                    pose['position_mm'] = (np.array(pose.get('position_mm', [0,0,0]), float)+delta).tolist()
+                    objects[owner]['pose'] = pose_of(delta_matrix@transform(objects[owner].get('pose')))
                 after = Assembly.from_doc(document, assembly.base, assembly.library)
             shifted.update(component)
     internal = {object_id+'/'+j['id'] for j in generated['joints']}

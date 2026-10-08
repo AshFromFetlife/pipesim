@@ -139,13 +139,14 @@ def test_length_edit_bakes_saved_state_and_removes_only_trimmed_internal_referen
     aligned(after)
 
 
-def test_shortening_remaps_a_world_anchor_without_moving_it(factory,blank):
-    before=chain(factory,blank,12);before.doc['anchors']=[{'part':'chain/link-12','surface':'ceiling'}]
+@pytest.mark.parametrize('count',[11,12])
+def test_shortening_remaps_a_world_anchor_without_moving_it(factory,blank,count):
+    before=chain(factory,blank,count);before.doc['anchors']=[{'part':f'chain/link-{count}','surface':'ceiling'}]
     before=factory(before.doc)
     after=factory(update_object_parameters(before,'chain',{'length_mm':160}))
     assert after.anchors[0]['part']=='chain/link-8'
-    assert np.allclose(after.parts['chain/link-8'].matrix[:3,3],
-                       before.parts['chain/link-12'].matrix[:3,3])
+    assert np.allclose(after.parts['chain/link-8'].matrix,
+                       before.parts[f'chain/link-{count}'].matrix)
 
 
 def test_expansion_and_regrouping_preserve_length_controls_and_saved_link_edits(factory,blank):
