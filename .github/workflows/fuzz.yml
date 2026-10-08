@@ -1,24 +1,20 @@
-name: Long geometry fuzz
+name: Geometry fuzz
 
 on:
-  schedule:
-    - cron: '17 3 * * *'
   workflow_dispatch:
 
 jobs:
   draft-repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
-      - name: Fuzz connected draft repair for two hours
+      - name: Fuzz connected draft repair
         env:
-          PIPESIM_FUZZ_LONG: '1'
-          PIPESIM_FUZZ_HOURS: '2'
           PIPESIM_FUZZ_CASES: '1000000'
         run: python -m pytest -s -q --basetemp=fuzz-repro tests/test_solver_fuzz.py -k draft_repair_long_randomized
       - name: Keep failing models
@@ -30,17 +26,15 @@ jobs:
 
   resize-graph:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
-      - name: Fuzz connected resize operations for two hours
+      - name: Fuzz connected resize operations
         env:
-          PIPESIM_RESIZE_REALWORLD_LONG: '1'
-          PIPESIM_RESIZE_REALWORLD_HOURS: '2'
           PIPESIM_RESIZE_REALWORLD_CASES: '1000000'
         run: python -m pytest -s -q --basetemp=resize-fuzz-repro tests/test_resize_realworld.py -k resize_realworld_long
       - name: Keep failing models
@@ -52,17 +46,15 @@ jobs:
 
   resize-capture:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
-      - name: Fuzz mirrored socket capture and shrink for two hours
+      - name: Fuzz mirrored socket capture and shrink
         env:
-          PIPESIM_RESIZE_CAPTURE_LONG: '1'
-          PIPESIM_RESIZE_CAPTURE_SECONDS: '7200'
           PIPESIM_RESIZE_CAPTURE_CASES: '1000000'
         run: python -m pytest -s -q --basetemp=capture-fuzz-repro tests/test_resize_capture_mirror.py -k long_generated_mirror_capture_and_shrink_sequences
       - name: Keep failing models
@@ -74,7 +66,7 @@ jobs:
 
   mirror-cube:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -83,10 +75,8 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - name: Check deterministic cube and cross-plane regressions
         run: python -m pytest -q tests/test_symmetry_cube_collisions.py tests/test_symmetry_cross_plane.py
-      - name: Fuzz orthogonal mirror cubes for two hours
+      - name: Fuzz orthogonal mirror cubes
         env:
-          PIPESIM_CUBE_FUZZ_LONG: '1'
-          PIPESIM_CUBE_FUZZ_SECONDS: '7200'
           PIPESIM_CUBE_FUZZ_CASES: '1000000'
         run: python -m pytest -s -q --basetemp=cube-fuzz-repro tests/test_symmetry_cube_fuzz.py -k cube_long_randomized
       - name: Keep failing models

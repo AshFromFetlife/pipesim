@@ -113,6 +113,14 @@ class World:
         self.part_map={}; self.joint_map={}; self.body_ids=[]; self.constraints=[]
         self.events=[]; self.elapsed=0.; self._mesh_number=0
         self.broken=set(); self.reference_coordinates={}
+        # A severed flexible line remains two connected lengths. Solver
+        # reactions on its newly free ends must not fracture every link.
+        original_chain=[j for j in assembly.joints if j.get('metadata',{}).get('chain_link')]
+        original_parts={j[end]['part'] for j in original_chain for end in ('a','b')}
+        original_groups=UnionFind(original_parts)
+        for j in original_chain: original_groups.union(j['a']['part'],j['b']['part'])
+        self._chain_line_by_joint={j['id']:original_groups.find(j['a']['part']) for j in original_chain}
+        self._fractured_lines=set()
         self._beam_rest_angles={}; self._beam_yielded=set()
         self.dislocated={}; self.activity_efforts={}; self._socket_clearances={}
         self._chain_initial=copy.deepcopy(assembly.doc.get('state',{}).get('joints',{}))
@@ -333,12 +341,52 @@ class World:
                 if same_human_no_collision(a,b):
                     aa,bb=self.part_map[a.id],self.part_map[b.id]
                     pb.setCollisionFilterPair(aa[0],bb[0],aa[1],bb[1],0,physicsClientId=self.client)
+        self._suppress_flexible_mount_overlap()
         self._socket_joints=[j for j in assembly.joints if j.get('metadata',{}).get('flexibility')=='full_socket_span' or j.get('metadata',{}).get('dislocated')]
         for j in self._socket_joints:
             if j['id'] not in self._socket_clearances:
                 contacts=self._parent_contacts(j)
                 self._socket_clearances[j['id']]=max([0., *[-c[8] for c in contacts]])
         # Distance-only links remain separate bodies and exchange equal/opposite forces.
+
+    def _suppress_flexible_mount_overlap(self):
+        """Ignore rope segments already embedded in their own mount at time zero.
+
+        An attachment legitimately places the line inside a hand, eye, or
+        collar. A deep Bullet contact on a gram-scale segment then creates an
+        enormous separating impulse against the attachment constraint. Only
+        initially penetrating pairs in the same attached rigid body are
+        filtered; other line contacts still participate in the simulation.
+        """
+        soft_joints=[j for j in self._chain_joints
+                     if all(self.assembly.parts[j[end]['part']].definition.get('flexible_profile')
+                            in ('rope','strap') for end in ('a','b'))]
+        if not soft_joints: return
+        chain_parts={j[end]['part'] for j in soft_joints for end in ('a','b')}
+        connected=UnionFind(chain_parts)
+        for j in soft_joints: connected.union(j['a']['part'],j['b']['part'])
+        mounts={}
+        chain_ids={j['id'] for j in soft_joints}
+        for j in self.assembly.joints:
+            if j['id'] in chain_ids: continue
+            inside=[end for end in ('a','b') if j[end]['part'] in chain_parts]
+            if len(inside)!=1: continue
+            outside='b' if inside[0]=='a' else 'a'
+            line=connected.find(j[inside[0]]['part'])
+            mounts.setdefault(line,set()).add(self.part_map[j[outside]['part']][0])
+        if not mounts: return
+        by_link={(body,link):pid for pid,(body,link,_) in self.part_map.items()
+                 if pid in chain_parts}
+        pb.performCollisionDetection(physicsClientId=self.client)
+        for contact in pb.getContactPoints(physicsClientId=self.client):
+            if contact[8]>=-.001: continue
+            for rope,other in (((contact[1],contact[3]),(contact[2],contact[4])),
+                               ((contact[2],contact[4]),(contact[1],contact[3]))):
+                pid=by_link.get(rope)
+                if pid is not None and other[0] in mounts.get(connected.find(pid),()):
+                    pb.setCollisionFilterPair(rope[0],other[0],rope[1],other[1],0,
+                                              physicsClientId=self.client)
+                    break
 
     def _load_articulation(self,robot,root,tree,groups,frames,fixed,joint_specs):
         chunks=_partition_tree(root,tree)
@@ -625,10 +673,17 @@ class World:
             if j['id'] in self.broken: continue
             mapping=self.joint_map.get(j['id'],{})
             if j['id'] in self._chain_constraints and j.get('break_force_n'):
-                reactions=[pb.getConstraintState(cid,physicsClientId=self.client)
-                           for cid in self._chain_constraints[j['id']]]
-                force=max([self._span_tensions.get(j['id'],0.),
-                           *(float(np.linalg.norm(reaction[:3])) for reaction in reactions)])
+                if self._chain_line_by_joint.get(j['id']) in self._fractured_lines:
+                    continue
+                # On a two-ended line the span force is the actual material
+                # tension. A point-constraint reaction also includes contact
+                # correction impulses and can dwarf the real load.
+                if j['id'] in self._span_tensions:
+                    force=self._span_tensions[j['id']]
+                else:
+                    reactions=[pb.getConstraintState(cid,physicsClientId=self.client)
+                               for cid in self._chain_constraints[j['id']]]
+                    force=max((float(np.linalg.norm(reaction[:3])) for reaction in reactions),default=0.)
                 if force>j['break_force_n']:
                     chain_failures.append((j,force))
                 continue
@@ -666,6 +721,7 @@ class World:
                     weakest[group]=(utilisation,j,force)
             for _,j,force in weakest.values():
                 detach.append(j['id'])
+                self._fractured_lines.add(self._chain_line_by_joint.get(j['id'],j['id']))
                 self.events.append({'time_s':self.elapsed,'type':'joint_break',
                                     'joint':j['id'],'force_n':float(force)})
         if detach: self._detach(set(detach))

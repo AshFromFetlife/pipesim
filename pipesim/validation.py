@@ -54,17 +54,18 @@ def _socket_interface_contact(assembly, joint, contact):
     else:
         axial_low = -float(joint.get('insertion_mm', 0))
         axial_high = 0.
-    # Allow the outer wall and Bullet's contact margin around the bore, while
-    # retaining clearance checks for the remainder of the fitting and pipe.
+    # A mirrored mesh may have a convex collision hull extending beyond the
+    # bore. The member-side contact must still lie on the occupied pipe surface.
     radial_limit = float(socket.get('diameter_mm', 0))/2 + max(
-        5., float(socket.get('clearance_mm', 0)) + 2.)
+        2., float(socket.get('clearance_mm', 0)))
+    radial_distances = []
     for point_metres in (contact[5], contact[6]):
         relative = np.asarray(point_metres)*1000 - mouth
         axial = float(relative @ axis)
-        radial = float(np.linalg.norm(relative-axis*axial))
-        if not axial_low-2 <= axial <= axial_high+2 or radial > radial_limit:
+        radial_distances.append(float(np.linalg.norm(relative-axis*axial)))
+        if not axial_low-2 <= axial <= axial_high+2:
             return False
-    return True
+    return min(radial_distances) <= radial_limit
 
 
 def support(assembly,subset=None,tolerance_mm=1.,cancelled=None):

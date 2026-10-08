@@ -15,7 +15,7 @@ from pipesim.validation import validate
 @pytest.mark.parametrize('catalog,profile,shape,width,mass,strength', [
     ('generic.chain-heavy-100', 'chain', 'tube', 100, 1.2, 60000),
     ('generic.rope-jute-6', 'rope', 'cylinder', 6, .0006, 1800),
-    ('generic.rope-nylon-10', 'rope', 'cylinder', 10, .0018, 2000),
+    ('generic.rope-nylon-10', 'rope', 'cylinder', 10, .0018, 20400),
     ('generic.rope-polypropylene-12', 'rope', 'cylinder', 12, .0025, 1200),
     ('generic.strap-ratchet-25', 'strap', 'box', 25, .001, 5000),
     ('generic.strap-seatbelt-65', 'strap', 'box', 65, .0035, 8000),

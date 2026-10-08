@@ -139,12 +139,13 @@ def test_length_edit_bakes_saved_state_and_removes_only_trimmed_internal_referen
     aligned(after)
 
 
-def test_shortening_identifies_the_attached_link_and_never_drops_an_anchor(factory,blank):
+def test_shortening_remaps_a_world_anchor_without_moving_it(factory,blank):
     before=chain(factory,blank,12);before.doc['anchors']=[{'part':'chain/link-12','surface':'ceiling'}]
-    before=factory(before.doc);original=copy.deepcopy(before.doc)
-    with pytest.raises(DocumentError,match='world anchor on chain/link-12'):
-        update_object_parameters(before,'chain',{'length_mm':160})
-    assert before.doc==original
+    before=factory(before.doc)
+    after=factory(update_object_parameters(before,'chain',{'length_mm':160}))
+    assert after.anchors[0]['part']=='chain/link-8'
+    assert np.allclose(after.parts['chain/link-8'].matrix[:3,3],
+                       before.parts['chain/link-12'].matrix[:3,3])
 
 
 def test_expansion_and_regrouping_preserve_length_controls_and_saved_link_edits(factory,blank):
@@ -292,6 +293,29 @@ def test_flexible_link_attaches_to_human_surface_without_moving_the_person(facto
     detached=factory(detach_attachment(after,'line',joint['id']))
     reattached=factory(attach_part(detached,'line',reconnect=joint['id'])['document'])
     assert np.linalg.norm(reattached.joint_frames(joint)[0]-reattached.joint_frames(joint)[1])<.05
+
+
+@pytest.mark.parametrize('catalog,pitch', [('generic.chain-link',20),
+                                           ('generic.rope-jute-6',20),
+                                           ('generic.strap-seatbelt-65',25)])
+def test_anchored_flexible_line_moves_free_body_to_close_small_reach_gap(factory,blank,catalog,pitch):
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'person','template':'human','parameters':{'mass_kg':90}}]
+    foot=factory(doc).parts['person/left_foot'].matrix[:3,3]
+    doc['objects'].append({'id':'line','template':'chain',
+                           'parameters':{'length_mm':10*pitch,'link_catalog':catalog},
+                           'pose':{'position_mm':(foot+[0,0,10*pitch+33]).tolist()}})
+    doc['anchors']=[{'part':'line/link-1','surface':'fixture'}]
+    before=factory(doc)
+    fixed=before.parts['line/link-1'].matrix.copy()
+    result=attach_part(before,'line','line/link-10',
+                       {'part':'person/left_foot','frame':{'position_mm':[0,0,0]}},
+                       'spherical',part_port='a')
+    after=factory(result['document'])
+    a,b,_=after.joint_frames(result['joint'])
+    assert np.linalg.norm(a-b)<.05
+    assert np.allclose(after.parts['line/link-1'].matrix,fixed,atol=.05,rtol=0)
+    assert np.linalg.norm(after.parts['person/left_foot'].matrix[:3,3]-foot)>20
 
 
 def test_multiple_surface_attachments_can_follow_the_same_flexible_line(factory,blank):

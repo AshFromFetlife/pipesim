@@ -331,6 +331,24 @@ def update_object_parameters(assembly, object_id, parameters):
     if instance['template']=='chain':
         from .chain import resize
         doc=resize(assembly,object_id,parameters)
+        after=Assembly.from_doc(doc,assembly.base,assembly.library)
+        for joint in doc.get('joints',[]):
+            if not (joint['a']['part'].startswith(object_id+'/') or
+                    joint['b']['part'].startswith(object_id+'/')): continue
+            before_joint=next((j for j in assembly.doc.get('joints',[]) if j['id']==joint['id']),None)
+            old_gap=(np.linalg.norm(assembly.joint_frames(before_joint)[0]-assembly.joint_frames(before_joint)[1])
+                     if before_joint is not None else 0.)
+            a,b,_=after.joint_frames(joint)
+            if np.linalg.norm(a-b)>max(.5,old_gap+.05):
+                raise DocumentError(f'{joint["id"]}: the shortened line cannot reach its attachment')
+        for old_anchor,new_anchor in zip(assembly.anchors,after.anchors):
+            if not old_anchor['part'].startswith(object_id+'/'): continue
+            old=assembly.parts[old_anchor['part']].matrix[:3,3]
+            new=after.parts[new_anchor['part']].matrix[:3,3]
+            if np.linalg.norm(old-new)>.5:
+                raise DocumentError(f'world anchor on {old_anchor["part"]} cannot follow this length edit')
+        doc.pop('results',None);doc.pop('build_plan',None)
+        return doc
     else: instance['parameters']=copy.deepcopy(parameters)
     after=Assembly.from_doc(doc,assembly.base,assembly.library)
     before=copy.copy(assembly)
@@ -451,6 +469,33 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
         if not moved['moved']: break
         assembly=Assembly.from_doc(moved['document'],assembly.base,assembly.library)
     part=assembly.parts[part_id];current,_=part.frame(source);error=float(np.linalg.norm(current-point))
+    if chain and error>.5:
+        # A constrained line may stop short even though the other object is
+        # free to move. Give the target's own mechanism a chance to close the
+        # remaining gap before reporting that the attachment is impossible.
+        for _ in range(3):
+            host=assembly.parts[target['part']]
+            desired=host.matrix.copy();desired[:3,3]+=current-point
+            try: moved=transform_part(assembly,host.id,pose_of(desired))
+            except DocumentError: break
+            if not moved['moved']: break
+            assembly=Assembly.from_doc(moved['document'],assembly.base,assembly.library)
+            point,axis=assembly.parts[target['part']].frame(target)
+            current,_=assembly.parts[part_id].frame(source)
+            error=float(np.linalg.norm(current-point))
+            if error<=.5: break
+        if error>.5:
+            owner=next((obj for obj in assembly.doc.get('objects',[])
+                        if target['part'].startswith(obj['id']+'/')),None)
+            if owner:
+                parent=transform(owner.get('pose'));parent[:3,3]+=current-point
+                try: moved=move_object(assembly,owner['id'],pose_of(parent))
+                except DocumentError: moved=None
+                if moved and moved['moved']:
+                    assembly=Assembly.from_doc(moved['document'],assembly.base,assembly.library)
+                    point,axis=assembly.parts[target['part']].frame(target)
+                    current,_=assembly.parts[part_id].frame(source)
+                    error=float(np.linalg.norm(current-point))
     if error>.5:
         action='Move the chain closer, increase its length or pose its links' if chain else 'Move the person closer or pose the torso and limb'
         raise DocumentError(f'The attachment is still {error:.1f} mm out of reach. {action}, then preview again.')

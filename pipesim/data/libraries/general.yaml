@@ -482,7 +482,7 @@ parts:
     flexible_profile: rope
     color: '#e8ddd0'
     mass_kg: 0.0018
-    break_force_n: 2000
+    break_force_n: 20400
     axial_rigidity_n: 50000
     geometry:
     - {type: cylinder, diameter_mm: 10, length_mm: 25}
@@ -491,7 +491,8 @@ parts:
       b: {type: eye, position_mm: [0, 0, 12.5], axis: [0, 0, 1]}
     source:
       geometry_status: round segment proxy
-      strength_status: illustrative simulation threshold; replace with a verified rope rating
+      strength_status: representative straight-rope breaking force for 10 mm hawser-laid nylon; knots, wear and terminations need design-specific derating
+      strength_reference: user-supplied 3-strand nylon rope specification (20.4 kN, 2080 kg)
   generic.rope-polypropylene-12:
     name: "Polypropylene rope · 12 mm"
     kind: chain

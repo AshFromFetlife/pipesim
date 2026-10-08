@@ -66,12 +66,55 @@ def hanging_weight(blank, library, *, mass_kg=10, rope_mm=400, slack_mm=0,
     return doc
 
 
-def max_joint_gap_mm(assembly, frames):
+def four_rope_swing(blank):
+    """Four rated lines, each carrying about 15 kg, seated inside their mounts."""
+    doc = copy.deepcopy(blank)
+    doc['environment'] = {'ground': False}
+    corners = [(x, y) for x in (-150, 150) for y in (-150, 150)]
+    doc['parts'] = [{
+        'id': 'payload',
+        'body': {'kind': 'rigid', 'mass_kg': 60,
+                 'geometry': [{'type': 'box', 'size_mm': [420, 420, 200]}],
+                 'ports': {f'eye-{i}': {'type': 'eye', 'position_mm': [x, y, 0]}
+                           for i, (x, y) in enumerate(corners)}},
+        'pose': {'position_mm': [0, 0, 500]},
+    }]
+    doc['objects'] = []
+    doc['joints'] = []
+    doc['anchors'] = []
+    for i, (x, y) in enumerate(corners):
+        doc['parts'].append({
+            'id': f'support-{i}',
+            'body': {'kind': 'rigid', 'mass_kg': 1,
+                     'geometry': [{'type': 'sphere', 'radius_mm': 55}],
+                     'ports': {'eye': {'type': 'eye', 'position_mm': [0, 0, 0]}}},
+            'pose': {'position_mm': [x, y, 1500]},
+        })
+        doc['objects'].append({
+            'id': f'rope-{i}', 'template': 'chain',
+            'parameters': {'length_mm': 1000, 'link_catalog': 'generic.rope-nylon-10'},
+            'pose': {'position_mm': [x, y, 1500]},
+        })
+        doc['joints'].extend([
+            {'id': f'top-{i}', 'type': 'spherical',
+             'a': {'part': f'support-{i}', 'port': 'eye'},
+             'b': {'part': f'rope-{i}/link-1', 'port': 'b'}},
+            {'id': f'bottom-{i}', 'type': 'spherical',
+             'a': {'part': f'rope-{i}/link-40', 'port': 'a'},
+             'b': {'part': 'payload', 'port': f'eye-{i}'}},
+        ])
+        doc['anchors'].append({'part': f'support-{i}', 'surface': 'fixture'})
+    return doc
+
+
+def max_joint_gap_mm(assembly, frames, *, excluded=()):
     # A chain can visually explode without reporting a fracture: Bullet's
     # point constraints remain present while their two pivots drift apart.
     largest = 0.
     for frame in frames:
         for joint in assembly.joints:
+            if joint['id'] in excluded:
+                continue
             a, b = joint['a'], joint['b']
             pa = point(transform(frame['parts'][a['part']]),
                        assembly.parts[a['part']].local_frame(a)[0])
@@ -103,6 +146,14 @@ def test_ten_kg_drop_into_jute_slack_does_not_shatter(factory, blank, library):
     assert not any(event['type'] == 'joint_break' for event in result['events']), result['events']
 
 
+def test_four_ropes_seated_in_mounts_carry_sixty_kg_without_exploding(factory, blank):
+    assembly = factory(four_rope_swing(blank))
+    result = simulate(assembly, duration=.25, fps=20)
+    assert not any(event['type'] == 'joint_break' for event in result['events']), result['events']
+    assert result['final_max_speed_m_s'] < 5
+    assert max_joint_gap_mm(assembly, result['frames']) < 8
+
+
 def test_24_kg_jute_pendulum_swing_does_not_break(factory, blank, library):
     result = simulate(factory(hanging_weight(blank, library, mass_kg=24,
                                              swing_deg=30)), duration=.7, fps=20)
@@ -114,12 +165,15 @@ def test_overloaded_rope_first_fails_at_one_link(factory, blank, library):
     weak_jute = copy.deepcopy(library.parts['generic.rope-jute-6'])
     weak_jute['break_force_n'] = 350
     doc['definitions'] = {'generic.rope-jute-6': weak_jute}
-    result = simulate(factory(doc), duration=.18, fps=30)
+    assembly = factory(doc)
+    result = simulate(assembly, duration=.18, fps=30)
     breaks = [event for event in result['events'] if event['type'] == 'joint_break']
     assert breaks
     first_time = breaks[0]['time_s']
     assert sum(abs(event['time_s']-first_time) < 1e-9 for event in breaks) == 1, breaks
     assert len(breaks) == 1, breaks
+    assert max_joint_gap_mm(assembly, result['frames'][-1:],
+                            excluded={breaks[0]['joint']}) < 8
 
 
 @pytest.mark.parametrize('slack_mm,swing_deg', [(0, 30), (0, 90), (100, 0)])

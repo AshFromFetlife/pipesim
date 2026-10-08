@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import numpy as np
 from scipy.spatial.transform import Rotation
 
@@ -25,6 +27,135 @@ def _check_cancelled(cancelled):
 
 def runs(doc):
     return [run for group in doc.get('draft_subassemblies', []) for run in group['runs']]
+
+
+def _mirror_reopen_digest(document):
+    """Identify an unchanged exact design while ignoring generated analysis."""
+    clean = copy.deepcopy(document)
+    clean.pop('results', None)
+    clean.pop('build_plan', None)
+    clean.get('metadata', {}).pop('draft_mirror_reopen', None)
+    if not clean.get('metadata'):
+        clean.pop('metadata', None)
+    return hashlib.sha256(json.dumps(clean, sort_keys=True, separators=(',', ':'),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def remember_mirrored_draft(source_document, finalized_result):
+    """Keep enough round-trip information to reopen baked mirror copies as previews."""
+    if finalized_result['status'] != 'finalized':
+        return finalized_result
+    source = copy.deepcopy(source_document)
+    source.get('metadata', {}).pop('draft_mirror_reopen', None)
+    finished = copy.deepcopy(finalized_result['document'])
+    finished_member_ids = set(finalized_result['lengths_mm'])
+    mirror_groups = [group for group in source.get('draft_subassemblies', [])
+                     if group.get('mirrors') and any(
+                         run['id'] in finished_member_ids for run in group['runs'])]
+    if not mirror_groups:
+        return finalized_result
+    source_part_ids = {part['id'] for part in source.get('parts', [])}
+    required_parts = ({part['id'] for part in finished['parts']} - source_part_ids) | finished_member_ids
+    for group in mirror_groups:
+        required_parts.update(attachment['connector'] for run in group['runs']
+                              for attachment in run.get('attachments', []))
+    record = {'version': 1, 'source_document': source, 'finished_members': sorted(finished_member_ids),
+              'mirror_group_ids': [group['id'] for group in mirror_groups],
+              'required_parts': sorted(required_parts),
+              'final_digest': _mirror_reopen_digest(finished)}
+    finished.setdefault('metadata', {})['draft_mirror_reopen'] = record
+    finalized_result['document'] = finished
+    return finalized_result
+
+
+def _reopen_mirrored_assembly(assembly, members):
+    record = assembly.doc.get('metadata', {}).get('draft_mirror_reopen')
+    if (not isinstance(record, dict) or record.get('version') != 1 or
+            not isinstance(record.get('source_document'), dict) or
+            not isinstance(record.get('finished_members'), list) or
+            not isinstance(record.get('mirror_group_ids'), list) or
+            not isinstance(record.get('required_parts'), list) or
+            record.get('final_digest') != _mirror_reopen_digest(assembly.doc)):
+        return None
+    chosen = set(members)
+    related = set(record['required_parts'])
+    if not chosen <= related or not chosen.intersection(record['finished_members']):
+        return None
+    document = copy.deepcopy(record['source_document'])
+    Assembly.from_doc(document, assembly.base, assembly.library,
+                      validate_mirror_geometry=False)
+    source_joint_ids = {joint['id'] for joint in document.get('joints', [])}
+    return {'status': 'reopened', 'document': document,
+            'subassembly': record['mirror_group_ids'][0],
+            'restored_mirrors': sum(len(group.get('mirrors', []))
+                                    for group in document['draft_subassemblies']
+                                    if group['id'] in record['mirror_group_ids']),
+            'converted_parts': [run['id'] for group in document['draft_subassemblies']
+                                for run in group['runs'] if run['id'] in record['finished_members']],
+            'removed_joints': sorted(joint['id'] for joint in assembly.doc.get('joints', [])
+                                     if joint['id'] not in source_joint_ids)}
+
+
+def _coalesce_overlapping_mirror_runs(assembly):
+    """Join already baked mirror copies that occupy the same pipe centreline.
+
+    Older editor documents can contain both halves after baking a nearly
+    centered crossing. Preserve the original run and all distinct sockets.
+    """
+    document = copy.deepcopy(assembly.doc)
+    aliases = {}
+    changed = False
+    for group in document.get('draft_subassemblies', []):
+        if group.get('mirrors'):
+            continue
+        retained = []
+        for candidate in group['runs']:
+            source = next((run for run in retained
+                           if candidate['id'].startswith(run['id'] + '-mirror-')), None)
+            if (source is None or source['catalog'] != candidate['catalog'] or
+                    source.get('parameters', {}) != candidate.get('parameters', {}) or
+                    source.get('locked_length_mm') is not None or
+                    candidate.get('locked_length_mm') is not None):
+                retained.append(candidate)
+                continue
+            start, end = np.asarray(source['start_mm'], dtype=float), np.asarray(source['end_mm'], dtype=float)
+            other_start = np.asarray(candidate['start_mm'], dtype=float)
+            other_end = np.asarray(candidate['end_mm'], dtype=float)
+            length = np.linalg.norm(end-start)
+            if length < 1:
+                retained.append(candidate)
+                continue
+            direction = (end-start)/length
+            def station(point):
+                delta = point-start
+                along = float(delta @ direction)
+                return along, float(np.linalg.norm(delta-direction*along))
+            low, low_error = station(other_start)
+            high, high_error = station(other_end)
+            overlap = min(length, max(low, high))-max(0, min(low, high))
+            if max(low_error, high_error) > .1 or overlap <= 1:
+                retained.append(candidate)
+                continue
+            minimum, maximum = min(0, low, high), max(length, low, high)
+            source['start_mm'] = (start+direction*minimum).tolist()
+            source['end_mm'] = (start+direction*maximum).tolist()
+            for attachment in candidate.get('attachments', []):
+                attachment = copy.deepcopy(attachment)
+                if attachment.get('end'):
+                    endpoint = low if attachment['end'] == 'start' else high
+                    attachment['end'] = ('start' if abs(endpoint-minimum) <= abs(endpoint-maximum)
+                                         else 'end')
+                if attachment not in source.setdefault('attachments', []):
+                    source['attachments'].append(attachment)
+            aliases[candidate['id']] = source['id']
+            changed = True
+        group['runs'] = retained
+    if not changed:
+        return assembly, aliases
+    document.pop('results', None)
+    document.pop('build_plan', None)
+    return Assembly.from_doc(document, assembly.base, assembly.library,
+                             validate_mirror_geometry=False), aliases
 
 
 def _scope(assembly, subassembly=None, run_id=None, inferred=(), include_run_ids=()):
@@ -808,6 +939,9 @@ def repair(assembly, subassembly=None, cancelled=None, run_id=None):
 
 def finalize(assembly, subassembly=None, check_collisions=True, cancelled=None, run_id=None, include_run_ids=()):
     """Materialize a draft group atomically or return all closure conflicts."""
+    assembly, aliases = _coalesce_overlapping_mirror_runs(assembly)
+    run_id = aliases.get(run_id, run_id)
+    include_run_ids = tuple(aliases.get(identifier, identifier) for identifier in include_run_ids)
     inferred, ambiguous, near = _inferred_through(assembly)
     possible = [(candidate_run, {'connector': conflict['connector'], 'port': conflict['port']})
                 for conflict in ambiguous if 'port' in conflict for candidate_run in conflict['runs']]
@@ -908,6 +1042,9 @@ def reopen(assembly, members):
         raise DocumentError('Choose a finished pipe or Body to return to draft')
     if len(members) != len(set(members)) or not set(members) <= assembly.parts.keys():
         raise DocumentError('A selected part no longer exists')
+    restored = _reopen_mirrored_assembly(assembly, members)
+    if restored is not None:
+        return restored
     direct = {part['id']: part for part in assembly.doc.get('parts', [])}
     selected = [pid for pid in members if assembly.parts[pid].kind == 'member']
     if not selected:
@@ -923,6 +1060,7 @@ def reopen(assembly, members):
         if part.length <= 0:
             raise DocumentError(f'{pid}: pipe length must be positive')
     doc = copy.deepcopy(assembly.doc)
+    doc.get('metadata', {}).pop('draft_mirror_reopen', None)
     removed_joints = set()
     attachments = {pid: [] for pid in selected}
     for joint in assembly.joints:

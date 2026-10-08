@@ -383,9 +383,11 @@ def resize_drag(assembly,identifier,length_mm,side,behavior='follow',capture_mm=
         new_point,_=after.parts[new_id].frame({'port':new_port})
         delta=old_point-new_point
         if np.linalg.norm(delta)>1e-6:
+            from .grouping import move_object
             obj=next(o for o in doc['objects'] if o['id']==identifier)
-            pose=obj.setdefault('pose',{})
+            pose=copy.deepcopy(obj.get('pose',{}))
             pose['position_mm']=(np.array(pose.get('position_mm',[0,0,0]))+delta).tolist()
+            doc=move_object(after,identifier,pose)['document']
             after=Assembly.from_doc(doc,assembly.base,assembly.library)
         for anchor in assembly.anchors:
             pid=anchor['part']

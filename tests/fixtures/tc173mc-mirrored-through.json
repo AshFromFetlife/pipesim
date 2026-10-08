@@ -1,0 +1,111 @@
+{
+  "format": "pipesim/1",
+  "units": "mm-kg-s-N-deg",
+  "name": "Mirrored through fitting from 4WaySwing",
+  "parts": [
+    {
+      "id": "tc173mc-1-mirror-mirror-1",
+      "pose": {
+        "position_mm": [
+          -790,
+          -826.24000028,
+          96.88000261
+        ],
+        "rotation_deg": [
+          90,
+          36,
+          -90
+        ]
+      },
+      "label": "Mirror of tc173mc-1",
+      "body": {
+        "kind": "connector",
+        "material": "cast-iron",
+        "color": "#9aabb7",
+        "mass_kg": 0.316,
+        "geometry": [
+          {
+            "type": "mesh",
+            "file": "assets/mirrored/mirror-08acd26e49da986bd75c.stl"
+          }
+        ],
+        "ports": {
+          "through": {
+            "type": "socket",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "axis": [
+              0,
+              0,
+              1
+            ],
+            "diameter_mm": 42.4,
+            "profile": "round",
+            "through": true,
+            "engagement_mm": 45,
+            "min_engagement_mm": 25,
+            "assembly": "slide",
+            "capacity": 1,
+            "clearance_mm": 1,
+            "geometry_status": "inferred-engagement"
+          },
+          "hinge": {
+            "type": "eye",
+            "position_mm": [
+              -50,
+              0,
+              0
+            ],
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "diameter_mm": 10.6,
+            "assembly": "bolt",
+            "capacity": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "tube-c-2",
+      "catalog": "tubeclamp.tube-C",
+      "parameters": {
+        "wall_mm": 3.2,
+        "length_mm": 1600.0
+      },
+      "pose": {
+        "position_mm": [
+          -50.0,
+          -826.24000028,
+          96.88000261
+        ],
+        "rotation_deg": [
+          -0.0,
+          90.0,
+          0.0
+        ]
+      }
+    }
+  ],
+  "joints": [
+    {
+      "id": "tc173mc-1-mirror-mirror-1-through-tube-c-2",
+      "type": "socket",
+      "a": {
+        "part": "tc173mc-1-mirror-mirror-1",
+        "port": "through"
+      },
+      "b": {
+        "part": "tube-c-2",
+        "at_mm": 60.0
+      },
+      "insertion_mm": 0.0,
+      "locked": true
+    }
+  ]
+}

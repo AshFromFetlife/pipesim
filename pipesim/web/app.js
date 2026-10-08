@@ -705,7 +705,9 @@ async function reopenTreeTarget(target){
     if(revision!==state.revision)return;
     state.selected=result.converted_parts[0];
     await acceptPlacement(result,revision);
-    toast(`${result.converted_parts.length} ${result.converted_parts.length===1?'pipe':'pipes'} returned to draft. Undo restores the exact assembly.`);
+    toast(result.restored_mirrors?
+      `Mirrored draft restored with ${result.restored_mirrors} live mirror ${result.restored_mirrors===1?'plane':'planes'}. Undo restores the exact assembly.`:
+      `${result.converted_parts.length} ${result.converted_parts.length===1?'pipe':'pipes'} returned to draft. Undo restores the exact assembly.`);
     status('Subassembly is editable in draft mode');
   }catch(error){toast(error.message,true);status('Return to draft failed · design unchanged');}
   finally{state.placementPending=false;attachGizmo();}
@@ -1520,9 +1522,10 @@ async function regroupObject(id){
   if(state.doc.objects?.some(o=>o.id===id)){select(state.selected);toast('Regrouped '+id+'. Its parts and joints remain articulated.');}
 }
 function bindDuplicateButton(){
+  const wholeLine=selectedObject()?.template==='chain';
   const split=document.createElement('div');split.className='duplicate-control';
   split.innerHTML=`<div class="duplicate-buttons">
-    <button id="duplicate-selected" class="inspect-action secondary" title="Make one copy of just the selected part · Alt+Shift+D">Duplicate</button>
+    <button id="duplicate-selected" class="inspect-action secondary" title="${wholeLine?'Make one copy of the whole flexible line':'Make one copy of just the selected part'} · Alt+Shift+D">Duplicate</button>
     <button id="duplicate-menu-toggle" class="inspect-action secondary" aria-label="Duplicate options" aria-haspopup="menu" aria-controls="duplicate-menu" aria-expanded="false" title="More duplicate options">▾</button></div>
     <div id="duplicate-menu" class="duplicate-menu" role="menu" aria-label="Duplicate options" hidden>
       <button role="menuitem" data-duplicate="count" tabindex="-1">Duplicate N copies…<small>Choose a count and what to include</small></button>
@@ -1550,6 +1553,7 @@ function bindDuplicateButton(){
   };
   for(const button of items)button.onclick=()=>{closeDuplicateMenu(true);if(button.dataset.duplicate==='count')duplicateCountDialog();else duplicateSelected(button.dataset.duplicate);};
 }
+function defaultDuplicateScope(){return selectedObject()?.template==='chain'?'subassembly':'part';}
 function closeDuplicateMenu(focus=false){
   const menu=$('#duplicate-menu');if(!menu||menu.hidden)return;
   menu.hidden=true;$('#duplicate-menu-toggle').setAttribute('aria-expanded','false');if(focus)$('#duplicate-menu-toggle').focus();
@@ -1627,12 +1631,13 @@ function drawDuplicatePreview(members,count,step){
 function duplicateCountDialog(){
   if(state.busy||state.placementPending)return;
   const draft=!!draftRun(state.doc,state.selected);
+  const initialScope=defaultDuplicateScope();
   let cancelled=false,offsetEdited=false;
   modal('Duplicate N copies',`<form id="duplicate-form">
     <div class="single-field"><label for="duplicate-count">Number of new copies</label><input id="duplicate-count" type="number" min="1" max="100" step="1" value="${preferences.defaultDuplicateCount}" required aria-describedby="duplicate-count-help"></div>
     <p id="duplicate-count-help">Enter a whole number from 1 to 100.</p>
     <div class="single-field"><label for="duplicate-scope">Include in each copy</label><select id="duplicate-scope"><option value="part">Selected part only</option><option value="touching">Part and directly touching parts</option><option value="subassembly">Entire subassembly</option></select></div>
-    <div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label for="duplicate-offset-${i}">STEP ${axis} · mm</label><input id="duplicate-offset-${i}" type="number" step="any" required value="${i===0?defaultDuplicateStep('part'):0}"></div>`).join('')}</div>
+    <div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label for="duplicate-offset-${i}">STEP ${axis} · mm</label><input id="duplicate-offset-${i}" type="number" step="any" required value="${i===0?defaultDuplicateStep(initialScope):0}"></div>`).join('')}</div>
     <p>Each copy moves by this X/Y/Z step from the preceding one. Negative values reverse an axis; zero leaves it unchanged.</p>
     <p id="duplicate-scope-help"></p><p id="duplicate-summary" role="status"></p>
     <p id="duplicate-preview-note" role="status"></p>
@@ -1646,6 +1651,7 @@ function duplicateCountDialog(){
     }}]);
   reviewCleanup=()=>{cancelled=true;clearSnapPreview();};
   if(draft)$('#duplicate-scope option[value="touching"]').remove();
+  $('#duplicate-scope').value=initialScope;
   const update=()=>{const scope=$('#duplicate-scope').value,info=duplicateScopeInfo(scope),input=$('#duplicate-count');
     $('#duplicate-scope-help').textContent=info.description;
     const fields=[0,1,2].map(axis=>$('#duplicate-offset-'+axis)),step=fields.map(field=>Number(field.value));
@@ -1689,7 +1695,7 @@ async function resizePipe(member,length,releases=[]){
   }catch(error){toast(error.message,true);status('Length unchanged');}
   finally{state.placementPending=false;if(!$('#modal').open)renderInspector();attachGizmo();}
 }
-async function duplicateSelected(scope='part',count=1,cancelled=()=>false,offsetMm=null){
+async function duplicateSelected(scope=defaultDuplicateScope(),count=1,cancelled=()=>false,offsetMm=null){
   if(state.busy||state.placementPending||!state.selected)return false;
   closeDuplicateMenu();const selected=state.selected,revision=state.revision;
   if(draftRun(state.doc,selected)&&scope==='part')return duplicateDraft(selected,scope,count,cancelled,offsetMm);
@@ -1976,6 +1982,7 @@ function renderHumanModelControls(instance){
 function renderObjectAttachments(instance,selectedPart){
   const chain=instance.template==='chain';
   const flexibleLines=chain?[]:(state.doc.objects||[]).filter(o=>o.template==='chain');
+  const nearestLine=flexibleLines.length?closestFlexibleLineEnd(selectedPart,flexibleLines):null;
   const inside=id=>id.startsWith(instance.id+'/'),connections=state.scene.joints.filter(j=>inside(j.a.part)!==inside(j.b.part));
   const detached=(state.doc.metadata?.detached_attachments||[]).filter(r=>(r.object===instance.id||!chain&&[r.joint.a.part,r.joint.b.part].some(id=>inside(id)))&&state.scene.parts.some(p=>p.id===r.joint.a.part)&&state.scene.parts.some(p=>p.id===r.joint.b.part));
   const anchors=state.scene.anchors.filter(a=>inside(a.part));
@@ -1986,7 +1993,7 @@ function renderObjectAttachments(instance,selectedPart){
     ${!connections.length&&!anchors.length?`<p>No external attachments. The whole ${chain?'chain':'person'} can move freely.</p>`:''}
     ${detached.map(r=>`<div class="joint-card"><p>${esc(r.joint.id)} · detached</p><button class="inspect-action secondary" data-attachment-reconnect="${esc(r.joint.id)}">Preview reconnect</button></div>`).join('')}
     <button class="inspect-action secondary" id="object-attach-part">${chain?'Attach flexible link to a part':'Attach body part to structure'}</button>
-    ${flexibleLines.length?`<div class="single-field"><label for="human-flexible-line">FLEXIBLE LINE</label><select id="human-flexible-line">${flexibleLines.map(line=>`<option value="${esc(line.id)}">${esc(line.label||line.id)}</option>`).join('')}</select></div><button class="inspect-action secondary" id="human-attach-flexible">Attach line to this body surface</button>`:''}`;
+    ${flexibleLines.length?`<div class="single-field"><label for="human-flexible-line">FLEXIBLE LINE</label><select id="human-flexible-line">${flexibleLines.map(line=>`<option value="${esc(line.id)}" ${line.id===nearestLine?.line.id?'selected':''}>${esc(line.label||line.id)}</option>`).join('')}</select></div><button class="inspect-action secondary" id="human-attach-flexible">Attach line to this body surface</button>`:''}`;
   $('#object-expand').closest('.inspect-section').before(section);
   $$('[data-attachment-edit]').forEach(b=>b.onclick=()=>jointDialog(b.dataset.attachmentEdit));
   $$('[data-attachment-detach]').forEach(b=>b.onclick=()=>{
@@ -2003,19 +2010,40 @@ function renderObjectAttachments(instance,selectedPart){
   $('#object-attach-part').onclick=()=>attachmentDialog(instance,selectedPart);
   if(flexibleLines.length)$('#human-attach-flexible').onclick=()=>{
     const line=flexibleLines.find(o=>o.id===$('#human-flexible-line').value);
-    const link=state.scene.parts.find(p=>p.id===line.id+'/link-1');
+    const link=closestFlexibleLineEnd(selectedPart,[line]).part;
     attachmentDialog(line,link,null,selectedPart.id);
   };
+}
+function closestFlexibleLineEnd(bodyPart,lines){
+  const body=partObjects.get(bodyPart.id)?.position;
+  let closest=null;
+  for(const line of lines){
+    const info=state.scene.chains?.find(chain=>chain.id===line.id);
+    if(!info)continue;
+    for(const end of ['start','end']){
+      const part=state.scene.parts.find(candidate=>candidate.id===info[end+'_part']);
+      const mesh=partObjects.get(part?.id),port=part?.ports?.[info[end+'_port']];
+      if(!body||!mesh||!port)continue;
+      const position=new THREE.Vector3(...port.position_mm).applyMatrix4(mesh.matrix);
+      const distance=position.distanceToSquared(body);
+      if(!closest||distance<closest.distance)closest={line,part,end,distance};
+    }
+  }
+  return closest;
 }
 function attachmentDialog(instance,selectedPart,reconnect=null,preferredTarget=null){
   const chain=instance.template==='chain';
   if(state.busy||state.placementPending)return;
   const inside=p=>p.id.startsWith(instance.id+'/'),limbs=state.scene.parts.filter(inside),targets=state.scene.parts.filter(p=>!inside(p));
+  const lineInfo=chain?state.scene.chains?.find(line=>line.id===instance.id):null;
+  const lineEnds=lineInfo?[lineInfo.start_part,lineInfo.end_part]:[];
+  const limbOptions=chain&&lineInfo?`${[...new Set(lineEnds)].map((id,index)=>`<option value="${esc(id)}" ${id===selectedPart.id?'selected':''}>${index===0?'Start':'End'} of line</option>`).join('')}<optgroup label="Other segments">${limbs.filter(p=>!lineEnds.includes(p.id)).map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(p.id)}</option>`).join('')}</optgroup>`:
+    limbs.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(p.id)}</option>`).join('');
   if(!targets.length){toast('Add a bar or another structure part to attach to.');return;}
   let result=null,request=0;const revision=state.revision;
   state.placementPending=true;gizmo?.detach();
   modal(reconnect?'Reconnect body attachment':chain?'Attach flexible line to a part':'Add connection · human',reconnect?`<p>${esc(reconnect)}</p><p>Preview reaching the saved attachment point.</p><p id="attachment-preview-status" role="status"></p>`:`
-    <div class="single-field"><label for="attachment-limb">${chain?'CHAIN LINK':'BODY PART'}</label><select id="attachment-limb">${limbs.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(p.id)}</option>`).join('')}</select></div>
+    <div class="single-field"><label for="attachment-limb">${chain?'LINE END OR SEGMENT':'BODY PART'}</label><select id="attachment-limb">${limbOptions}</select></div>
     ${chain?`<div class="single-field"><label for="attachment-source-port">POINT ON LINK</label><select id="attachment-source-port"><option value="b">B eye</option><option value="a">A eye</option></select></div>`:''}
     <div class="single-field"><label for="attachment-target">STRUCTURE PART</label><select id="attachment-target">${targets.map(p=>`<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('')}</select></div>
     <div id="attachment-location"></div><div class="single-field"><label for="attachment-kind">ATTACHMENT</label><select id="attachment-kind"><option value="revolute">Grip · pivots around the bar</option><option value="fixed">Fixed · holds position and orientation</option><option value="spherical">Ball joint · rotates freely</option></select></div>
@@ -2075,7 +2103,13 @@ function attachmentDialog(instance,selectedPart,reconnect=null,preferredTarget=n
   }
   if(reconnect)preview();else{
     if(chain){$('#attachment-kind').value='spherical';$('#attachment-source-port').value=selectedPart.id===instance.id+'/link-1'?'b':'a';$('#attachment-source-port').onchange=preview;}
-    $('#attachment-target').onchange=location;$('#attachment-limb').onchange=location;$('#attachment-kind').onchange=preview;
+    $('#attachment-target').onchange=location;$('#attachment-limb').onchange=()=>{
+      if(chain&&lineInfo){
+        if($('#attachment-limb').value===lineInfo.start_part)$('#attachment-source-port').value=lineInfo.start_port;
+        if($('#attachment-limb').value===lineInfo.end_part)$('#attachment-source-port').value=lineInfo.end_port;
+      }
+      location();
+    };$('#attachment-kind').onchange=preview;
     const origin=partObjects.get(selectedPart.id).position;
     $('#attachment-target').value=preferredTarget&&targets.some(p=>p.id===preferredTarget)?preferredTarget:[...targets].sort((a,b)=>partObjects.get(a.id).position.distanceTo(origin)-partObjects.get(b.id).position.distanceTo(origin))[0].id;
     location();

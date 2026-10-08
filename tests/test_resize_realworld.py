@@ -15,6 +15,8 @@ import subprocess
 import sys
 import time
 
+from fuzz_runtime import batch_size, budget
+
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
@@ -303,22 +305,19 @@ def test_randomized_connected_graph_resize_sequence(case_seed, library, tmp_path
     _check_connected_graph_sequence(case_seed, library, tmp_path)
 
 
-@pytest.mark.skipif(os.environ.get('PIPESIM_RESIZE_REALWORLD_LONG') != '1',
-                    reason='opt in with PIPESIM_RESIZE_REALWORLD_LONG=1')
 def test_resize_realworld_long_randomized(library, tmp_path):
     root_seed = int(os.environ.get('PIPESIM_RESIZE_REALWORLD_ROOT_SEED', secrets.randbits(64)))
     case_limit = int(os.environ.get('PIPESIM_RESIZE_REALWORLD_CASES', '1000000'))
-    deadline = time.monotonic() + float(os.environ.get('PIPESIM_RESIZE_REALWORLD_HOURS', '2'))*3600
-    started = time.monotonic()
+    minutes, started, deadline = budget()
     rng = random.Random(root_seed)
     print(f'Resize fuzz root_seed={root_seed}, case_limit={case_limit}', flush=True)
     completed = 0
     while completed < case_limit and time.monotonic() < deadline:
-        batch = [rng.getrandbits(64) for _ in range(min(25, case_limit-completed))]
-        batch_dir = tmp_path / f'batch-{completed//25:06d}'
+        batch = [rng.getrandbits(64) for _ in range(batch_size(
+            25, case_limit-completed, completed, started, deadline, minutes))]
+        batch_dir = tmp_path / f'batch-{completed:06d}'
         child_env = os.environ.copy()
         child_env['PIPESIM_RESIZE_GRAPH_SEEDS'] = ','.join(map(str, batch))
-        child_env.pop('PIPESIM_RESIZE_REALWORLD_LONG', None)
         child = subprocess.run(
             [sys.executable, '-m', 'pytest', '-q', '-s', f'--basetemp={batch_dir}',
              'tests/test_resize_realworld.py', '-k', 'randomized_connected_graph_resize_sequence'],

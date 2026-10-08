@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+from fuzz_runtime import batch_size, budget
+
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
@@ -322,25 +324,21 @@ def test_generated_mirror_capture_and_shrink_sequences(factory, blank):
                                         replay_index if replay else index_base+index)
 
 
-@pytest.mark.skipif(os.environ.get('PIPESIM_RESIZE_CAPTURE_LONG') != '1',
-                    reason='opt-in multi-hour resize capture campaign')
 def test_long_generated_mirror_capture_and_shrink_sequences(factory, blank, tmp_path):
     root_seed = int(os.environ.get('PIPESIM_RESIZE_CAPTURE_SEED', secrets.randbits(64)))
     rng = random.Random(root_seed)
-    seconds = float(os.environ.get('PIPESIM_RESIZE_CAPTURE_SECONDS', 7200))
+    minutes, started, deadline = budget()
     cases = int(os.environ.get('PIPESIM_RESIZE_CAPTURE_CASES', 1000000))
-    deadline = time.monotonic() + seconds
     print(f'long resize capture root_seed={root_seed}', flush=True)
     completed = 0
-    started = time.monotonic()
     try:
         while completed < cases and time.monotonic() < deadline:
-            batch = [rng.getrandbits(64) for _ in range(min(10, cases-completed))]
-            batch_dir = tmp_path / f'batch-{completed//10:06d}'
+            batch = [rng.getrandbits(64) for _ in range(batch_size(
+                10, cases-completed, completed, started, deadline, minutes))]
+            batch_dir = tmp_path / f'batch-{completed:06d}'
             child_env = os.environ.copy()
             child_env['PIPESIM_RESIZE_CAPTURE_CASE_SEEDS'] = ','.join(map(str, batch))
             child_env['PIPESIM_RESIZE_CAPTURE_CASE_INDEX_BASE'] = str(completed)
-            child_env.pop('PIPESIM_RESIZE_CAPTURE_LONG', None)
             child = subprocess.run(
                 [sys.executable, '-m', 'pytest', '-q', '-s', f'--basetemp={batch_dir}',
                  'tests/test_resize_capture_mirror.py', '-k', 'test_generated_mirror_capture_and_shrink_sequences'],

@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from test_server import editor, request
 
-from pipesim.document import Assembly
-from pipesim.drafting import finalize
+from pipesim.document import Assembly, read, write
+from pipesim.drafting import _mirror_reopen_digest, finalize
 from pipesim.symmetry import materialize_all
 from pipesim.validation import validate
 
@@ -75,6 +75,68 @@ def test_editor_finalize_endpoint_accepts_three_mirror_cube(editor):
     assert status == 200 and response['status'] == 'finalized', response
     assert len(response['document']['parts']) == 20
     assert len(response['document']['joints']) == 24
+
+
+def test_mirrored_cube_returns_to_live_draft_and_can_be_finalized_again(editor):
+    original = cube_corner(editor.root)
+    status, raw = request(editor, '/api/draft-finalize', {'document': original})
+    exact = json.loads(raw)
+    assert status == 200 and exact['status'] == 'finalized', exact
+    assert len(exact['document']['parts']) == 20
+    assert exact['document']['metadata']['draft_mirror_reopen']['final_digest'] == _mirror_reopen_digest(exact['document'])
+    path = editor.root / 'mirrored-roundtrip.pipe.yaml'
+    write(path, exact['document'])
+    saved = read(path)
+
+    status, raw = request(editor, '/api/draft-reopen', {
+        'document': saved,
+        'members': [part['id'] for part in saved['parts']]})
+    reopened = json.loads(raw)
+    assert status == 200 and reopened['status'] == 'reopened', reopened
+    draft = reopened['document']
+    assert {part['id'] for part in draft['parts']} == {'corner'}
+    assert {run['id'] for run in draft['draft_subassemblies'][0]['runs']} == {
+        'x-edge', 'y-edge', 'z-edge'}
+    assert {plane['axis'] for plane in draft['draft_subassemblies'][0]['mirrors']} == {
+        'x', 'y', 'z'}
+    assert 'draft_mirror_reopen' not in draft.get('metadata', {})
+
+    # The source run remains editable and its new free-end span is mirrored.
+    edge = next(run for run in draft['draft_subassemblies'][0]['runs']
+                if run['id'] == 'x-edge')
+    edge['end_mm'][0] += 5
+    status, raw = request(editor, '/api/draft-finalize', {'document': draft})
+    again = json.loads(raw)
+    assert status == 200 and again['status'] == 'finalized', again
+    assert len(again['document']['parts']) == 20
+    assert validate(Assembly.from_doc(again['document'], editor.root))['valid']
+
+
+def test_one_pipe_reopens_its_linked_mirrored_assembly(editor):
+    status, raw = request(editor, '/api/draft-finalize',
+                          {'document': cube_corner(editor.root)})
+    exact = json.loads(raw)
+    assert status == 200 and exact['status'] == 'finalized', exact
+    status, raw = request(editor, '/api/draft-reopen', {
+        'document': exact['document'], 'members': ['x-edge']})
+    reopened = json.loads(raw)
+    assert status == 200 and reopened['status'] == 'reopened', reopened
+    assert {part['id'] for part in reopened['document']['parts']} == {'corner'}
+    assert len(reopened['document']['draft_subassemblies'][0]['mirrors']) == 3
+
+
+def test_edited_exact_mirror_design_reopens_without_stale_mirror_history(editor):
+    status, raw = request(editor, '/api/draft-finalize',
+                          {'document': cube_corner(editor.root)})
+    exact = json.loads(raw)
+    assert status == 200 and exact['status'] == 'finalized', exact
+    exact['document']['parts'][0]['pose']['position_mm'][0] += 1
+    status, raw = request(editor, '/api/draft-reopen', {
+        'document': exact['document'], 'members': ['x-edge']})
+    reopened = json.loads(raw)
+    assert status == 200 and reopened['status'] == 'reopened', reopened
+    assert 'draft_mirror_reopen' not in reopened['document'].get('metadata', {})
+    assert not reopened['document']['draft_subassemblies'][0].get('mirrors')
 
 
 def socket_with_extra_obstacle(extra=False):

@@ -7,12 +7,14 @@ import sys
 import json
 import time
 
+from fuzz_runtime import batch_size, budget
+
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
 from pipesim.document import Assembly
-from pipesim.drafting import finalize
+from pipesim.drafting import finalize, remember_mirrored_draft, reopen, repair
 from pipesim.math3d import pose_of, transform
 from pipesim.symmetry import materialize_all
 from pipesim.validation import validate
@@ -78,6 +80,24 @@ def _check_cube_case(base, case_seed, *, root_seed, index, repro_dir):
         assert len(exact.joints) == 24, context
         report = validate(exact)
         assert report['valid'], f'{context}: {report["issues"]}'
+        stage = 'reopen'
+        remembered = remember_mirrored_draft(doc, result)
+        chosen = random.Random(case_seed).choice(tuple(remembered['lengths_mm']))
+        returned = reopen(Assembly.from_doc(remembered['document'], base), [chosen])
+        assert returned['status'] == 'reopened', context
+        editable = returned['document']
+        assert len(editable['parts']) == 1 and len(editable['draft_subassemblies'][0]['mirrors']) == 3, context
+        stage = 'edit and refinalize'
+        run = random.Random(case_seed + 1).choice(editable['draft_subassemblies'][0]['runs'])
+        direction = np.asarray(run['end_mm']) - run['start_mm']
+        axis = int(np.argmax(np.abs(direction)))
+        run['end_mm'][axis] += np.sign(direction[axis]) * 5
+        repaired = repair(Assembly.from_doc(editable, base, validate_mirror_geometry=False))
+        assert repaired['status'] == 'repaired', f'{context}: {repaired}'
+        rebaked = materialize_all(Assembly.from_doc(repaired['document'], base))
+        again = finalize(Assembly.from_doc(rebaked, base))
+        assert again['status'] == 'finalized', f'{context}: {again}'
+        assert validate(Assembly.from_doc(again['document'], base))['valid'], context
     except Exception as exc:
         path = repro_dir / f'cube-fuzz-{case_seed}.json'
         path.write_text(json.dumps({
@@ -105,27 +125,26 @@ def test_randomized_orthogonal_mirror_cubes_finalize_without_collisions(tmp_path
                          index=index_base+index, repro_dir=tmp_path)
 
 
-@pytest.mark.skipif(os.environ.get('PIPESIM_CUBE_FUZZ_LONG') != '1',
-                    reason='opt-in multi-hour orthogonal mirror cube campaign')
 def test_cube_long_randomized(tmp_path):
     root_seed = int(os.environ.get('PIPESIM_CUBE_FUZZ_SEED', secrets.randbits(64)))
     case_limit = int(os.environ.get('PIPESIM_CUBE_FUZZ_CASES', 1000000))
-    deadline = time.monotonic() + float(os.environ.get('PIPESIM_CUBE_FUZZ_SECONDS', 7200))
+    minutes, started, deadline = budget()
     rng = random.Random(root_seed)
     print(f'cube mirror long root_seed={root_seed} case_limit={case_limit}', flush=True)
     completed = 0
-    started = time.monotonic()
     try:
         while completed < case_limit and time.monotonic() < deadline:
-            batch = [rng.getrandbits(64) for _ in range(min(10, case_limit-completed))]
-            batch_dir = tmp_path / f'batch-{completed//10:06d}'
+            batch = [rng.getrandbits(64) for _ in range(batch_size(
+                10, case_limit-completed, completed, started, deadline, minutes))]
+            batch_dir = tmp_path / f'batch-{completed:06d}'
             child_env = os.environ.copy()
             child_env['PIPESIM_CUBE_FUZZ_CASE_SEEDS'] = ','.join(map(str, batch))
+            child_env['PIPESIM_REALWORLD_MIRROR_CASE_SEEDS'] = ','.join(map(str, batch))
             child_env['PIPESIM_CUBE_FUZZ_CASE_INDEX_BASE'] = str(completed)
-            child_env.pop('PIPESIM_CUBE_FUZZ_LONG', None)
             child = subprocess.run(
                 [sys.executable, '-m', 'pytest', '-q', '-s', f'--basetemp={batch_dir}',
-                 'tests/test_symmetry_cube_fuzz.py', '-k', 'randomized_orthogonal_mirror_cubes_finalize_without_collisions'],
+                 'tests/test_symmetry_cube_fuzz.py', 'tests/test_mirror_overlap_realworld.py',
+                 '-k', 'randomized_orthogonal_mirror_cubes_finalize_without_collisions or realworld_mirror_overlap_case or realworld_through_socket_case'],
                 env=child_env, capture_output=True, text=True, check=False)
             if child.returncode:
                 pytest.fail(f'Cube fuzz root_seed={root_seed}, completed={completed}, '

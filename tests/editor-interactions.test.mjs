@@ -3189,6 +3189,42 @@ test('a chain can move whole, pose links, hold that shape and keep hundreds of l
   }finally{await ui.close();}
 });
 
+test('Duplicate on a selected chain link copies the whole flexible line and remains undoable',async()=>{
+  const doc=chainDesign(8);doc.objects[0].parameters.link_catalog='generic.rope-nylon-10';
+  const ui=await editor(doc);try{
+    selectChain(ui,'start');
+    const original=structuredClone(ui.state.doc.objects[0]);
+    assert.match(ui.document.querySelector('#duplicate-selected').title,/whole flexible line/);
+    ui.document.querySelector('#duplicate-selected').click();
+    await ui.wait(()=>ui.state.doc.objects.length===2&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.parts.length,0);
+    assert.equal(ui.state.doc.objects[1].id,'chain-copy');
+    assert.deepEqual(ui.state.doc.objects[1].parameters,original.parameters);
+    assert.equal(ui.state.scene.chains.length,2);
+    assert.equal(ui.state.scene.parts.length,ui.state.scene.chains[0].count*2);
+    assert.equal(ui.state.selected,'chain-copy/link-1');
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.objects.length===1);
+    assert.deepEqual(ui.state.doc.objects[0],original);
+  }finally{await ui.close();}
+});
+
+test('Duplicate N defaults to copying the complete chain from either selected end',async()=>{
+  const ui=await editor(chainDesign(6));try{
+    selectChain(ui);ui.document.querySelector('#duplicate-menu-toggle').click();
+    ui.document.querySelector('[data-duplicate="count"]').click();
+    assert.equal(ui.document.querySelector('#duplicate-scope').value,'subassembly');
+    assert.match(ui.document.querySelector('#duplicate-summary').textContent,/2 new copies × 6 parts = 12 new parts/);
+    ui.document.querySelector('#duplicate-count').value='2';
+    ui.document.querySelector('#duplicate-form').dispatchEvent(new ui.window.Event('submit',{bubbles:true,cancelable:true}));
+    await ui.wait(()=>ui.state.doc.objects.length===3&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.parts.length,0);
+    assert.deepEqual(ui.state.doc.objects.map(o=>o.parameters.length_mm),[120,120,120]);
+    assert.equal(ui.state.scene.parts.length,18);
+    assert.equal(ui.state.undo.length,1);
+  }finally{await ui.close();}
+});
+
 test('shortening a chain reports the attachment to release without changing it',async()=>{
   const doc=chainDesign();doc.anchors=[{part:'chain/link-25',surface:'ceiling'}];const ui=await editor(doc);try{
     selectChain(ui,'start');const before=structuredClone(ui.state.doc);changeInput(ui,'#chain-length',100);
@@ -3725,6 +3761,31 @@ test('a flexible link can be attached to a selected human body surface',async()=
     modalAction(ui,'Connect');
     await ui.wait(()=>ui.state.doc.joints.length===1);
     assert.equal(ui.state.doc.joints[0].id,joint.id);
+  }finally{await ui.close();}
+});
+
+test('body attachment chooses the closest flexible line and its closest end',async()=>{
+  const doc=blankDesign('Nearest strap end');
+  doc.objects=[{id:'person',template:'human'},
+    {id:'far',template:'chain',parameters:{length_mm:300,link_catalog:'generic.strap-seatbelt-65'},pose:{position_mm:[3000,0,2000]}},
+    {id:'near',template:'chain',parameters:{length_mm:300,link_catalog:'generic.strap-seatbelt-65'},pose:{position_mm:[0,0,2000]}}];
+  const ui=await editor(doc);try{
+    ui.select('person/thorax');
+    assert.equal(ui.document.querySelector('#human-flexible-line').value,'near');
+    ui.document.querySelector('#human-attach-flexible').click();
+    assert.equal(ui.document.querySelector('#attachment-target').value,'person/thorax');
+    assert.equal(ui.document.querySelector('#attachment-limb').value,'near/link-12');
+    assert.equal(ui.document.querySelector('#attachment-source-port').value,'a');
+    assert.equal(ui.document.querySelector('#attachment-limb').options[0].textContent,'Start of line');
+    assert.equal(ui.document.querySelector('#attachment-limb').options[1].textContent,'End of line');
+    ui.document.querySelector('#attachment-limb').value='near/link-1';
+    ui.document.querySelector('#attachment-limb').dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.equal(ui.document.querySelector('#attachment-source-port').value,'b');
+    modalAction(ui,'Cancel');
+    ui.select('person/thorax');ui.document.querySelector('#human-flexible-line').value='far';
+    ui.document.querySelector('#human-attach-flexible').click();
+    assert.equal(ui.document.querySelector('#attachment-limb').value,'far/link-12');
+    modalAction(ui,'Cancel');
   }finally{await ui.close();}
 });
 

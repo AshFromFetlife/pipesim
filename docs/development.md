@@ -107,31 +107,32 @@ python -m pytest -q tests/test_solver_fuzz.py -k draft_repair_varied
 Remove-Item Env:PIPESIM_FUZZ_CASE_SEEDS
 ```
 
-For a long randomized campaign, set a wall-time budget and a maximum number of
-cases. The default long-run budgets are two hours and one million generated
-models; the first limit reached stops the run. The random root seed and each
-failing case seed are printed so a failure can be reproduced. Supplying a root
+The four extended fuzz campaigns run in the normal Python suite. Each runs for
+ten minutes by default, or until its one-million-model limit is reached. Set
+`PIPESIM_FUZZ_MINUTES` to change the time in minutes for each campaign. The
+random root seed and each failing case seed are printed so a failure can be
+reproduced. Supplying a root
 seed repeats the entire sequence. For example:
 
 ```powershell
-$env:PIPESIM_FUZZ_LONG = '1'
-$env:PIPESIM_FUZZ_HOURS = '4'
+$env:PIPESIM_FUZZ_MINUTES = '20'
 $env:PIPESIM_FUZZ_CASES = '1000000'
 python -m pytest -s -q tests/test_solver_fuzz.py -k draft_repair_long_randomized
-Remove-Item Env:PIPESIM_FUZZ_LONG, Env:PIPESIM_FUZZ_HOURS, Env:PIPESIM_FUZZ_CASES
+Remove-Item Env:PIPESIM_FUZZ_MINUTES, Env:PIPESIM_FUZZ_CASES
 ```
 
-The long mode runs 25 models per child process because geometry libraries can
-retain native memory across models. Each batch reports its completed count and
+The draft repair and connected resize campaigns run at most 25 models per child
+process; the mirror campaigns run at most ten. Short budgets use smaller batches,
+and completed-case speed sizes later batches near the deadline. A running case
+can still take the campaign past its deadline. Geometry libraries can retain
+native memory across models. Each batch reports its completed count and
 elapsed time; a failing batch retains its generated designs under pytest's
-temporary directory. The long mode is opt-in because a full campaign can take
-hours. It uses new
-randomness by default; fixed seeds are retained for reliable regression replay.
-The separate `Long geometry fuzz` GitHub Actions workflow runs fresh two-hour
-draft-repair, connected-resize, mirrored socket-capture, and three-mirror cube campaigns each day and can also be started
-manually. On failure it keeps the generated designs as artifacts; the log
-records the root and failing case seeds. The million-case setting is an upper
-bound, not an expected two-hour throughput.
+temporary directory. The campaigns use new randomness by default; fixed seeds
+are retained for reliable regression replay. The separate `Geometry fuzz`
+GitHub Actions workflow can be started manually and has no daily schedule. On
+failure it keeps the generated designs as artifacts; the log records the root
+and failing case seeds. The million-case setting is an upper bound, not an
+expected ten-minute throughput.
 
 Browser verification additionally exercises the visible GUI: library loading, selection, lock/unlock body inference, edit dialogs, validation, structural response, simulation playback, save and printable instruction export. A browser screenshot is a layout check, not a numerical solver test.
 
@@ -164,29 +165,27 @@ then perform sequences of known-solvable end extensions. Each expected edit is
 constructed and validated independently before the resize tool is called, so
 a rejected operation fails the test. Ordinary runs combine retained seeds with
 fresh random seeds; failures keep the individual seed and input document for
-replay. The long run uses 25-case child batches to limit native geometry memory
+replay. The timed run uses up to 25 cases per child batch to limit native geometry memory
 growth and reports each completed batch. To run it locally:
 
 ```powershell
-$env:PIPESIM_RESIZE_REALWORLD_LONG = '1'
-$env:PIPESIM_RESIZE_REALWORLD_HOURS = '2'
+$env:PIPESIM_FUZZ_MINUTES = '20'
 $env:PIPESIM_RESIZE_REALWORLD_CASES = '1000000'
 python -m pytest -s -q --basetemp=resize-fuzz-repro tests/test_resize_realworld.py -k resize_realworld_long
-Remove-Item Env:PIPESIM_RESIZE_REALWORLD_LONG, Env:PIPESIM_RESIZE_REALWORLD_HOURS, Env:PIPESIM_RESIZE_REALWORLD_CASES
+Remove-Item Env:PIPESIM_FUZZ_MINUTES, Env:PIPESIM_RESIZE_REALWORLD_CASES
 ```
 
 For socket capture followed by free-end shrink across one or two scene mirrors,
 run the separate long campaign. It varies both pipe ends, through and end
 sockets, rigid scene orientation, and a fitting shared with another draft run.
 Each case independently builds a valid target before checking the editor edit.
-The long run uses ten-case child batches and preserves each case's sequence index.
+The timed run uses up to ten cases per child batch and preserves each case's sequence index.
 
 ```powershell
-$env:PIPESIM_RESIZE_CAPTURE_LONG = '1'
-$env:PIPESIM_RESIZE_CAPTURE_SECONDS = '7200'
+$env:PIPESIM_FUZZ_MINUTES = '20'
 $env:PIPESIM_RESIZE_CAPTURE_CASES = '1000000'
 python -m pytest -s -q --basetemp=capture-fuzz-repro tests/test_resize_capture_mirror.py -k long_generated_mirror_capture_and_shrink_sequences
-Remove-Item Env:PIPESIM_RESIZE_CAPTURE_LONG, Env:PIPESIM_RESIZE_CAPTURE_SECONDS, Env:PIPESIM_RESIZE_CAPTURE_CASES
+Remove-Item Env:PIPESIM_FUZZ_MINUTES, Env:PIPESIM_RESIZE_CAPTURE_CASES
 ```
 
 The deterministic cube regression starts with one TC128C corner, three pipes,
@@ -195,15 +194,19 @@ connectors, twelve pipes, and twenty-four distinct socket joints, followed by
 exact validation with collisions enabled. The ordinary fuzz test varies all
 three spans independently to make rectangular boxes, plus world position,
 right-angle orientation, and mirror order. For a longer fresh-seed campaign
-with replayable failure documents, the long run uses ten-case child batches
-to limit native geometry memory growth:
+with replayable failure documents, the timed run uses up to ten seeds per child
+batch to limit native geometry memory growth. Each seed also checks a saved
+TC104C/TC128C mirror frame with a near-centered pipe and a mirrored TC173MC
+through fitting under a random rigid orientation. These cases require exact
+finalization with collision checking, rather than treating a reported collision
+as an expected outcome. Each cube case also returns the finalized mirror
+assembly to draft, edits a span, repairs it, and finalizes again:
 
 ```powershell
-$env:PIPESIM_CUBE_FUZZ_LONG = '1'
-$env:PIPESIM_CUBE_FUZZ_SECONDS = '7200'
+$env:PIPESIM_FUZZ_MINUTES = '20'
 $env:PIPESIM_CUBE_FUZZ_CASES = '1000000'
 python -m pytest -s -q --basetemp=cube-fuzz-repro tests/test_symmetry_cube_fuzz.py -k cube_long_randomized
-Remove-Item Env:PIPESIM_CUBE_FUZZ_LONG, Env:PIPESIM_CUBE_FUZZ_SECONDS, Env:PIPESIM_CUBE_FUZZ_CASES
+Remove-Item Env:PIPESIM_FUZZ_MINUTES, Env:PIPESIM_CUBE_FUZZ_CASES
 ```
 
 ## Rebuilding source data

@@ -2,7 +2,7 @@
 
 The bounded suite combines known seeds with new random cases on every run. Failures
 include a case seed; replay one with ``PIPESIM_FUZZ_CASE_SEEDS=<seed> pytest
-tests/test_solver_fuzz.py -k draft_repair_varied``. The optional long run is
+tests/test_solver_fuzz.py -k draft_repair_varied``. The timed campaign is
 documented in docs/development.md.
 """
 
@@ -15,6 +15,8 @@ import secrets
 import subprocess
 import sys
 import time
+
+from fuzz_runtime import batch_size, budget
 
 import numpy as np
 import pytest
@@ -326,8 +328,6 @@ def test_draft_repair_collision_valid_geometry(case_seed, factory, tmp_path):
                              check_collisions=True)
 
 
-@pytest.mark.skipif(os.environ.get('PIPESIM_FUZZ_LONG') != '1',
-                    reason='opt in with PIPESIM_FUZZ_LONG=1')
 def test_draft_repair_long_randomized(factory, tmp_path):
     """Explore in fresh processes until the wall-time or case budget expires.
 
@@ -337,17 +337,16 @@ def test_draft_repair_long_randomized(factory, tmp_path):
     """
     root_seed = int(os.environ.get('PIPESIM_FUZZ_ROOT_SEED', secrets.randbits(64)))
     case_limit = int(os.environ.get('PIPESIM_FUZZ_CASES', '1000000'))
-    deadline = time.monotonic() + float(os.environ.get('PIPESIM_FUZZ_HOURS', '2'))*3600
+    minutes, started, deadline = budget()
     rng = random.Random(root_seed)
     print(f'Draft fuzz root_seed={root_seed}, case_limit={case_limit}', flush=True)
     completed = 0
-    started = time.monotonic()
     while completed < case_limit and time.monotonic() < deadline:
-        batch = [rng.getrandbits(64) for _ in range(min(25, case_limit-completed))]
-        batch_dir = tmp_path / f'batch-{completed//25:06d}'
+        batch = [rng.getrandbits(64) for _ in range(batch_size(
+            25, case_limit-completed, completed, started, deadline, minutes))]
+        batch_dir = tmp_path / f'batch-{completed:06d}'
         child_env = os.environ.copy()
         child_env['PIPESIM_FUZZ_CASE_SEEDS'] = ','.join(map(str, batch))
-        child_env.pop('PIPESIM_FUZZ_LONG', None)
         child = subprocess.run(
             [sys.executable, '-m', 'pytest', '-q', '-s', f'--basetemp={batch_dir}',
              'tests/test_solver_fuzz.py', '-k', 'draft_repair_varied_geometry'],

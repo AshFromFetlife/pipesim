@@ -286,6 +286,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise DocumentError('This editor tab is out of date. Save your work and refresh before finalizing a selected draft structure')
                     include_run_ids=()
                     blocking=None
+                    mirror_source_document=None
                     if operation is finalize and any(g.get('mirrors') for g in assembly.doc.get('draft_subassemblies', [])):
                         from .symmetry import materialize_all
                         # A draft mirror is only a preview. Close recoverable
@@ -305,6 +306,7 @@ class Handler(BaseHTTPRequestHandler):
                             existing={r['id'] for r in runs(assembly.doc)}
                         if blocking is None:
                             try:
+                                mirror_source_document=copy.deepcopy(assembly.doc)
                                 document=materialize_all(assembly,{owner} if selected else None)
                             except DocumentError as exc:
                                 blocking={'status':'conflict','conflicts':[{
@@ -318,6 +320,9 @@ class Handler(BaseHTTPRequestHandler):
                         assembly,data.get('subassembly'),cancelled=event.is_set,
                         run_id=run_id if selected else None,
                         **({'include_run_ids':include_run_ids} if operation is finalize else {}))
+                    if mirror_source_document is not None:
+                        from .drafting import remember_mirrored_draft
+                        result=remember_mirrored_draft(mirror_source_document,result)
                     if result['status'] in ('finalized','repaired'):
                         result['scene']=self.scene(self.assembly(result['document'],base,
                                                                validate_mirror_geometry=False))

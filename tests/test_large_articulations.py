@@ -61,11 +61,18 @@ def test_heavy_load_on_chain_with_external_top_attachment_stays_supported(factor
         'a':{'part':'fixture'},'b':{'part':'chain/link-1','port':'b'}})
     assembly=factory(doc)
     initial=np.array(assembly.parts['load'].matrix[:3,3])
+    chain_reach=sum(np.linalg.norm(
+        assembly.parts[f'chain/link-{index}'].frame({'port':'a'})[0]
+        -assembly.parts[f'chain/link-{index}'].frame({'port':'b'})[0])
+        for index in range(1,26))
+    load_mount_offset=np.linalg.norm(doc['joints'][0]['b']['frame']['position_mm'])
     result=physics.simulate(assembly,1,20)
     positions=np.array([frame['parts']['load']['position_mm'] for frame in result['frames']])
     speeds=np.linalg.norm(np.diff(positions,axis=0)*20/1000,axis=1)
     assert max(speeds)<10
-    assert max(np.linalg.norm(positions-initial,axis=1))<1000
+    # A pendulum can travel farther than its radius when it swings across the anchor.
+    # The load centre must remain within the chain's contour plus its mounting offset.
+    assert max(np.linalg.norm(positions-top,axis=1))<=chain_reach+load_mount_offset+10
     assert set(result['frames'][-1]['joints'])=={j['id'] for j in assembly.joints}
     doc['joints']=[j for j in doc['joints'] if j['id']!='top-hook']
     loose=physics.simulate(factory(doc),.7,10)

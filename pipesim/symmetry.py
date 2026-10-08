@@ -383,6 +383,13 @@ def materialize_mirror(assembly, group_id, plane_id):
         mirrored_end = np.array(reflected_point(end, axis, offset))
         same = np.linalg.norm(mirrored_start-start) < .05 and np.linalg.norm(mirrored_end-end) < .05
         reversed_ = np.linalg.norm(mirrored_start-end) < .05 and np.linalg.norm(mirrored_end-start) < .05
+        normal = AXES[axis]
+        crosses_plane = (start[normal]-offset) * (end[normal]-offset) < 0
+        along_normal = np.linalg.norm(np.delete(end-start, normal)) < .05
+        # A single pipe already spanning a mirror cannot acquire a second,
+        # overlapping physical pipe just because its free end is a little short.
+        spanning_normal = crosses_plane and along_normal
+        reversed_ = reversed_ or spanning_normal
         attachments = copy.deepcopy(run.get('attachments', []))
         for attachment in attachments:
             original = attachment['connector']
@@ -397,6 +404,13 @@ def materialize_mirror(assembly, group_id, plane_id):
                 attachment['end'] = 'end' if attachment['end'] == 'start' else 'start'
         if same or reversed_:
             existing = next(item for item in owner_target['runs'] if item['id'] == run['id'])
+            if spanning_normal:
+                half_span = max(abs(start[normal]-offset), abs(end[normal]-offset))
+                symmetric_start, symmetric_end = start.copy(), end.copy()
+                symmetric_start[normal] = offset + np.sign(start[normal]-offset)*half_span
+                symmetric_end[normal] = offset + np.sign(end[normal]-offset)*half_span
+                existing['start_mm'] = symmetric_start.tolist()
+                existing['end_mm'] = symmetric_end.tolist()
             for attachment in attachments:
                 if attachment in existing.get('attachments', []):
                     continue

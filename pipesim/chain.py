@@ -86,11 +86,35 @@ def generate(parameters, library, components=None):
     saved = {p['id']: p for p in result['parts']}
     if components:
         old = dimensions(components.get('parameter_reference', parameters), library)
-        if old['link_catalog'] != info['link_catalog']:
-            raise DocumentError('An edited chain keeps its link type. Add a new chain to use a different link.')
         expected = {f'link-{i}' for i in range(1, len(saved)+1)}
         if set(saved) != expected:
             raise DocumentError('This chain has individually removed or renamed links. Restore its link sequence before setting its length.')
+        if old['link_catalog'] != info['link_catalog']:
+            # Resample the saved centreline before replacing the link geometry.
+            # Link counts and port offsets vary between chain, rope and strap.
+            old_nodes = [point(transform(saved['link-1'].get('pose')), old['b'])]
+            old_nodes += [point(transform(saved[f'link-{i}'].get('pose')), old['a'])
+                          for i in range(1, len(saved)+1)]
+            stations = np.r_[0, np.cumsum(np.linalg.norm(np.diff(old_nodes, axis=0), axis=1))]
+            nodes = [np.asarray(old_nodes[0], float)]
+            for i in range(1, count+1):
+                distance = i*info['pitch_mm']
+                segment = min(max(1, int(np.searchsorted(stations, distance))), len(saved))
+                direction = np.asarray(old_nodes[segment])-np.asarray(old_nodes[segment-1])
+                direction /= max(np.linalg.norm(direction), 1e-9)
+                target = np.asarray(old_nodes[segment-1])+direction*(distance-stations[segment-1])
+                step = target-nodes[-1]
+                if np.linalg.norm(step) < 1e-9: step = direction
+                nodes.append(nodes[-1]+step/np.linalg.norm(step)*info['pitch_mm'])
+            parts = []
+            for i in range(1, count+1):
+                matrix = np.eye(4)
+                matrix[:3, :3] = align_axis(a-b, nodes[i]-nodes[i-1])
+                matrix[:3, 3] = nodes[i-1]-matrix[:3, :3]@b
+                parts.append({'id': f'link-{i}', 'catalog': info['link_catalog'], 'pose': pose_of(matrix)})
+            result.update(parts=parts, joints=[_joint(i, info['break_force_n']) for i in range(1,count)],
+                          parameter_reference=copy.deepcopy(parameters))
+            return result
     parts = []
     # Interleaved metal rings alternate by 90 degrees. Rope and webbing keep
     # their cross-section orientation between segments until posed or twisted.
@@ -133,7 +157,7 @@ def summary(instance, library):
 
 
 def resize(assembly, object_id, parameters):
-    """Resize atomically, refusing to remove a link still used by the design."""
+    """Resize a flexible line while retaining its external connections."""
     from .grouping import restore_objects
     from .posing import _editable
     instance = next(o for o in assembly.doc['objects'] if o['id'] == object_id)
@@ -145,17 +169,138 @@ def resize(assembly, object_id, parameters):
     else:
         document = copy.deepcopy(assembly.doc)
     instance = next(o for o in document['objects'] if o['id'] == object_id)
+    old_info = dimensions(instance.get('parameters', {}), assembly.library)
+    new_info = dimensions(parameters, assembly.library)
     generated = generate(parameters, assembly.library, instance.get('components'))
     members = {object_id+'/'+p['id'] for p in generated['parts']}
     removed = {p for p in assembly.parts if p.startswith(object_id+'/')}-members
-    blockers = [j['id'] for j in document.get('joints', []) if {j['a']['part'], j['b']['part']} & removed]
-    blockers += ['world anchor on '+a['part'] for a in assembly.anchors if a['part'] in removed]
-    blockers += ['load on '+l['part'] for l in document.get('loads', []) if l['part'] in removed]
-    if blockers:
-        raise DocumentError('Shortening would remove an attached link. Detach or move '+', '.join(blockers)+' first.')
     instance['parameters'] = copy.deepcopy(parameters)
     if 'components' in instance:
         instance['components'] = generated
+    changed_profile = old_info['link_catalog'] != new_info['link_catalog']
+    if old_info['count'] != new_info['count'] or changed_profile:
+        # An attachment belongs to a station on the line, not to an incidental
+        # link number. Keep its station when the pitch changes and clamp it to
+        # the new free end when the line is shortened.
+        from .document import Assembly
+        geometry = copy.deepcopy(document)
+        geometry['joints'] = []
+        geometry['anchors'] = []
+        geometry['loads'] = []
+        after = Assembly.from_doc(geometry, assembly.base, assembly.library)
+        def remap(endpoint):
+            pid = endpoint.get('part', '')
+            if not pid.startswith(object_id+'/link-'):
+                return
+            old_part = assembly.parts[pid]
+            number = int(pid.rsplit('-', 1)[1])
+            local, axis = old_part.local_frame(endpoint)
+            fraction = float(np.dot(local-old_info['b'], old_info['a']-old_info['b'])
+                             / old_info['pitch_mm']**2)
+            terminal = number==old_info['count'] and fraction>1-1e-6
+            distance = (new_info['length_mm'] if terminal else
+                        max(0., min((number-1+fraction)*old_info['pitch_mm'],
+                                    new_info['length_mm'])))
+            station = distance/new_info['pitch_mm']
+            new_number = min(new_info['count'], max(1, math.ceil(station-1e-9)))
+            along = station-(new_number-1)
+            new_pid = object_id+f'/link-{new_number}'
+            new_part = after.parts[new_pid]
+            position = new_info['b']+along*(new_info['a']-new_info['b'])
+            world_axis = old_part.matrix[:3, :3]@axis
+            endpoint.clear()
+            endpoint.update(part=new_pid, frame={'position_mm':position.tolist(),
+                                                  'axis':(new_part.matrix[:3, :3].T@world_axis).tolist()})
+        for joint in document.get('joints', []):
+            remap(joint['a']); remap(joint['b'])
+        for anchor in document.get('anchors', []):
+            reference = {'part':anchor['part']}
+            remap(reference)
+            anchor['part'] = reference['part']
+        for load in document.get('loads', []):
+            reference = {'part':load['part']}
+            remap(reference)
+            load['part'] = reference['part']
+        for record in document.get('metadata', {}).get('detached_attachments', []):
+            remap(record['joint']['a']); remap(record['joint']['b'])
+        line_anchors = [(old,new) for old,new in zip(assembly.anchors,document.get('anchors', []))
+                        if old['part'].startswith(object_id+'/')]
+        if len(line_anchors)==1:
+            old_anchor,new_anchor = line_anchors[0]
+            after = Assembly.from_doc(document, assembly.base, assembly.library)
+            delta = (assembly.parts[old_anchor['part']].matrix[:3,3]-
+                     after.parts[new_anchor['part']].matrix[:3,3])
+            pose = instance.setdefault('pose', {})
+            pose['position_mm'] = (np.array(pose.get('position_mm', [0,0,0]), float)+delta).tolist()
+        # A free part attached to the edited end follows it. Move the whole
+        # connected external component, so other joints on that part remain
+        # intact. Anchored hosts are handled by the geometry check below.
+        after = Assembly.from_doc(document, assembly.base, assembly.library)
+        external = [j for j in document.get('joints', [])
+                    if (j['a']['part'].startswith(object_id+'/') !=
+                        j['b']['part'].startswith(object_id+'/'))]
+        direct = {p['id']:p for p in document.get('parts', [])}
+        objects = {o['id']:o for o in document.get('objects', []) if o['id'] != object_id}
+        outside = {pid for pid in after.parts if not pid.startswith(object_id+'/')}
+        neighbors = {pid:set() for pid in outside}
+        for edge in after.joints:
+            a,b = edge['a']['part'],edge['b']['part']
+            if a in outside and b in outside:
+                neighbors[a].add(b); neighbors[b].add(a)
+        shifted = set()
+        for joint in external:
+            line_side = 'a' if joint['a']['part'].startswith(object_id+'/') else 'b'
+            host_side = 'b' if line_side == 'a' else 'a'
+            host_id = joint[host_side]['part']
+            if host_id in shifted:
+                continue
+            component = {host_id}
+            queue = [host_id]
+            while queue:
+                for adjacent in neighbors[queue.pop()]-component:
+                    component.add(adjacent); queue.append(adjacent)
+            if any(a['part'] in component for a in after.anchors):
+                # A fixed target cannot follow the line. Bend the line toward
+                # that target while its other already connected end stays put.
+                line_point,_ = after.parts[joint[line_side]['part']].frame(joint[line_side])
+                host_point,_ = after.parts[host_id].frame(joint[host_side])
+                if np.linalg.norm(line_point-host_point) > .05:
+                    line_id = joint[line_side]['part']
+                    link = after.parts[line_id]
+                    local,_ = link.local_frame(joint[line_side])
+                    port = next((p for p in ('a','b') if
+                                 np.linalg.norm(link.local_frame({'port':p})[0]-local)<1e-5),None)
+                    if port:
+                        temporarily = copy.deepcopy(document)
+                        temporarily['joints'] = [j for j in temporarily['joints'] if j['id']!=joint['id']]
+                        try:
+                            free = Assembly.from_doc(temporarily, assembly.base, assembly.library)
+                            owner = next(o for o in temporarily['objects'] if o['id']==object_id)
+                            desired = free.parts[line_id].matrix.copy()
+                            desired[:3,3] += host_point-line_point
+                            posed = pose_chain(free, owner, line_id, desired, endpoint=port)
+                            if posed and posed['poses']:
+                                document = posed['document']
+                                document.setdefault('joints',[]).append(copy.deepcopy(joint))
+                                after = Assembly.from_doc(document, assembly.base, assembly.library)
+                        except DocumentError:
+                            pass
+                continue
+            line_point,_ = after.parts[joint[line_side]['part']].frame(joint[line_side])
+            host_point,_ = after.parts[host_id].frame(joint[host_side])
+            delta = line_point-host_point
+            if np.linalg.norm(delta) > 1e-7:
+                owners = {pid.split('/',1)[0] for pid in component if pid not in direct}
+                if any(owner not in objects for owner in owners):
+                    continue
+                for pid in component & direct.keys():
+                    pose = direct[pid].setdefault('pose', {})
+                    pose['position_mm'] = (np.array(pose.get('position_mm', [0,0,0]), float)+delta).tolist()
+                for owner in owners:
+                    pose = objects[owner].setdefault('pose', {})
+                    pose['position_mm'] = (np.array(pose.get('position_mm', [0,0,0]), float)+delta).tolist()
+                after = Assembly.from_doc(document, assembly.base, assembly.library)
+            shifted.update(component)
     internal = {object_id+'/'+j['id'] for j in generated['joints']}
     gone = {j['id'] for j in assembly.joints if j['id'].startswith(object_id+'/')}-internal
     if 'state' in document:
