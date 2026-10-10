@@ -1,0 +1,533 @@
+{
+  "version": 1,
+  "seed": 2,
+  "family": "offset-grid",
+  "doc": {
+    "format": "pipesim/1",
+    "units": "mm-kg-s-N-deg",
+    "name": "Geometry workflow 2",
+    "parts": [
+      {
+        "id": "cross-0-0",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            -72.04601000994444,
+            -559.8894516471773,
+            2570.949814794585
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "cross-0-1",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            -72.04601000994444,
+            -559.8894516471773,
+            2991.801044647582
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "cross-1-0",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            308.8239892036654,
+            -559.8894516471773,
+            2570.949814794585
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "cross-1-1",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            308.8239892036654,
+            -559.8894516471773,
+            2991.801044647582
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "cross-2-0",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            689.6939884172752,
+            -559.8894516471773,
+            2570.949814794585
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "cross-2-1",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            689.6939884172752,
+            -559.8894516471773,
+            2991.801044647582
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    ],
+    "joints": [],
+    "anchors": [],
+    "draft_subassemblies": [
+      {
+        "id": "frame",
+        "runs": [
+          {
+            "id": "upright-0",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -72.04601000994444,
+              -559.8894516471773,
+              2370.949814794585
+            ],
+            "end_mm": [
+              -72.04601000994444,
+              -559.8894516471773,
+              3191.801044647582
+            ],
+            "attachments": []
+          },
+          {
+            "id": "upright-1",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              308.8239892036654,
+              -559.8894516471773,
+              2370.949814794585
+            ],
+            "end_mm": [
+              308.8239892036654,
+              -559.8894516471773,
+              3191.801044647582
+            ],
+            "attachments": []
+          },
+          {
+            "id": "upright-2",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              689.6939884172752,
+              -559.8894516471773,
+              2370.949814794585
+            ],
+            "end_mm": [
+              689.6939884172752,
+              -559.8894516471773,
+              3191.801044647582
+            ],
+            "attachments": []
+          },
+          {
+            "id": "crossbar-0",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              889.6939884172752,
+              -517.4894516471774,
+              2570.949814794585
+            ],
+            "end_mm": [
+              -272.04601000994444,
+              -517.4894516471774,
+              2570.949814794585
+            ],
+            "attachments": []
+          },
+          {
+            "id": "crossbar-1",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -272.04601000994444,
+              -517.4894516471774,
+              2991.801044647582
+            ],
+            "end_mm": [
+              889.6939884172752,
+              -517.4894516471774,
+              2991.801044647582
+            ],
+            "attachments": []
+          },
+          {
+            "id": "spare",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -1572.0460100099444,
+              -559.8894516471773,
+              2570.949814794585
+            ],
+            "end_mm": [
+              -1572.0460100099444,
+              -559.8894516471773,
+              3170.949814794585
+            ],
+            "attachments": []
+          }
+        ]
+      }
+    ]
+  },
+  "model": {
+    "spans": {
+      "upright-0": [
+        [
+          -72.04601000994444,
+          -559.8894516471773,
+          2370.949814794585
+        ],
+        [
+          -72.04601000994444,
+          -559.8894516471773,
+          3191.801044647582
+        ]
+      ],
+      "upright-1": [
+        [
+          308.8239892036654,
+          -559.8894516471773,
+          2370.949814794585
+        ],
+        [
+          308.8239892036654,
+          -559.8894516471773,
+          3191.801044647582
+        ]
+      ],
+      "upright-2": [
+        [
+          689.6939884172752,
+          -559.8894516471773,
+          2370.949814794585
+        ],
+        [
+          689.6939884172752,
+          -559.8894516471773,
+          3191.801044647582
+        ]
+      ],
+      "crossbar-0": [
+        [
+          889.6939884172752,
+          -517.4894516471774,
+          2570.949814794585
+        ],
+        [
+          -272.04601000994444,
+          -517.4894516471774,
+          2570.949814794585
+        ]
+      ],
+      "crossbar-1": [
+        [
+          -272.04601000994444,
+          -517.4894516471774,
+          2991.801044647582
+        ],
+        [
+          889.6939884172752,
+          -517.4894516471774,
+          2991.801044647582
+        ]
+      ],
+      "spare": [
+        [
+          -1572.0460100099444,
+          -559.8894516471773,
+          2570.949814794585
+        ],
+        [
+          -1572.0460100099444,
+          -559.8894516471773,
+          3170.949814794585
+        ]
+      ]
+    },
+    "fittings": {
+      "cross-0-0": {
+        "position_mm": [
+          -72.04601000994444,
+          -559.8894516471773,
+          2570.949814794585
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      },
+      "cross-0-1": {
+        "position_mm": [
+          -72.04601000994444,
+          -559.8894516471773,
+          2991.801044647582
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      },
+      "cross-1-0": {
+        "position_mm": [
+          308.8239892036654,
+          -559.8894516471773,
+          2570.949814794585
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      },
+      "cross-1-1": {
+        "position_mm": [
+          308.8239892036654,
+          -559.8894516471773,
+          2991.801044647582
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      },
+      "cross-2-0": {
+        "position_mm": [
+          689.6939884172752,
+          -559.8894516471773,
+          2570.949814794585
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      },
+      "cross-2-1": {
+        "position_mm": [
+          689.6939884172752,
+          -559.8894516471773,
+          2991.801044647582
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "edges": [
+      {
+        "member": "upright-0",
+        "connector": "cross-0-0",
+        "port": "through"
+      },
+      {
+        "member": "upright-0",
+        "connector": "cross-0-1",
+        "port": "through"
+      },
+      {
+        "member": "upright-1",
+        "connector": "cross-1-0",
+        "port": "through"
+      },
+      {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      {
+        "member": "upright-2",
+        "connector": "cross-2-0",
+        "port": "through"
+      },
+      {
+        "member": "upright-2",
+        "connector": "cross-2-1",
+        "port": "through"
+      },
+      {
+        "member": "crossbar-0",
+        "connector": "cross-0-0",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-0",
+        "connector": "cross-2-0",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-1",
+        "connector": "cross-0-1",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-1",
+        "connector": "cross-1-1",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-1",
+        "connector": "cross-2-1",
+        "port": "cross"
+      }
+    ],
+    "mirror": null
+  },
+  "actions": [
+    {
+      "kind": "connect",
+      "member": "crossbar-1",
+      "connector": "cross-1-1",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-1",
+      "connector": "cross-0-1",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-0",
+      "connector": "cross-0-1",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-0",
+      "connector": "cross-0-0",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-0",
+      "connector": "cross-2-0",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-1",
+      "connector": "cross-2-1",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-1",
+      "connector": "cross-1-0",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-0",
+      "connector": "cross-1-0",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-1",
+      "connector": "cross-1-1",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-0",
+      "connector": "cross-0-0",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-2",
+      "connector": "cross-2-0",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-2",
+      "connector": "cross-2-1",
+      "port": "through"
+    },
+    {
+      "kind": "resize",
+      "member": "spare",
+      "axis": 2,
+      "delta": 52,
+      "edge": {
+        "member": "crossbar-1",
+        "connector": "cross-2-1",
+        "port": "cross"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "undo-redo",
+      "member": "crossbar-1",
+      "axis": 2,
+      "delta": 23,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-0-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "resize",
+      "member": "upright-0",
+      "axis": 1,
+      "delta": -30,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    }
+  ]
+}

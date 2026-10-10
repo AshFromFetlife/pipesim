@@ -1,5 +1,7 @@
 """Editing a flexible line keeps the connections that define its design."""
 import copy
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -33,6 +35,25 @@ def assert_attached(assembly):
     for joint in assembly.doc['joints']:
         a,b,_ = assembly.joint_frames(joint)
         assert np.linalg.norm(a-b) < .05, joint['id']
+
+
+@pytest.mark.parametrize('line',['chain-1','chain-2','chain-3','chain-4'])
+def test_swing_nylon_changes_to_chain_without_shortening_or_moving_hosts(library,line):
+    fixture=Path(__file__).parent/'fixtures'/'four-way-swing'
+    before=Assembly.from_doc(json.loads((fixture/'design.json').read_text()),fixture,library)
+    original=copy.deepcopy(before.doc)
+    doc=update_object_parameters(before,line,{'length_mm':1000,'link_catalog':'generic.chain-link'})
+    after=Assembly.from_doc(doc,fixture,library)
+    assert [j['id'] for j in doc['joints']]==[j['id'] for j in original['joints']]
+    for pid,part in before.parts.items():
+        if not pid.startswith(line+'/'):
+            np.testing.assert_allclose(after.parts[pid].matrix,part.matrix,atol=1e-6,rtol=0,err_msg=pid)
+    for joint in after.joints:
+        if not any(joint[e]['part'].startswith(line+'/') for e in ('a','b')):continue
+        a,b,_=after.joint_frames(joint)
+        assert np.linalg.norm(a-b)<.05,joint['id']
+    assert len([pid for pid in after.parts if pid.startswith(line+'/')])==50
+    assert before.doc==original
 
 
 @pytest.mark.parametrize('catalog,count', [('generic.rope-nylon-10',8),

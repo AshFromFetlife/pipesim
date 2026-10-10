@@ -7,7 +7,7 @@ import time
 
 def budget():
     """Return a monotonic start/deadline for each independently timed campaign."""
-    minutes = float(os.environ.get('PIPESIM_FUZZ_MINUTES', '10'))
+    minutes = float(os.environ.get('PIPESIM_FUZZ_MINUTES', '15'))
     if not math.isfinite(minutes) or minutes <= 0:
         raise ValueError('PIPESIM_FUZZ_MINUTES must be a positive finite number')
     started = time.monotonic()

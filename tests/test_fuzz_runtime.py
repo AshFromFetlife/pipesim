@@ -4,11 +4,11 @@ import fuzz_runtime
 from fuzz_runtime import batch_size, budget
 
 
-def test_each_campaign_defaults_to_ten_minutes(monkeypatch):
+def test_each_campaign_defaults_to_fifteen_minutes(monkeypatch):
     monkeypatch.delenv('PIPESIM_FUZZ_MINUTES', raising=False)
     minutes, started, deadline = budget()
-    assert minutes == 10
-    assert deadline - started == pytest.approx(600)
+    assert minutes == 15
+    assert deadline - started == pytest.approx(900)
     assert batch_size(25, 100, 0, started, deadline, minutes) == 25
 
 

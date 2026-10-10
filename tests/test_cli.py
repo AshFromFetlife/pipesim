@@ -33,16 +33,23 @@ def test_cli_reports_invalid_input_without_traceback(tmp_path):
 
 def test_cli_simulation_progress_and_grouping(tmp_path):
     target=tmp_path/'recording.json'
-    result=run('simulate','examples/chain.pipe.yaml','--duration','.02','--chain-links-per-body',5,'-o',target)
+    result=run('simulate','examples/chain.pipe.yaml','--duration','.02','--mode','preview',
+        '--chain-links-per-body',5,'--preview-steps-per-second',2000,
+        '--preview-solver-iterations',480,'--preview-beam-segment-mm',1000,'-o',target)
     assert result.returncode==0,result.stderr
     assert '[simulation' in result.stdout
     recording=read(target)
     assert recording['chain_simplification']['links_per_body']==5
     assert recording['chain_simplification']['frozen_joints']
+    assert recording['mode']=='preview'
+    assert recording['quality']['requested_steps_per_second']==2000
+    assert recording['quality']['starting_solver_iterations']==480
+    assert recording['quality']['beam_segment_mm']==1000
     result=run('simulate','examples/chain.pipe.yaml','--duration','.01','--quiet')
     assert result.returncode==0,result.stderr
     assert '[simulation' not in result.stdout+result.stderr
     assert json.loads(result.stdout)['frames']
+    assert json.loads(result.stdout)['mode']=='full'
 
 
 def test_cli_interrupt_returns_130_without_writing_recording(tmp_path,monkeypatch,capsys):

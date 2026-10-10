@@ -2,7 +2,8 @@
 // orbit widgets are replaced; picking, projections, DOM events and documents are real.
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile,mkdtemp,rm,realpath} from 'node:fs/promises';
+import {readFile,writeFile,mkdtemp,rm,realpath} from 'node:fs/promises';
+import {randomBytes} from 'node:crypto';
 import {join,dirname,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
@@ -10,6 +11,7 @@ import {setTimeout as pause} from 'node:timers/promises';
 import {JSDOM} from 'jsdom';
 import * as Three from 'three';
 import {STLLoader as ThreeSTLLoader} from 'three/addons/loaders/STLLoader.js';
+import {TransformControls as ThreeTransformControls} from 'three/addons/controls/TransformControls.js';
 import * as snapping from '../pipesim/web/snapping.js';
 import * as settings from '../pipesim/web/snap-settings.js';
 import * as preferences from '../pipesim/web/preferences.js';
@@ -18,6 +20,12 @@ import * as drafting from '../pipesim/web/drafting.js';
 import {HUMAN_POSES} from '../pipesim/web/human-poses.js';
 import {HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg} from '../pipesim/web/human-model.js';
 import {makeRig,exportRig} from './helpers/human-rig-fixtures.mjs';
+import {registerGeometryWorkflows} from './helpers/geometry-workflow-fuzz.mjs';
+import {registerAnchoredResizeWorkflows} from './helpers/anchored-resize-workflows.mjs';
+import {registerFreeAssemblyWorkflows} from './helpers/free-assembly-workflows.mjs';
+import {registerMaterialWorkflows} from './helpers/material-workflows.mjs';
+import {registerWholeAssemblyWorkflows} from './helpers/whole-assembly-workflows.mjs';
+import {registerReinforcementWorkflows} from './helpers/reinforcement-workflows.mjs';
 
 let server,url,bootstrap,workspace;
 before(async()=>{
@@ -691,9 +699,11 @@ test('finalizing a mirrored draft run commits both sides in one edit',async()=>{
   }finally{await ui.close();}
 });
 
-async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOverride=()=>({}),interceptFetch=()=>null,storedHotkeys=null,storedPreferences=null,storedLastSavedPath=null}={}){
+async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},onRequest=null,onResponse=()=>{},onToast=()=>{},onError=()=>{},requestTimeoutMs=0,bootstrapOverride=()=>({}),interceptFetch=()=>null,storedHotkeys=null,storedPreferences=null,storedLastSavedPath=null,realGizmo=false}={}){
   const html=await readFile('pipesim/web/index.html','utf8');const dom=new JSDOM(html,{url});const window=dom.window;
   const document=window.document,timers=[],captures=new Set();let frame,inFlight=0;
+  window.addEventListener('error',event=>onError(event.error||event.message));
+  window.addEventListener('unhandledrejection',event=>onError(event.reason));
   if(storedDefaults)window.localStorage.setItem('pipesim.snap-defaults.v1',storedDefaults);
   if(storedHotkeys)window.localStorage.setItem('pipesim.library-hotkeys.v1',storedHotkeys);
   if(storedPreferences)window.localStorage.setItem('pipesim.preferences.v1',storedPreferences);
@@ -711,30 +721,37 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   const resolved=await post('resolve',doc);
   const initialDoc=resolved.document||doc;
   const fetchEditor=async(path,options)=>{
+    if(path.startsWith('/api/'))onRequest?.(path,options?.body?JSON.parse(options.body):null);
     if(path==='/api/bootstrap')return new Response(JSON.stringify({...bootstrap,path:'output/ui-test.pipe.yaml',document:initialDoc,scene:resolved,...bootstrapOverride()}));
-    const intercepted=interceptFetch(path,options);if(intercepted){inFlight++;try{return await intercepted;}finally{inFlight--;}}
+    const intercepted=interceptFetch(path,options);if(intercepted){inFlight++;try{const response=await intercepted;if(path.startsWith('/api/'))onResponse(path,response.status,await response.clone().json());return response;}finally{inFlight--;}}
     inFlight++;try{
-      const response=await fetch(new URL(path,url),options);
+      const response=await fetch(new URL(path,url),requestTimeoutMs?{...options,signal:AbortSignal.timeout(requestTimeoutMs)}:options);
+      if(path.startsWith('/api/'))onResponse(path,response.status,await response.clone().json());
       const body=await response.arrayBuffer();await beforeResponse(path);
       return new Response(body,{status:response.status,headers:response.headers});
     }finally{inFlight--;}
   };
-  const source=(await readFile('pipesim/web/app.js','utf8')).replace(/^import .*;\r?\n/gm,'');
+  const source=(await readFile('pipesim/web/app.js','utf8')).replace(/^import .*;\r?\n/gm,'')
+    .replace('function toast(text,error=false){','function toast(text,error=false){onToast(text,error);');
+  assert.ok(source.includes('function toast(text,error=false){onToast(text,error);'),
+    'The editor toast observer must be updated when the toast function changes');
   class MeshLoader {load(path,success,progress,failure){fetchEditor(path).then(response=>response.arrayBuffer()).then(bytes=>success(new ThreeSTLLoader().parse(bytes))).catch(failure);}}
   const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
   const evaluate=new AsyncFunction('THREE','OrbitControls','TransformControls','GLTFLoader','STLLoader','OBJLoader','connectionCandidates','hingeCandidates','clearConnectionIntent','alignmentDelta','socketOccupied','rotationAlignment',
     'DEFAULT_SNAP_SETTINGS','loadSnapDefaults','saveSnapDefaults','validateSnapSettings',
     'DEFAULT_PREFERENCES','loadPreferences','savePreferences','validatePreferences','displayValue','storedValue',
     'draftRuns','draftRun','draftPreview','HUMAN_POSES','nextFlexibleShortcutLength','HumanModelLayer','HUMAN_BONE_SEGMENTS','EXTRA_BONE_MODES','suggestBoneMappings','boneDiagramSvg',
-    'window','document','devicePixelRatio','getComputedStyle','ResizeObserver','requestAnimationFrame','fetch','setTimeout','clearTimeout',
-    source+'\nreturn {state, camera, orbit, scene, partObjects, ports, resizeHandles, viewport, gizmo, snapGhost, mirrorGhost, mirrorCopies, draftConnect, performAutosave};');
-  const app=await evaluate({...Three,WebGLRenderer:Renderer},Controls,Gizmo,class{},MeshLoader,class{},
+    'window','document','devicePixelRatio','getComputedStyle','ResizeObserver','requestAnimationFrame','fetch','setTimeout','clearTimeout','onToast',
+    source+'\nreturn {state, camera, orbit, scene, partObjects, ports, resizeHandles, viewport, gizmo, snapGhost, mirrorGhost, mirrorCopies, draftConnect, performAutosave, offerConnection, connectionReview};');
+  const app=await evaluate({...Three,WebGLRenderer:Renderer},Controls,realGizmo?ThreeTransformControls:Gizmo,class{},MeshLoader,class{},
     snapping.connectionCandidates,snapping.hingeCandidates,snapping.clearConnectionIntent,snapping.alignmentDelta,snapping.socketOccupied,snapping.rotationAlignment,
     settings.DEFAULT_SNAP_SETTINGS,settings.loadSnapDefaults,settings.saveSnapDefaults,settings.validateSnapSettings,
     preferences.DEFAULT_PREFERENCES,preferences.loadPreferences,preferences.savePreferences,preferences.validatePreferences,preferences.displayValue,preferences.storedValue,
     drafting.draftRuns,drafting.draftRun,drafting.draftPreview,HUMAN_POSES,nextFlexibleShortcutLength,HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg,
     window,document,1,()=>({getPropertyValue:()=> '#dce5e9'}),class{constructor(callback){this.callback=callback;}observe(){this.callback();}},callback=>{frame=callback;},fetchEditor,
-    (callback,delay)=>{const timer=setTimeout(callback,delay);timers.push(timer);return timer;},clearTimeout);
+    // Background editor timers must not keep an otherwise completed test
+    // worker alive. Tests awaiting UI effects keep their own polling timers.
+    (callback,delay)=>{const timer=setTimeout(callback,delay);timer.unref();timers.push(timer);return timer;},clearTimeout,onToast);
   const tick=()=>frame?.(performance.now());tick();
   const wait=async(predicate,timeout=12000)=>{const deadline=Date.now()+timeout;while(!predicate()){if(Date.now()>deadline)throw new Error('Timed out: '+document.querySelector('#toast').textContent+' / '+document.querySelector('#snap-review-status')?.textContent+' / '+document.querySelector('#opening-status')?.textContent);await pause(20);tick();}};
   const select=id=>document.querySelector(`[data-select="${id}"]`).click();
@@ -742,8 +759,51 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},bootstrapOv
   const pointer=(type,point)=>{tick();const event=new window.MouseEvent(type,{clientX:point.x,clientY:point.y,button:0,bubbles:true});Object.defineProperty(event,'pointerId',{value:1});document.querySelector('#viewport canvas').dispatchEvent(event);};
   const drag=(from,to)=>{pointer('pointerdown',from);pointer('pointermove',{x:(from.x+to.x)/2,y:(from.y+to.y)/2});pointer('pointermove',to);pointer('pointerup',to);};
   const drain=async()=>{await wait(()=>inFlight===0,45000);await pause(30);};
-  return {...app,document,window,wait,select,pixel,pointer,drag,tick,drain,async close(){await drain();timers.forEach(clearTimeout);dom.window.close();}};
+  return {...app,document,window,wait,select,pixel,pointer,drag,tick,drain,async close(){try{await drain();}finally{app.gizmo.dispose?.();timers.forEach(clearTimeout);dom.window.close();}}};
 }
+
+registerGeometryWorkflows({test,editor,post,library:()=>bootstrap.library});
+registerAnchoredResizeWorkflows({test,editor,post});
+registerFreeAssemblyWorkflows({test,editor,post,workspace:()=>workspace});
+registerMaterialWorkflows({test,editor,workspace:()=>workspace});
+registerWholeAssemblyWorkflows({test,editor,post});
+registerReinforcementWorkflows({test,editor,post,workspace:()=>workspace});
+
+for(const mode of ['button','escape','modal','supersede'])test(`connection cancellation ${mode} discards late results and permits retry`,async()=>{
+  let release,held=false,hold=true;const waiting=new Promise(resolve=>release=resolve),requests=[],failures=[];
+  const ui=await editor(fixture(),null,{
+    onRequest:(path,body)=>requests.push({path,body}),onToast:(text,error)=>{if(error)failures.push(text);},
+    beforeResponse:async path=>{if(path==='/api/snap-options'&&hold){hold=false;held=true;await waiting;}},
+  });
+  const match={member:'pipe',connector:'tee',port:'through',at_mm:500,angle:0,score:0};
+  try {
+    const original=structuredClone(ui.state.doc);let pending;
+    if(mode==='modal'||mode==='supersede')ui.connectionReview([match]);else pending=ui.offerConnection([match]);
+    await ui.wait(()=>held);
+    if(mode==='button')ui.document.querySelector('#cancel-connection-search').click();
+    else if(mode==='escape')ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    else if(mode==='modal')ui.document.querySelector('#modal-close').click();
+    else {
+      const field=ui.document.querySelector('#snap-station');field.value='600';field.dispatchEvent(new ui.window.Event('change'));
+      await ui.wait(()=>!ui.document.querySelector('#modal-actions .primary').disabled);
+    }
+    await ui.wait(()=>requests.some(r=>r.path==='/api/connection-cancel'));
+    release();await pending;await ui.drain();
+    assert.deepEqual(ui.state.doc,original);assert.equal(ui.state.undo.length,0);assert.deepEqual(failures,[]);
+    if(mode==='supersede') {
+      assert.equal(ui.document.querySelector('#snap-station').value,'600','late result replaced the newer preview');
+      ui.document.querySelector('#modal-actions .primary').click();await ui.drain();
+      assert.equal(ui.state.doc.joints.at(-1).b.at_mm,600);
+    } else {
+      assert.equal(ui.document.querySelector('#modal').open,false);
+      assert.equal(ui.state.placementPending,false);
+      await ui.offerConnection([match]);await ui.drain();
+    }
+    assert.equal(ui.state.doc.joints.length,original.joints.length+1);assert.equal(ui.state.undo.length,1);
+    const ids=requests.filter(r=>r.path==='/api/snap-options').map(r=>r.body.job_id);
+    assert.equal(new Set(ids).size,ids.length);
+  } finally {release();await ui.close();}
+});
 
 test('resize handles and Y/H/U/J resize either end with one undo step each',async()=>{
   const doc=fixture();doc.anchors=[];doc.parts=doc.parts.filter(p=>p.id==='pipe');
@@ -1354,6 +1414,86 @@ test('hinge eye and clevis join through the inspector without editing JSON',asyn
     assert.deepEqual(ui.state.doc.joints[0].b,{part:'female',port:'hinge'});
     assert.equal(ui.state.undo.length,1);
   }finally{await ui.close();}
+});
+
+for(const reverse of [false,true])test(`abstract load attaches to a connector without a port from the ${reverse?'load':'connector'} inspector`,async()=>{
+  const doc=blankDesign('Abstract connector load');
+  doc.parts=[{id:'host',catalog:'tubeclamp.TC132C',pose:{position_mm:[0,0,1000]}},
+    {id:'load',catalog:'generic.box',parameters:{mass_kg:37},pose:{position_mm:[120,80,1300],rotation_deg:[20,-10,35]}}];
+  doc.anchors=[{part:'host',surface:'fixture'}];
+  const ui=await editor(doc);try{
+    const before=structuredClone(ui.state.doc);ui.select(reverse?'load':'host');ui.document.querySelector('#new-joint').click();
+    const loadSide=reverse?'a':'b',hostSide=reverse?'b':'a';
+    assert.equal(ui.document.querySelector('#joint-port-'+loadSide).value,'@load');
+    assert.equal(ui.document.querySelector('#joint-port-'+hostSide).value,'@origin');
+    const type=ui.document.querySelector('#joint-create-type');type.value='spherical';type.dispatchEvent(new ui.window.Event('change'));
+    await ui.wait(()=>!ui.document.querySelector('#modal-actions .primary').disabled,10000);
+    assert.equal(ui.document.querySelector('#modal-actions .primary').textContent,'Attach load');
+    assert.equal(ui.document.querySelector('#joint-create-move').disabled,true);
+    assert.match(ui.document.querySelector('#joint-create-status').textContent,/Both parts keep their current positions/);
+    assert.deepEqual(ui.state.doc,before,'preview leaves the document unchanged');
+    ui.document.querySelector('#modal-actions .primary').click();await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    const joint=ui.state.doc.joints[0];assert.equal(joint.type,'spherical');
+    assert.equal(joint[loadSide].part,'load');assert.equal(joint[hostSide].part,'host');
+    assert.ok(joint.a.frame&&joint.b.frame);assert.equal(joint.a.port,undefined);assert.equal(joint.b.port,undefined);
+    assert.deepEqual(ui.state.doc.parts,before.parts);assert.equal(ui.state.undo.length,1);
+    const reopened=await editor(structuredClone(ui.state.doc));try{assert.deepEqual(reopened.state.doc.joints,ui.state.doc.joints);}finally{await reopened.close();}
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.joints.length===0);assert.deepEqual(ui.state.doc.parts,before.parts);
+    ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.doc.joints.length===1);
+    ui.select('host');ui.document.querySelector('[data-detach]').click();await ui.wait(()=>ui.state.doc.joints.length===0);
+    assert.deepEqual(ui.state.doc.parts,before.parts);
+  }finally{await ui.close();}
+});
+
+test('seeded abstract load workflows attach through the dialog without shifting connectors or loads',async()=>{
+  const rootSeed=Number(process.env.PIPESIM_LOAD_FUZZ_SEED??randomBytes(4).readUInt32LE()),count=Number(process.env.PIPESIM_LOAD_FUZZ_CASES??12);
+  assert.ok(Number.isInteger(rootSeed)&&rootSeed>=0&&rootSeed<=0xffffffff);assert.ok(Number.isInteger(count)&&count>0);
+  let sequence=rootSeed;const nextSeed=()=>sequence=(Math.imul(sequence,1664525)+1013904223)>>>0;
+  console.log(`Abstract load workflow fuzz root_seed=${rootSeed}, fresh_cases=${count}`);
+  for(const [index,seed] of [0,1,2,3,...Array.from({length:count},nextSeed)].entries()){
+    let random=seed;const rng=()=>{random=(Math.imul(random,1664525)+1013904223)>>>0;return random/0x100000000;};
+    const vector=scale=>Array.from({length:3},()=>Math.round((rng()-.5)*scale));
+    const doc=blankDesign(`Abstract load seed ${seed}`);
+    doc.parts=[{id:'host',catalog:['tubeclamp.TC132C','tubeclamp.TC173MC','tubeclamp.TC101C','tubeclamp.TC131T'][index%4],pose:{position_mm:vector(2000),rotation_deg:vector(180)}},
+      {id:'load',catalog:'generic.box',parameters:{mass_kg:5+Math.round(rng()*100),width_mm:100+Math.round(rng()*400)},pose:{position_mm:vector(2000),rotation_deg:vector(180)}}];
+    if(index%3===0)doc.parts[1].pose.position_mm=[...doc.parts[0].pose.position_mm];
+    doc.anchors=[{part:'host',surface:'fixture'}];const actions=[],context=`root_seed=${rootSeed} case_seed=${seed} index=${index}`;let ui;
+    try{
+      ui=await editor(doc);const before=structuredClone(ui.state.doc.parts),poses=ui.state.scene.parts.map(part=>({id:part.id,pose:structuredClone(part.pose)}));
+      const reverse=!!(index%2),hostSide=reverse?'b':'a',kind=['fixed','spherical','revolute'][index%3];
+      actions.push({kind:'attach',selected:reverse?'load':'host',joint:kind});
+      ui.select(reverse?'load':'host');ui.document.querySelector('#new-joint').click();
+      if(index%4===0){const port=ui.document.querySelector('#joint-port-'+hostSide);port.value='bolt1';port.dispatchEvent(new ui.window.Event('change'));actions.push({kind:'host-port',port:'bolt1'});}
+      const type=ui.document.querySelector('#joint-create-type');type.value=kind;type.dispatchEvent(new ui.window.Event('change'));
+      await ui.wait(()=>!ui.document.querySelector('#modal-actions .primary').disabled,10000);
+      assert.deepEqual(ui.state.doc.parts,before,context);assert.equal(ui.state.undo.length,0,context);
+      if(index===3){actions.push({kind:'cancel'});ui.document.querySelector('#modal-actions button').click();assert.equal(ui.state.doc.joints.length,0,context);ui.document.querySelector('#new-joint').click();await ui.wait(()=>!ui.document.querySelector('#modal-actions .primary').disabled);}
+      ui.document.querySelector('#modal-actions .primary').click();await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+      assert.deepEqual(ui.state.doc.parts,before,context);
+      assert.deepEqual(ui.state.scene.parts.map(part=>part.id),poses.map(part=>part.id),context);
+      for(const expected of poses){const actual=ui.state.scene.parts.find(part=>part.id===expected.id).pose;
+        for(const field of ['position_mm','rotation_deg'])assert.ok(actual[field].every((value,i)=>Math.abs(value-expected.pose[field][i])<1e-7),`${context}: ${expected.id} ${field} stays unchanged`);
+      }
+      assert.equal(ui.state.undo.length,1,context);
+      assert.ok(ui.state.doc.joints[0].metadata.abstract_load_attachment,context);
+      assert.equal(ui.state.doc.joints[0].type,kind,context);
+      const joint=ui.state.doc.joints[0],worldFrame=end=>{
+        const matrix=ui.partObjects.get(end.part).matrix;
+        return {position:new Three.Vector3(...end.frame.position_mm).applyMatrix4(matrix),axis:new Three.Vector3(...end.frame.axis).transformDirection(matrix)};
+      };
+      const first=worldFrame(joint.a),second=worldFrame(joint.b);
+      assert.ok(first.position.distanceTo(second.position)<1e-7,context);assert.ok(first.axis.distanceTo(second.axis)<1e-7,context);
+      actions.push({kind:'validate'});const report=await post('validate',ui.state.doc);assert.ok(report.valid,`${context}: ${JSON.stringify(report.issues)}`);
+      actions.push({kind:'undo'});ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.joints.length===0);assert.deepEqual(ui.state.doc.parts,before,context);
+      actions.push({kind:'redo'});ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.doc.joints.length===1);
+      const reopened=await editor(structuredClone(ui.state.doc));try{assert.deepEqual(reopened.state.doc.parts,before,context);assert.deepEqual(reopened.state.doc.joints,ui.state.doc.joints,context);}finally{await reopened.close();}
+      actions.push({kind:'detach'});ui.select('load');ui.document.querySelector('[data-detach]').click();await ui.wait(()=>ui.state.doc.joints.length===0);assert.deepEqual(ui.state.doc.parts,before,context);
+    }catch(error){
+      const repro=await mkdtemp(join(process.env.PIPESIM_LOAD_FUZZ_REPRO_DIR||tmpdir(),'pipesim-load-fuzz-repro-'));
+      await writeFile(join(repro,'workflow.json'),JSON.stringify({rootSeed,seed,index,doc,actions,currentDocument:ui?.state.doc},null,2));
+      error.message+=`\n${context}; replay with PIPESIM_LOAD_FUZZ_SEED=${rootSeed} PIPESIM_LOAD_FUZZ_CASES=${count}; repro=${repro}`;throw error;
+    }finally{await ui?.close();}
+  }
 });
 
 test('wheel button configures and mounts a free-spinning axle on a pipe',async()=>{
@@ -2657,6 +2797,42 @@ test('new human activity and flexibility controls persist and can return to pass
   }finally{await ui.close();}
 });
 
+function documentValueCount(value){
+  return 1+(value&&typeof value==='object'?Object.values(value).reduce((sum,item)=>sum+documentValueCount(item),0):0);
+}
+
+function extendRecording(recording,count){
+  const samples=recording.frames;
+  const frames=Array.from({length:count},(_,i)=>({...structuredClone(samples[i%samples.length]),time_s:i/120}));
+  return {...recording,fps:120,frames,duration_s:frames.at(-1).time_s};
+}
+
+test('struggle inspector change succeeds after simulation with over one million recorded values',async()=>{
+  const doc=blankDesign('Recorded human activity');
+  doc.objects=[{id:'person',template:'human',parameters:{posture_control:'fidget',movement_seed:41}}];
+  doc.anchors=[{part:'person/pelvis',surface:'fixture'}];
+  const ui=await editor(doc);try{
+    ui.document.querySelector('[data-mode="simulate"]').click();ui.document.querySelector('#sim-duration').value='.1';
+    ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>ui.state.recording&&!ui.state.busy,60000);
+    const count=Math.floor(1_000_001/Math.min(...ui.state.recording.frames.map(documentValueCount)))+1;
+    const recording=extendRecording(ui.state.recording,count);
+    ui.state.recording=recording;ui.state.doc.results.simulate=recording;
+    assert.ok(documentValueCount(ui.state.doc)>1_000_000);
+    assert.ok(Buffer.byteLength(JSON.stringify(ui.state.doc))<32*1024*1024);
+    ui.document.querySelector('[data-mode="design"]').click();ui.select('person/pelvis');
+    const poses=ui.state.scene.parts.map(part=>({id:part.id,pose:structuredClone(part.pose)})),undo=ui.state.undo.length;
+    const select=ui.document.querySelector('#object-hold');select.value='struggle';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>!ui.state.placementPending&&ui.state.doc.objects[0].parameters.posture_control==='struggle',30000);
+    assert.equal(ui.document.querySelector('#object-hold').value,'struggle');
+    assert.ok(ui.state.scene.joints.every(joint=>joint.metadata.human_activity.mode==='struggle'&&!joint.motor));
+    assert.deepEqual(ui.state.scene.parts.map(part=>({id:part.id,pose:part.pose})),poses);
+    assert.equal(ui.state.undo.length,undo+1);assert.equal(ui.state.undo.at(-1).results.simulate.frames.length,count);
+    assert.equal(ui.state.recording,null);assert.deepEqual(ui.state.doc.results,{});
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.objects[0].parameters.posture_control==='fidget'&&!ui.state.placementPending,30000);
+    ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.doc.objects[0].parameters.posture_control==='struggle'&&!ui.state.placementPending,30000);
+  }finally{await ui.close();}
+});
+
 test('add human file picker imports an actual weighted GLB and stores its configuration',async()=>{
   const ui=await editor(blankDesign('Imported human'));try{
     ui.document.querySelector('#human-button').click();
@@ -3639,6 +3815,43 @@ test('rotating a thigh uses its spherical hip pivot and carries the lower leg',a
 });
 
 
+test('Preview quality lives in Preferences and Full uses individual links',async()=>{
+  const requests=[];
+  const ui=await editor(freeTube(),null,{interceptFetch:(path,options)=>{
+    if(path==='/api/simulate'){
+      requests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({id:'quality-job',status:'completed'}));
+    }
+    if(path==='/api/simulation-result')return new Response(JSON.stringify({result:{
+      mode:requests.at(-1).mode,quality:requests.length===3?{resolved_mode:'full'}:{},
+      frames:[{time_s:0,parts:{}}],duration_s:0,events:[],settled:true}}));
+    return null;
+  }});
+  try{
+    ui.document.querySelector('#snap-settings-button').click();
+    for(const [id,value] of Object.entries({'pref-chain-links':'6','pref-preview-steps':'2000','pref-preview-iterations':'480','pref-preview-beam':'1000'}))
+      ui.document.querySelector('#'+id).value=value;
+    [...ui.document.querySelectorAll('#modal-actions button')].find(button=>button.textContent==='Save as defaults').click();
+    const stored=JSON.parse(ui.window.localStorage.getItem('pipesim.preferences.v1'));
+    assert.equal(stored.simulationChainLinks,6);assert.equal(stored.previewStepsPerSecond,2000);
+    assert.equal(stored.previewSolverIterations,480);assert.equal(stored.previewBeamSegmentMm,1000);
+    ui.document.querySelector('[data-mode="simulate"]').click();
+    assert.equal(ui.document.querySelector('#sim-chain-links'),null);
+    ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>!ui.state.busy);
+    assert.equal(requests.at(-1).mode,'preview');assert.equal(requests.at(-1).chain_links_per_body,6);
+    assert.equal(requests.at(-1).preview_steps_per_second,2000);assert.equal(requests.at(-1).preview_solver_iterations,480);
+    assert.match(ui.document.querySelector('#simulation-recording-mode').textContent,/Preview recording/);
+    const mode=ui.document.querySelector('#sim-mode');mode.value='full';mode.dispatchEvent(new ui.window.Event('change'));
+    ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>!ui.state.busy);
+    assert.equal(requests.at(-1).mode,'full');assert.equal(requests.at(-1).chain_links_per_body,1);
+    assert.match(ui.document.querySelector('#simulation-recording-mode').textContent,/Full physics recording/);
+    assert.equal(JSON.parse(ui.window.localStorage.getItem('pipesim.preferences.v1')).simulationChainLinks,6);
+    const preview=ui.document.querySelector('#sim-mode');preview.value='preview';preview.dispatchEvent(new ui.window.Event('change'));
+    ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>!ui.state.busy);
+    assert.match(ui.document.querySelector('#simulation-recording-mode').textContent,/automatically refined to Full physics/);
+  }finally{await ui.close();}
+});
+
 test('Simulation progress, early cancellation and retry preserve the previous recording',async()=>{
   let releaseStart,cancelled=false,optionsSeen,statusPolls=0;
   const startGate=new Promise(resolve=>releaseStart=resolve);
@@ -3656,14 +3869,14 @@ test('Simulation progress, early cancellation and retry preserve the previous re
     const old={frames:[{time_s:0,parts:{}}],duration_s:1};
     ui.state.recording=old;ui.state.doc.results={simulate:old};
     ui.document.querySelector('[data-mode="simulate"]').click();
-    assert.equal(ui.document.querySelector('#sim-chain-links').value,'1');
-    ui.document.querySelector('#sim-chain-links').value='10';
+    assert.equal(ui.document.querySelector('#sim-chain-links'),null);
+    assert.equal(ui.document.querySelector('#sim-mode').value,'preview');
     ui.document.querySelector('[data-run="simulate"]').click();
     assert.ok(ui.state.busy);assert.ok(ui.document.querySelector('[data-run="simulate"]').disabled);
     ui.document.querySelector('#cancel-simulation').click();
     assert.match(ui.document.querySelector('#sim-progress').textContent,/Cancelling/);
     releaseStart();await ui.wait(()=>!ui.state.busy);
-    assert.equal(optionsSeen.chain_links_per_body,10);assert.ok(cancelled);
+    assert.equal(optionsSeen.chain_links_per_body,8);assert.equal(optionsSeen.mode,'preview');assert.ok(cancelled);
     assert.equal(ui.state.recording,old);assert.equal(ui.state.doc.results.simulate,old);
     assert.equal(ui.document.querySelector('#cancel-simulation'),null);
     assert.match(ui.document.querySelector('#status-text').textContent,/cancelled/);
@@ -3710,7 +3923,7 @@ test('Tree actions delete an attached grouped chain in one Undo and Redo',async(
 });
 
 test('a newer server identifies the editor tab as the stale side',async()=>{
-  const ui=await editor(freeTube(),null,{bootstrapOverride:()=>({api_version:26})});
+  const ui=await editor(freeTube(),null,{bootstrapOverride:()=>({api_version:bootstrap.api_version+1})});
   try{
     assert.match(ui.document.querySelector('#status-text').textContent,/page update required/);
     assert.match(ui.document.querySelector('#toast').textContent,/tab is older than the running server.*reload this tab/);
@@ -3907,6 +4120,172 @@ test('an attached person that cannot reach the mirror line still resolves with a
   assert.equal(result.scene,undefined);
   assert.ok(result.parts.some(part=>part.id==='person/pelvis'));
   assert.equal(result.document.objects.find(object=>object.id==='free-person').symmetry.axis,'x');
+});
+
+for(const axis of ['Y','Z'])test(`whole-person ${axis} arrow translates a lying person within the scene mirror`,async()=>{
+  const doc=blankDesign('Lying person translation');
+  doc.objects=[{id:'person',template:'human',parameters:{pose:'standing'},
+    pose:{position_mm:[0,120,800],rotation_deg:[90,0,0]}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',
+    start_mm:[200,0,100],end_mm:[200,0,1100]}],mirrors:[{id:'middle',axis:'x',offset_mm:0,scope:'scene'}]}];
+  const requests=[];
+  const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
+    if(path==='/api/move-object')requests.push(JSON.parse(options.body));return null;
+  }});try{
+    ui.state.connectionSnap=false;ui.select('person/pelvis');
+    ui.document.querySelector('[data-tool="translate"]').click();
+    const before=structuredClone(ui.state.doc),positions=new Map([...ui.partObjects].map(([id,part])=>[id,part.position.clone()]));
+    ui.gizmo.axis=axis;ui.gizmo.dispatchEvent({type:'mouseDown'});
+    ui.gizmo.object.position[axis.toLowerCase()]+=175;
+    ui.gizmo.dispatchEvent({type:'objectChange'});await ui.drain();
+    const delta=new Three.Vector3();delta[axis.toLowerCase()]=175;
+    for(const [id,position] of positions){
+      const expected=position.clone();if(id.startsWith('person/'))expected.add(delta);
+      assert.ok(ui.partObjects.get(id).position.distanceTo(expected)<1e-4,`${id} follows the preview`);
+    }
+    assert.deepEqual(ui.state.doc,before);assert.equal(ui.state.undo.length,0);
+    ui.gizmo.dispatchEvent({type:'mouseUp'});await ui.wait(()=>!ui.state.placementPending&&ui.state.undo.length===1);
+    assert.equal(ui.state.undo.length,1,ui.document.querySelector('#toast').textContent);
+    assert.equal(ui.state.doc.objects[0].pose.position_mm['XYZ'.indexOf(axis)],before.objects[0].pose.position_mm['XYZ'.indexOf(axis)]+175);
+    assert.equal(requests.length,2);assert.equal(requests[0].preview,true);
+    assert.equal(ui.gizmo.showX,false);assert.equal(ui.gizmo.showY,true);assert.equal(ui.gizmo.showZ,true);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.objects[0].pose.position_mm['XYZ'.indexOf(axis)]===before.objects[0].pose.position_mm['XYZ'.indexOf(axis)]);
+    assert.deepEqual(ui.state.doc.objects,before.objects);assert.deepEqual(ui.state.doc.draft_subassemblies,before.draft_subassemblies);
+    ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.doc.objects[0].pose.position_mm['XYZ'.indexOf(axis)]===before.objects[0].pose.position_mm['XYZ'.indexOf(axis)]+175);
+    assert.equal(ui.state.doc.objects[0].pose.position_mm['XYZ'.indexOf(axis)],before.objects[0].pose.position_mm['XYZ'.indexOf(axis)]+175);
+  }finally{await ui.close();}
+});
+
+test('native translation arrows pick and drag within a whole-person mirror plane',async()=>{
+  const doc=blankDesign('Native mirrored arrows');
+  doc.objects=[{id:'person',template:'human',pose:{position_mm:[0,120,800],rotation_deg:[90,0,0]}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',start_mm:[200,0,100],end_mm:[200,0,1100]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0,scope:'scene'}]}];
+  const ui=await editor(doc,null,{realGizmo:true});try{
+    ui.state.connectionSnap=false;ui.select('person/pelvis');ui.document.querySelector('[data-tool="translate"]').click();ui.gizmo.setTranslationSnap(null);
+    const pointer=point=>{const pixel=ui.pixel(point);return {x:pixel.x/450-1,y:1-pixel.y/300,button:0};};
+    for(const axis of ['Y','Z']){
+      ui.tick();
+      const arrows=ui.gizmo.getHelper().children.flatMap(child=>child.children).find(child=>child.type==='Object3D'&&child.visible)?.children;
+      assert.ok(arrows?.some(child=>child.name==='X'));
+      assert.ok(arrows.filter(child=>child.name==='X').every(child=>!child.visible),'perpendicular red handles are hidden');
+      // Pick the rendered arrowhead, using the same ray tests as TransformControls.
+      const arrow=arrows?.find(child=>child.name===axis&&child.visible&&child.geometry?.type==='CylinderGeometry');
+      assert.ok(arrow,`${axis} arrowhead is visible`);
+      arrow.geometry.computeBoundingBox();const point=arrow.geometry.boundingBox.getCenter(new Three.Vector3()).applyMatrix4(arrow.matrixWorld);
+      const before=new Map([...ui.partObjects].map(([id,part])=>[id,part.position.clone()])),delta=new Three.Vector3();delta[axis.toLowerCase()]=175;
+      ui.gizmo.pointerHover(pointer(point));assert.equal(ui.gizmo.axis,axis,`${axis} arrow is pickable`);ui.tick();
+      ui.gizmo.pointerDown(pointer(point));assert.equal(ui.gizmo.dragging,true);
+      ui.gizmo.pointerMove({...pointer(point.clone().add(delta)),button:-1});await ui.drain();
+      // The native drag plane is a large Float32 mesh; ray intersections can
+      // differ by hundredths of a millimetre from the projected target.
+      for(const [id,position] of before){const expected=position.clone();if(id.startsWith('person/'))expected.add(delta);assert.ok(ui.partObjects.get(id).position.distanceTo(expected)<.1,`${id} follows native ${axis} drag: actual=${ui.partObjects.get(id).position.toArray()} expected=${expected.toArray()} status=${ui.document.querySelector('#status-text').textContent}`);}
+      const undo=ui.state.undo.length;ui.gizmo.pointerUp({button:0});await ui.wait(()=>!ui.state.placementPending&&ui.state.undo.length===undo+1);
+      assert.equal(ui.gizmo.showX,false);
+    }
+  }finally{await ui.close();}
+});
+
+test('seeded human mirror workflows move real poses through editor actions and reopening',async()=>{
+  const rootSeed=Number(process.env.PIPESIM_HUMAN_FUZZ_SEED??randomBytes(4).readUInt32LE()),count=Number(process.env.PIPESIM_HUMAN_FUZZ_CASES??12);
+  assert.ok(Number.isInteger(rootSeed)&&rootSeed>=0&&rootSeed<=0xffffffff);
+  assert.ok(Number.isInteger(count)&&count>0);
+  let sequence=rootSeed;
+  const nextSeed=()=>sequence=(Math.imul(sequence,1664525)+1013904223)>>>0;
+  console.log(`Human editor fuzz root_seed=${rootSeed}, fresh_cases=${count}`);
+  const seeds=[0,1,2,3,...Array.from({length:count},nextSeed)];
+  for(const [index,seed] of seeds.entries()){
+    let random=seed;
+    const rng=()=>{random=(Math.imul(random,1664525)+1013904223)>>>0;return random/0x100000000;};
+    const normal=index%2,tangent=1-normal,axis='xy'[normal],offset=Math.round(rng()*1200)-600,sceneMirror=index%4<2;
+    const pose=['standing','seated','arms-forward','hands-up'][index%4],tilt=[0,90,-90,35][index%4];
+    const position=[Math.round(rng()*500),Math.round(rng()*500),1200];position[normal]=offset;
+    const doc=blankDesign(`Human workflow seed ${seed}`);
+    doc.objects=[{id:'person',template:'human',parameters:{pose,stature_mm:1400+Math.round(rng()*600),mass_kg:50+Math.round(rng()*60)},
+      pose:{position_mm:position,rotation_deg:[tilt,0,normal?90:0]}}];
+    const start=[0,0,100],end=[0,0,1100];start[normal]=end[normal]=offset+300;
+    doc.draft_subassemblies=[{id:'frame',runs:[{id:'reference',catalog:'tubeclamp.tube-C',start_mm:start,end_mm:end}],
+      mirrors:[{id:'middle',axis,offset_mm:offset,...(sceneMirror?{scope:'scene'}:{})}]}];
+    const actions=[],context=`root_seed=${rootSeed} case_seed=${seed} index=${index}`;
+    let ui;
+    try{
+      ui=await editor(doc);ui.state.connectionSnap=false;
+      ui.select('person/pelvis');
+      if(!sceneMirror){const select=ui.document.querySelector('#human-mirror-line');select.value='0';select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));await ui.wait(()=>ui.state.doc.objects[0].symmetry&&!ui.state.placementPending);}
+      // Users can enter whole-person mode by selecting any limb, after posing.
+      ui.document.querySelector('[data-object-mode="limb"]').click();ui.select(['person/left_hand','person/right_foot','person/thorax'][index%3]);
+      ui.document.querySelector('[data-object-mode="whole"]').click();
+      ui.document.querySelector('[data-tool="translate"]').click();
+      const matrices=()=>new Map([...ui.partObjects].map(([id,part])=>{part.updateMatrix();return [id,part.matrix.clone()];}));
+      const assertMove=(before,delta,parts=ui.partObjects)=>{
+        for(const [id,matrix] of before){const expected=matrix.clone();if(id.startsWith('person/'))expected.setPosition(new Three.Vector3().setFromMatrixPosition(matrix).add(delta));
+          const actual=parts.get(id);actual.updateMatrix();
+          assert.ok(actual.matrix.elements.every((value,i)=>Math.abs(value-expected.elements[i])<1e-4),`${context}: ${id} must move rigidly by ${delta.toArray()}`);
+        }
+        assert.equal(ui.state.doc.objects.length,1);assert.equal(ui.state.scene.parts.filter(part=>part.id.startsWith('person/')).length,19);
+        assert.equal(ui.state.doc.objects[0].pose.position_mm[normal],offset);
+      };
+      assert.equal(ui.gizmo[normal?'showY':'showX'],false,context);
+      assert.equal(ui.gizmo[normal?'showX':'showY'],true,context);assert.equal(ui.gizmo.showZ,true,context);
+      assert.equal(ui.document.querySelector(`[data-pose="position_mm"][data-axis="${normal}"]`).disabled,true,context);
+      assert.equal(ui.document.querySelector(`[data-pose="position_mm"][data-axis="${tangent}"]`).disabled,false,context);
+      for(const coordinate of [tangent,2,tangent]){
+        const amount=(rng()<.5?-1:1)*(20+Math.round(rng()*180)),delta=new Three.Vector3().setComponent(coordinate,amount),before=matrices(),authored=structuredClone(ui.state.doc),undo=ui.state.undo.length;
+        actions.push({kind:'gizmo',axis:'XYZ'[coordinate],amount});
+        ui.gizmo.axis='XYZ'[coordinate];ui.gizmo.dispatchEvent({type:'mouseDown'});ui.gizmo.object.position.add(delta);ui.gizmo.dispatchEvent({type:'objectChange'});await ui.drain();
+        assertMove(before,delta);assert.deepEqual(ui.state.doc,authored,context);assert.equal(ui.state.undo.length,undo,context);
+        ui.gizmo.dispatchEvent({type:'mouseUp'});await ui.wait(()=>!ui.state.placementPending&&ui.state.undo.length===undo+1);assertMove(before,delta);
+        const committed=structuredClone(ui.state.doc.objects);
+        ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.redo.length>0&&!ui.state.placementPending);await ui.drain();assertMove(before,new Three.Vector3());assert.deepEqual(ui.state.doc.objects,authored.objects,context);
+        ui.document.querySelector('#redo').click();await ui.wait(()=>ui.state.redo.length===0&&!ui.state.placementPending);await ui.drain();assertMove(before,delta);assert.deepEqual(ui.state.doc.objects,committed,context);
+      }
+      // Cancelling a valid drag must restore geometry and leave history intact.
+      let before=matrices(),undo=ui.state.undo.length;
+      actions.push({kind:'cancel',axis:'XYZ'[tangent],amount:80});
+      ui.gizmo.axis='XYZ'[tangent];ui.gizmo.dispatchEvent({type:'mouseDown'});ui.gizmo.object.position.setComponent(tangent,ui.gizmo.object.position.getComponent(tangent)+80);ui.gizmo.dispatchEvent({type:'objectChange'});await ui.drain();
+      ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await ui.drain();assertMove(before,new Three.Vector3());assert.equal(ui.state.undo.length,undo,context);
+      // Plane restrictions apply equally to inspector edits and keyboard nudges.
+      before=matrices();const field=ui.document.querySelector(`[data-pose="position_mm"][data-axis="${tangent}"]`),target=ui.state.doc.objects[0].pose.position_mm[tangent]+55;
+      actions.push({kind:'field',axis:'XYZ'[tangent],amount:55});field.value=String(target);field.dispatchEvent(new ui.window.Event('change',{bubbles:true}));await ui.wait(()=>!ui.state.placementPending&&ui.state.doc.objects[0].pose.position_mm[tangent]===target);assertMove(before,new Three.Vector3().setComponent(tangent,55));
+      before=matrices();const height=ui.state.doc.objects[0].pose.position_mm[2],step=ui.state.snapSettings.keyboardMoveMm;
+      actions.push({kind:'keyboard',key:'f',amount:step});ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'f',bubbles:true}));await ui.wait(()=>!ui.state.placementPending&&ui.state.doc.objects[0].pose.position_mm[2]===height+step);assertMove(before,new Three.Vector3(0,0,step));
+      before=matrices();undo=ui.state.undo.length;
+      const forbidden=structuredClone(ui.state.doc.objects[0].pose);forbidden.position_mm[normal]+=70;
+      actions.push({kind:'blocked-normal',amount:70});const blocked=await post('move-object',ui.state.doc,{object:'person',target:forbidden});
+      assert.equal(blocked.limited,true,context);assert.deepEqual(blocked.moved,[],context);assert.equal(JSON.stringify(blocked.document.objects),JSON.stringify(ui.state.doc.objects),context);assert.equal(ui.state.undo.length,undo,context);
+      // Run real physics, then edit activity while its recording is still in
+      // the document. The retained case crosses the former value-count limit;
+      // fresh cases vary recording size and activity transitions.
+      actions.push({kind:'finalize'});ui.document.querySelector('#finalize-draft').click();
+      await ui.wait(()=>!ui.state.doc.draft_subassemblies?.length&&!ui.state.placementPending,30000);
+      before=matrices();actions.push({kind:'simulate',duration:.1});
+      ui.document.querySelector('[data-mode="simulate"]').click();ui.document.querySelector('#sim-duration').value='.1';
+      ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>ui.state.recording&&!ui.state.busy,60000);
+      const sampleSize=Math.min(...ui.state.recording.frames.map(documentValueCount));
+      const frameCount=index===0?Math.floor(1_000_001/sampleSize)+1:30+Math.floor(rng()*300);
+      const recording=extendRecording(ui.state.recording,frameCount);
+      ui.document.querySelector('[data-mode="design"]').click();ui.select('person/pelvis');
+      const modes=['fidget','struggle','random_spasms','destructive'];
+      for(const mode of [modes[index%4],modes[(index+1)%4]]){
+        ui.state.recording=recording;ui.state.doc.results={simulate:recording};undo=ui.state.undo.length;
+        const previous=ui.document.querySelector('#object-hold').value;
+        actions.push({kind:'activity',mode,previous,frameCount});
+        const select=ui.document.querySelector('#object-hold');select.value=mode;select.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+        await ui.wait(()=>!ui.state.placementPending&&ui.state.doc.objects[0].parameters.posture_control===mode,30000);
+        assertMove(before,new Three.Vector3());assert.equal(ui.state.undo.length,undo+1,context);
+        assert.ok(ui.state.scene.joints.filter(j=>j.id.startsWith('person/')).every(j=>j.metadata.human_activity.mode===mode),context);
+        assert.equal(ui.state.undo.at(-1).results.simulate.frames.length,frameCount,context);
+        assert.equal(ui.state.recording,null,context);assert.deepEqual(ui.state.doc.results,{},context);
+        ui.document.querySelector('#undo').click();await ui.wait(()=>!ui.state.placementPending&&ui.document.querySelector('#object-hold').value===previous,30000);assertMove(before,new Three.Vector3());
+        ui.document.querySelector('#redo').click();await ui.wait(()=>!ui.state.placementPending&&ui.document.querySelector('#object-hold').value===mode,30000);assertMove(before,new Three.Vector3());
+      }
+      const reopened=await editor(structuredClone(ui.state.doc));try{assertMove(before,new Three.Vector3(),reopened.partObjects);assert.equal(reopened.state.doc.objects[0].symmetry.line_offset_mm,target,context);}finally{await reopened.close();}
+    }catch(error){
+      const repro=await mkdtemp(join(process.env.PIPESIM_HUMAN_FUZZ_REPRO_DIR||tmpdir(),'pipesim-human-fuzz-repro-'));
+      await writeFile(join(repro,'workflow.json'),JSON.stringify({rootSeed,seed,index,doc,actions,currentDocument:ui?.state.doc},null,2));
+      error.message+=`\n${context}; replay with PIPESIM_HUMAN_FUZZ_SEED=${rootSeed} PIPESIM_HUMAN_FUZZ_CASES=${count}; repro=${repro}`;throw error;
+    }finally{await ui?.close();}
+  }
 });
 
 test('human mirror keeps a symmetric whole-person rotation before and after activation',async()=>{

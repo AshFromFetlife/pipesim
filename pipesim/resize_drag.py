@@ -38,6 +38,28 @@ def _graph(assembly, identifier, draft):
         if len(connected)==previous:return connected
 
 
+def _end_followers(assembly, identifier, side, draft):
+    """Bodies carried by one cut end, with the edited pipe removed as a bridge.
+
+    A through support joins the same pipe to a separate branch of the graph.
+    Its world anchor does not require the end fitting to stay at that station.
+    """
+    if draft:
+        connected={a['connector'] for a in draft.get('attachments',[]) if a.get('end')==side}
+    else:
+        connected={joint[other]['part'] for joint in assembly.joints
+                   for end,other in (('a','b'),('b','a'))
+                   if joint[end]['part']==identifier and joint[end].get('end')==side}
+    edges=[{r['id'],a['connector']} for r in runs(assembly.doc) for a in r.get('attachments',[])]
+    edges += [{j['a']['part'],j['b']['part']} for j in assembly.joints]
+    edges=[edge for edge in edges if identifier not in edge]
+    while True:
+        previous=len(connected)
+        for edge in edges:
+            if edge&connected:connected|=edge
+        if len(connected)==previous:return connected
+
+
 def _valid_against(before,after,members,*,ignore_draft_runs=()):
     if before.doc.get('draft_subassemblies') or after.doc.get('draft_subassemblies'):
         # Exact validation intentionally refuses draft runs: their cut lengths
@@ -245,7 +267,7 @@ def _automatic_through(doc,assembly,identifier,old_start,old_end,new_start,new_e
 
 
 def _stretch(assembly,identifier,length,side,behavior,capture_mm,capture_deg,locked,auto_connect,*,
-             propagate=True):
+             propagate=True,follow_endpoint=False):
     first,last,draft=_frame(assembly,identifier)
     old_length=float(np.linalg.norm(last-first))
     if length<=0 or length>1e6:raise DocumentError('Choose a positive length no greater than 1,000,000 mm')
@@ -263,10 +285,13 @@ def _stretch(assembly,identifier,length,side,behavior,capture_mm,capture_deg,loc
         new_last=middle+direction*length/2
     scale=length/old_length;delta=length-old_length
     members=_graph(assembly,identifier,bool(draft)) if behavior=='follow' and propagate else {identifier}
+    if follow_endpoint:
+        members={identifier}|_end_followers(assembly,identifier,side,draft)
     doc=copy.deepcopy(assembly.doc)
     active_runs={r['id']:r for r in runs(doc)}
     def fraction(point):return float((point-(first if centered else fixed))@(direction if centered else outward)/old_length)
     def transformed(point):
+        if follow_endpoint:return point+outward*delta
         if centered:return point+direction*float((point-middle)@direction)*(scale-1)
         return point+outward*delta*np.clip(fraction(point),0,1)
     if behavior=='detach':
@@ -322,7 +347,7 @@ def _stretch(assembly,identifier,length,side,behavior,capture_mm,capture_deg,loc
             raise DocumentError(f'{pid} is anchored and cannot follow this endpoint')
         matrix=part.matrix.copy();matrix[:3,3]=after
         spec['pose']=pose_of(matrix)
-        if part.kind=='member' and (pid==identifier or behavior=='follow' and
+        if part.kind=='member' and (pid==identifier or behavior=='follow' and not follow_endpoint and
                 abs(part.matrix[:3,2]@outward)>.999 and
                 0-1e-5<=fraction(before-part.matrix[:3,2]*part.length/2)<=1+1e-5 and
                 0-1e-5<=fraction(before+part.matrix[:3,2]*part.length/2)<=1+1e-5):
@@ -403,6 +428,18 @@ def resize_drag(assembly,identifier,length_mm,side,behavior='follow',capture_mm=
     if draft is None and not any(part['id']==identifier for part in assembly.doc['parts']):
         raise DocumentError('Expand the object before changing an internal member length')
     requested_length=float(length_mm)
+    if behavior=='follow' and any(anchor['part'] in _graph(assembly,identifier,bool(draft))
+                                  for anchor in assembly.anchors):
+        # An anchored through branch stays at its world station while the cut
+        # end and its own attached branch move. Do not scale the whole graph or
+        # silently release a support merely because the selected end is occupied.
+        try:
+            return _stretch(assembly,identifier,requested_length,side,behavior,
+                            capture_mm,capture_deg,locked,auto_connect,
+                            follow_endpoint=True)
+        except DocumentError:
+            # A loop or another joint may require the existing constrained solve.
+            pass
     if behavior=='follow':length_mm=_spacing_length(assembly,identifier,length_mm,side)
     # A through socket can slide on its pipe. Extending a free end leaves every
     # existing fitting at its station and changes only the selected pipe. An
@@ -423,9 +460,17 @@ def resize_drag(assembly,identifier,length_mm,side,behavior='follow',capture_mm=
             pass
     if draft is not None and behavior=='follow' and requested_length<old_length-1e-6 and not occupied_end:
         local_length=_stationary_shrink_length(assembly,identifier,requested_length,side)
+        connected=_graph(assembly,identifier,True)
+        other_members=(any(run['id']!=identifier and run['id'] in connected
+                           for run in runs(assembly.doc)) or
+                       any(pid!=identifier and pid in connected and part.kind=='member'
+                           for pid,part in assembly.parts.items()))
         # Prefer the requested cut over a graph deformation that has to stop
-        # early to keep every fitting in its old proportional position.
-        if local_length<length_mm-1e-6:
+        # early to keep every fitting in its old proportional position. In a
+        # connected frame, proportional deformation can also silently shorten
+        # other pipes and move crossbars while passing every geometry check.
+        # A free cut must preserve those other authored spans when possible.
+        if other_members or local_length<length_mm-1e-6:
             try:
                 return _stretch(assembly,identifier,local_length,side,behavior,
                                 capture_mm,capture_deg,locked,auto_connect,

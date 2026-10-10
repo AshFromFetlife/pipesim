@@ -1,0 +1,823 @@
+{
+  "version": 1,
+  "seed": 2687427251,
+  "family": "offset-grid",
+  "historyLimit": 10,
+  "doc": {
+    "format": "pipesim/1",
+    "units": "mm-kg-s-N-deg",
+    "name": "Geometry workflow 2687427251",
+    "parts": [
+      {
+        "id": "cross-0-0",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            -634.9480115342885,
+            -213.9767604880035,
+            2549.353071418591
+          ],
+          "rotation_deg": [
+            -43.41080280952156,
+            6.50299733038992,
+            140.60798607766628
+          ]
+        }
+      },
+      {
+        "id": "cross-0-1",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            -860.5094936350957,
+            -430.13963794875997,
+            2875.1487472670537
+          ],
+          "rotation_deg": [
+            -43.41080280952156,
+            6.50299733038992,
+            140.60798607766628
+          ]
+        }
+      },
+      {
+        "id": "cross-1-0",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            -908.8539345098342,
+            10.948171406348706,
+            2508.9528868018747
+          ],
+          "rotation_deg": [
+            -43.41080280952156,
+            6.50299733038992,
+            140.60798607766628
+          ]
+        }
+      },
+      {
+        "id": "cross-1-1",
+        "catalog": "tubeclamp.TC161C",
+        "pose": {
+          "position_mm": [
+            -1134.4154166106414,
+            -205.21470605440774,
+            2834.7485626503376
+          ],
+          "rotation_deg": [
+            -43.41080280952156,
+            6.50299733038992,
+            140.60798607766628
+          ]
+        }
+      }
+    ],
+    "joints": [],
+    "anchors": [],
+    "draft_subassemblies": [
+      {
+        "id": "frame",
+        "runs": [
+          {
+            "id": "upright-0",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -535.0057628388126,
+              -118.19886500380245,
+              2404.998848541984
+            ],
+            "end_mm": [
+              -960.4517423305716,
+              -525.9175334329609,
+              3019.5029701436606
+            ],
+            "attachments": []
+          },
+          {
+            "id": "upright-1",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -808.9116858143584,
+              106.72606689054976,
+              2364.5986639252674
+            ],
+            "end_mm": [
+              -1234.3576653061173,
+              -300.9926015386087,
+              2979.1027855269444
+            ],
+            "attachments": []
+          },
+          {
+            "id": "crossbar-0",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -1079.4206904074258,
+              111.15789103245447,
+              2457.351008202073
+            ],
+            "end_mm": [
+              -498.37490841619433,
+              -365.9828787695426,
+              2543.053269066676
+            ],
+            "attachments": []
+          },
+          {
+            "id": "crossbar-1",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -723.9363905170017,
+              -582.145756230299,
+              2868.848944915139
+            ],
+            "end_mm": [
+              -1304.9821725082334,
+              -105.00498642830202,
+              2783.1466840505354
+            ],
+            "attachments": []
+          },
+          {
+            "id": "spare",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              216.9997136881061,
+              -1447.1198390942748,
+              3152.2985259779866
+            ],
+            "end_mm": [
+              516.8264597745338,
+              -1159.7861526416714,
+              2719.2358573481656
+            ],
+            "attachments": []
+          }
+        ]
+      }
+    ]
+  },
+  "model": {
+    "spans": {
+      "upright-0": [
+        [
+          -535.0057628388126,
+          -118.19886500380245,
+          2404.998848541984
+        ],
+        [
+          -960.4517423305716,
+          -525.9175334329609,
+          3019.5029701436606
+        ]
+      ],
+      "upright-1": [
+        [
+          -808.9116858143584,
+          106.72606689054976,
+          2364.5986639252674
+        ],
+        [
+          -1234.3576653061173,
+          -300.9926015386087,
+          2979.1027855269444
+        ]
+      ],
+      "crossbar-0": [
+        [
+          -1079.4206904074258,
+          111.15789103245447,
+          2457.351008202073
+        ],
+        [
+          -498.37490841619433,
+          -365.9828787695426,
+          2543.053269066676
+        ]
+      ],
+      "crossbar-1": [
+        [
+          -723.9363905170017,
+          -582.145756230299,
+          2868.848944915139
+        ],
+        [
+          -1304.9821725082334,
+          -105.00498642830202,
+          2783.1466840505354
+        ]
+      ],
+      "spare": [
+        [
+          216.9997136881061,
+          -1447.1198390942748,
+          3152.2985259779866
+        ],
+        [
+          516.8264597745338,
+          -1159.7861526416714,
+          2719.2358573481656
+        ]
+      ]
+    },
+    "fittings": {
+      "cross-0-0": {
+        "position_mm": [
+          -634.9480115342885,
+          -213.9767604880035,
+          2549.353071418591
+        ],
+        "rotation_deg": [
+          -43.41080280952156,
+          6.50299733038992,
+          140.60798607766628
+        ]
+      },
+      "cross-0-1": {
+        "position_mm": [
+          -860.5094936350957,
+          -430.13963794875997,
+          2875.1487472670537
+        ],
+        "rotation_deg": [
+          -43.41080280952156,
+          6.50299733038992,
+          140.60798607766628
+        ]
+      },
+      "cross-1-0": {
+        "position_mm": [
+          -908.8539345098342,
+          10.948171406348706,
+          2508.9528868018747
+        ],
+        "rotation_deg": [
+          -43.41080280952156,
+          6.50299733038992,
+          140.60798607766628
+        ]
+      },
+      "cross-1-1": {
+        "position_mm": [
+          -1134.4154166106414,
+          -205.21470605440774,
+          2834.7485626503376
+        ],
+        "rotation_deg": [
+          -43.41080280952156,
+          6.50299733038992,
+          140.60798607766628
+        ]
+      }
+    },
+    "edges": [
+      {
+        "member": "upright-0",
+        "connector": "cross-0-0",
+        "port": "through"
+      },
+      {
+        "member": "upright-0",
+        "connector": "cross-0-1",
+        "port": "through"
+      },
+      {
+        "member": "upright-1",
+        "connector": "cross-1-0",
+        "port": "through"
+      },
+      {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      {
+        "member": "crossbar-0",
+        "connector": "cross-0-0",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-1",
+        "connector": "cross-0-1",
+        "port": "cross"
+      },
+      {
+        "member": "crossbar-1",
+        "connector": "cross-1-1",
+        "port": "cross"
+      }
+    ],
+    "mirror": null
+  },
+  "actions": [
+    {
+      "kind": "connect",
+      "member": "crossbar-1",
+      "connector": "cross-1-1",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-0",
+      "connector": "cross-0-0",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-1",
+      "connector": "cross-1-1",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-0",
+      "connector": "cross-0-1",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-1",
+      "connector": "cross-0-1",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-0",
+      "connector": "cross-0-0",
+      "port": "cross"
+    },
+    {
+      "kind": "connect",
+      "member": "upright-1",
+      "connector": "cross-1-0",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "crossbar-0",
+      "connector": "cross-1-0",
+      "port": "cross"
+    },
+    {
+      "kind": "build-from-library",
+      "member": "crossbar-1",
+      "axis": 1,
+      "delta": 59,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "detach-reconnect",
+      "member": "upright-1",
+      "axis": 0,
+      "delta": -14,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "duplicate-delete",
+      "member": "crossbar-0",
+      "axis": 1,
+      "delta": -34,
+      "edge": {
+        "member": "crossbar-1",
+        "connector": "cross-0-1",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "finalize-reopen",
+      "member": "crossbar-0",
+      "axis": 0,
+      "delta": -35,
+      "edge": {
+        "member": "upright-0",
+        "connector": "cross-0-0",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "resize",
+      "member": "spare",
+      "axis": 0,
+      "delta": 15,
+      "edge": {
+        "member": "crossbar-1",
+        "connector": "cross-0-1",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "finalize-reopen",
+      "member": "upright-0",
+      "axis": 0,
+      "delta": 40,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "repair",
+      "member": "upright-1",
+      "axis": 0,
+      "delta": 25,
+      "edge": {
+        "member": "crossbar-1",
+        "connector": "cross-1-1",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "repair",
+      "member": "crossbar-0",
+      "axis": 1,
+      "delta": -55,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-0",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "undo-redo",
+      "member": "upright-0",
+      "axis": 0,
+      "delta": -11,
+      "edge": {
+        "member": "upright-0",
+        "connector": "cross-0-0",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "resize-length",
+      "member": "crossbar-0",
+      "axis": 0,
+      "delta": -37,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-0",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "translate",
+      "member": "crossbar-0",
+      "axis": 1,
+      "delta": 30,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-0-0",
+        "port": "cross"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "mirror-cycle",
+      "member": "crossbar-0",
+      "axis": 1,
+      "delta": -41,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "finalize-selected",
+      "member": "crossbar-1",
+      "axis": 1,
+      "delta": 36,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "repair",
+      "member": "crossbar-0",
+      "axis": 1,
+      "delta": 29,
+      "edge": {
+        "member": "upright-0",
+        "connector": "cross-0-1",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "reload",
+      "member": "crossbar-1",
+      "axis": 2,
+      "delta": -43,
+      "edge": {
+        "member": "upright-0",
+        "connector": "cross-0-0",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "translate",
+      "member": "upright-1",
+      "axis": 1,
+      "delta": 25,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "repair",
+      "member": "upright-0",
+      "axis": 2,
+      "delta": -58,
+      "edge": {
+        "member": "upright-0",
+        "connector": "cross-0-1",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "reload",
+      "member": "upright-1",
+      "axis": 2,
+      "delta": -23,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "finalize-selected",
+      "member": "upright-0",
+      "axis": 0,
+      "delta": -34,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "finalize-reopen",
+      "member": "crossbar-0",
+      "axis": 1,
+      "delta": -32,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-0-0",
+        "port": "cross"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "build-from-library",
+      "member": "upright-0",
+      "axis": 0,
+      "delta": -45,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "detach-reconnect",
+      "member": "upright-1",
+      "axis": 0,
+      "delta": -35,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-0",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "translate",
+      "member": "crossbar-0",
+      "axis": 1,
+      "delta": 65,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-0",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "build-from-library",
+      "member": "crossbar-1",
+      "axis": 1,
+      "delta": -43,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "duplicate-delete",
+      "member": "upright-1",
+      "axis": 0,
+      "delta": 38,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "duplicate-delete",
+      "member": "upright-0",
+      "axis": 2,
+      "delta": -62,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "undo-redo",
+      "member": "upright-0",
+      "axis": 1,
+      "delta": -68,
+      "edge": {
+        "member": "crossbar-1",
+        "connector": "cross-0-1",
+        "port": "cross"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "x"
+    },
+    {
+      "kind": "resize",
+      "member": "spare",
+      "axis": 1,
+      "delta": 49,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "undo-redo",
+      "member": "crossbar-0",
+      "axis": 2,
+      "delta": -62,
+      "edge": {
+        "member": "upright-0",
+        "connector": "cross-0-1",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "repair",
+      "member": "crossbar-1",
+      "axis": 1,
+      "delta": -34,
+      "edge": {
+        "member": "upright-0",
+        "connector": "cross-0-0",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "reload",
+      "member": "crossbar-1",
+      "axis": 2,
+      "delta": 17,
+      "edge": {
+        "member": "crossbar-1",
+        "connector": "cross-1-1",
+        "port": "cross"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "mirror-cycle",
+      "member": "crossbar-0",
+      "axis": 0,
+      "delta": -28,
+      "edge": {
+        "member": "crossbar-0",
+        "connector": "cross-1-0",
+        "port": "cross"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "finalize-reopen",
+      "member": "crossbar-1",
+      "axis": 2,
+      "delta": -28,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-0",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "y"
+    },
+    {
+      "kind": "resize-length",
+      "member": "crossbar-1",
+      "axis": 0,
+      "delta": 22,
+      "edge": {
+        "member": "upright-1",
+        "connector": "cross-1-1",
+        "port": "through"
+      },
+      "endpoint": "start",
+      "mirrorAxis": "z"
+    },
+    {
+      "kind": "mirror-cycle",
+      "member": "upright-1",
+      "axis": 0,
+      "delta": -61,
+      "edge": {
+        "member": "crossbar-1",
+        "connector": "cross-0-1",
+        "port": "cross"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "z"
+    }
+  ]
+}

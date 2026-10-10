@@ -3,6 +3,23 @@ import assert from 'node:assert/strict';
 import {DEFAULT_PREFERENCES,validatePreferences,loadPreferences,savePreferences,displayValue,storedValue} from '../pipesim/web/preferences.js';
 import {DEFAULT_SNAP_SETTINGS,validateSnapSettings,loadSnapDefaults,saveSnapDefaults} from '../pipesim/web/snap-settings.js';
 
+test('preview preferences persist, migrate older settings, and validate quality ranges',()=>{
+  const values=new Map(),storage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value)};
+  values.set('pipesim.preferences.v1',JSON.stringify({simulationChainLinks:12,simulationSeconds:5}));
+  assert.equal(loadPreferences(storage).simulationChainLinks,12);
+  assert.equal(loadPreferences(storage).simulationMode,'preview');
+  values.set('pipesim.preferences.v1',JSON.stringify({simulationChainLinks:1,simulationSeconds:5}));
+  assert.equal(loadPreferences(storage).simulationChainLinks,8);
+  assert.equal(loadPreferences(storage).simulationSeconds,5);
+  savePreferences(storage,{...DEFAULT_PREFERENCES,simulationChainLinks:1});
+  assert.equal(loadPreferences(storage).simulationChainLinks,1);
+  const saved=savePreferences(storage,{...DEFAULT_PREFERENCES,simulationMode:'full',simulationChainLinks:6,
+    previewStepsPerSecond:2000,previewSolverIterations:480,previewBeamSegmentMm:1000});
+  assert.deepEqual(loadPreferences(storage),saved);
+  for(const [key,value] of Object.entries({simulationMode:'fast',previewStepsPerSecond:0,previewSolverIterations:1,previewBeamSegmentMm:Infinity}))
+    assert.throws(()=>validatePreferences({...saved,[key]:value}),new RegExp(key));
+});
+
 test('preferences preserve current editor defaults and validate recovery folder',()=>{
   assert.equal(DEFAULT_PREFERENCES.autosaveEnabled,true);
   assert.equal(DEFAULT_PREFERENCES.startup,'workspace');

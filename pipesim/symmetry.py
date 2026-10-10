@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from .document import Assembly, DocumentError
-from .geometry import mesh_for_part
+from .geometry import collision_primitives, mesh_for_part, shape_mesh
 from .math3d import pose_of, transform
 
 
@@ -171,7 +171,10 @@ def _unique_id(stem, used):
 
 
 def _mirror_mesh(part, base):
-    mesh = mesh_for_part(part)
+    return _write_mirrored_mesh(mesh_for_part(part), base)
+
+
+def _write_mirrored_mesh(mesh, base):
     mesh.apply_transform(LOCAL_REFLECTION)
     data = mesh.export(file_type='stl')
     filename = f'mirror-{hashlib.sha256(data).hexdigest()[:20]}.stl'
@@ -183,12 +186,34 @@ def _mirror_mesh(part, base):
     return relative.as_posix()
 
 
+def _mirrored_collision_geometry(part, base):
+    """Reflect each collision solid without filling the gaps between them.
+
+    Flattening the visual mesh into one convex hull fills hollow sockets and
+    makes a perfectly seated pipe appear to penetrate its mirrored fitting.
+    Symmetric primitives need only a reflected frame. Chiral mesh primitives
+    additionally need their own reflected vertices, retaining their hull mode.
+    """
+    result = []
+    for shape, matrix in collision_primitives(part):
+        reflected = {key: copy.deepcopy(value) for key, value in shape.items()
+                     if key not in ('position_mm', 'rotation_deg', 'axis', 'collision_geometry')}
+        if shape['type'] == 'mesh':
+            filename = _write_mirrored_mesh(shape_mesh(reflected, part.base), base)
+            reflected.pop('scale', None)
+            reflected['file'] = filename
+        reflected.update(pose_of(LOCAL_REFLECTION @ matrix @ LOCAL_REFLECTION))
+        result.append(reflected)
+    return result
+
+
 def _mirrored_body(part, base):
     definition = part.definition
     body = {key: copy.deepcopy(definition[key]) for key in
             ('kind', 'material', 'color', 'friction', 'restitution', 'section') if key in definition}
     body['mass_kg'] = part.mass
-    body['geometry'] = [{'type': 'mesh', 'file': _mirror_mesh(part, base)}]
+    body['geometry'] = [{'type': 'mesh', 'file': _mirror_mesh(part, base),
+                         'collision_geometry': _mirrored_collision_geometry(part, base)}]
     ports = copy.deepcopy(definition.get('ports', {}))
     for port in ports.values():
         if 'position_mm' in port:

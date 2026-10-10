@@ -63,7 +63,8 @@ class Mechanism:
         hosts=[g for g in component if any(p not in chain_parts for p in self.groups[g])]
         candidates=hosts or component
         score=lambda g:(len(self.groups[g]),sum(assembly.parts[p].length or 0 for p in self.groups[g]),-g)
-        self.root=min(anchored) if anchored else pelvis[0] if pelvis else max(candidates,key=score)
+        structural=[g for g in candidates if any(assembly.parts[p].kind in ('member','connector') and p not in chain_parts for p in self.groups[g])]
+        self.root=min(anchored) if anchored else max(structural,key=score) if structural else pelvis[0] if pelvis else max(candidates,key=score)
         if not anchored and not pelvis and assembly.parts[selected].kind=='connector':
             hosts={self.group_of[j['b']['part']] for j in assembly.joints if j['type']=='socket' and not j.get('locked',False)
                    and self.group_of[j['a']['part']]==self.selected and self.group_of[j['b']['part']]!=self.selected}
@@ -141,6 +142,13 @@ class Mechanism:
     def forward(self,q,root=None):
         deltas={self.root:np.eye(4) if root is None else root}
         for parent,child,j,forward in self.tree:
+            if all((q[index] if index is not None else fixed)==0
+                   for _,index,_,_,fixed in self.variables[j['id']]):
+                # Unchanged branches inherit the parent's rigid transform.
+                # Building hundreds of identity joint rotations in every fit
+                # evaluation makes a local edit scale with its hanging payload.
+                deltas[child]=deltas[parent]
+                continue
             delta=self.delta(j,q)
             if not forward:
                 inverse=np.eye(4);inverse[:3,:3]=delta[:3,:3].T;inverse[:3,3]=-delta[:3,:3].T@delta[:3,3];delta=inverse
@@ -151,10 +159,12 @@ class Mechanism:
 def commit_transform(assembly, poses):
     """Revalidate and save a solved pose once, when a drag is accepted."""
     if not poses: return copy.deepcopy(assembly.doc)
-    from .snapping import rigid_draft_follow
+    from .snapping import rigid_draft_follow, _rigid_object_transforms
 
     poses,_=rigid_draft_follow(assembly,poses)
-    editable=_editable(assembly,set(poses))
+    try: _rigid_object_transforms(assembly,poses)
+    except DocumentError: editable=_editable(assembly,set(poses))
+    else: editable=assembly if not assembly.doc.get('state',{}).get('joints') else _editable(assembly,set(poses))
     document=move_document(editable,poses)
     from .grouping import restore_objects
     return restore_objects(assembly.doc,document,assembly.base,assembly.library)

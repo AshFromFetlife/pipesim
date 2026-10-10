@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from pipesim.document import Assembly, DocumentError, read
+from pipesim.document import Assembly, read
 from pipesim.drafting import _layout, finalize, preview, runs
 from pipesim.resize_drag import resize_drag
 from pipesim.validation import validate
@@ -146,7 +146,10 @@ def test_random_free_endpoint_resize_keeps_exact_design_valid(connected_design, 
                     f'side={side} delta_mm={delta:.6f}: {error}')
 
 
-LATTICE_SEQUENCE_SEEDS = tuple(range(6)) + tuple(secrets.randbits(64) for _ in range(2))
+LATTICE_SEQUENCE_SEEDS = tuple(int(value) for value in os.environ.get(
+    'PIPESIM_RESIZE_LATTICE_SEEDS',
+    ','.join(map(str, range(6))) + ',' + ','.join(str(secrets.randbits(64)) for _ in range(2))
+).split(',') if value)
 
 
 @pytest.mark.parametrize('case_seed', LATTICE_SEQUENCE_SEEDS)
@@ -155,29 +158,22 @@ def test_connected_lattice_mixed_end_edits_stay_solvable(connected_design, case_
     rng = random.Random(case_seed)
     current = connected_design
     operations = []
-    for step in range(3):
-        choices = list(FREE_END_CASES)
-        rng.shuffle(choices)
-        found = None
-        for target, side in choices:
+    # Extend a known free end, then cut back to its original span. Both edits
+    # have a constructive witness. Never ask the solver whether a candidate is
+    # worth testing and discard its AssertionError/DocumentError: that masks
+    # the false-positive rejections this campaign exists to find. Previously
+    # shrink candidates were tried only when extension had already failed.
+    for step in range(6):
+        if step % 2 == 0:
+            target, side = rng.choice(FREE_END_CASES)
             first, last = _effective_frame(current, target)
-            old_length = float(np.linalg.norm(last-first))
-            for change in (rng.uniform(20, 70), -rng.uniform(10, 35)):
-                requested = old_length+change
-                if requested <= 50:
-                    continue
-                try:
-                    _known_free_space_target(current, target, requested, side)
-                except (AssertionError, DocumentError, ValueError):
-                    continue
-                found = (target, side, requested)
-                break
-            if found:
-                break
-        assert found, f'No independently valid edit found at step {step} for case_seed={case_seed}'
-        target, side, requested = found
+            original_length = float(np.linalg.norm(last-first))
+            requested = original_length+rng.uniform(20, 70)
+        else:
+            requested = original_length
         operations.append({'target': target, 'side': side, 'length_mm': requested})
         try:
+            _known_free_space_target(current, target, requested, side)
             result = resize_drag(current, target, requested, side, auto_connect=False)
             assert result['status'] == 'resized', result
             after = Assembly.from_doc(result['document'], current.base, current.library)
@@ -193,6 +189,16 @@ def test_connected_lattice_mixed_end_edits_stay_solvable(connected_design, case_
                                        indent=2), encoding='utf-8')
             pytest.fail(f'connected lattice case_seed={case_seed}, step={step}, '
                         f'repro={path}: {error}')
+
+
+def test_lattice_generator_reports_oracle_failures_instead_of_discarding_them(
+        connected_design, monkeypatch, tmp_path):
+    def rejected(*args, **kwargs):
+        raise AssertionError('injected false-positive oracle rejection')
+    monkeypatch.setattr(sys.modules[__name__], '_known_free_space_target', rejected)
+    with pytest.raises(pytest.fail.Exception, match='injected false-positive oracle rejection'):
+        test_connected_lattice_mixed_end_edits_stay_solvable(connected_design, 0, tmp_path)
+    assert (tmp_path / 'lattice-sequence-0.json').exists()
 
 
 def _random_connected_graph(seed):
@@ -314,19 +320,22 @@ def test_resize_realworld_long_randomized(library, tmp_path):
     completed = 0
     while completed < case_limit and time.monotonic() < deadline:
         batch = [rng.getrandbits(64) for _ in range(batch_size(
-            25, case_limit-completed, completed, started, deadline, minutes))]
+            10, case_limit-completed, completed, started, deadline, minutes))]
         batch_dir = tmp_path / f'batch-{completed:06d}'
         child_env = os.environ.copy()
         child_env['PIPESIM_RESIZE_GRAPH_SEEDS'] = ','.join(map(str, batch))
+        child_env['PIPESIM_RESIZE_LATTICE_SEEDS'] = ','.join(map(str, batch))
         child = subprocess.run(
             [sys.executable, '-m', 'pytest', '-q', '-s', f'--basetemp={batch_dir}',
-             'tests/test_resize_realworld.py', '-k', 'randomized_connected_graph_resize_sequence'],
+             'tests/test_resize_realworld.py', '-k',
+             'randomized_connected_graph_resize_sequence or connected_lattice_mixed_end_edits_stay_solvable'],
             env=child_env, capture_output=True, text=True, check=False)
         if child.returncode:
             pytest.fail(f'Resize fuzz root_seed={root_seed}, completed={completed}, '
                         f'batch_seeds={batch}, repro_dir={batch_dir}\n'
                         f'{child.stdout}\n{child.stderr}', pytrace=False)
         completed += len(batch)
-        print(f'Resize fuzz completed={completed}, elapsed_s={time.monotonic()-started:.0f}, '
+        print(f'Resize fuzz completed_seeds={completed}, workflow_cases={completed*2}, '
+              f'elapsed_s={time.monotonic()-started:.0f}, '
               f'last_case_seed={batch[-1]}', flush=True)
     assert completed > 0, 'Long fuzz budget did not permit a single case'

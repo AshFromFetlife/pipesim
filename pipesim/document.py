@@ -62,23 +62,43 @@ def parse(text):
     return result
 
 def check_values(result):
-    count=0
-    def check(v, stack, depth=0):
-        nonlocal count
-        count+=1
-        if count>1000000: raise DocumentError('Document exceeds one million values after alias expansion')
+    # Recordings can legitimately contain millions of ordinary values. Limit
+    # only values duplicated through shared YAML containers, and validate each
+    # container once so nested aliases cannot make this walk exponential.
+    summaries={}
+    active=set()
+    expansion=0
+    def check(v, depth=0):
+        nonlocal expansion
         if depth > 80:
             raise DocumentError("Document nesting exceeds 80 levels")
         if isinstance(v, float) and not math.isfinite(v):
             raise DocumentError("NaN and Infinity are not valid engineering values")
         if isinstance(v,(dict,list)):
-            if id(v) in stack:
+            identity=id(v)
+            if identity in active:
                 raise DocumentError("Recursive YAML aliases are not supported")
+            if identity in summaries:
+                size,height=summaries[identity]
+                if depth+height>80:
+                    raise DocumentError("Document nesting exceeds 80 levels")
+                expansion+=size-1
+                if expansion>1_000_000:
+                    raise DocumentError('YAML alias expansion exceeds one million additional values')
+                return size,height
+            active.add(identity)
+            size,height=1,0
             for item in (v.values() if isinstance(v,dict) else v):
-                check(item, stack|{id(v)}, depth+1)
+                child_size,child_height=check(item,depth+1)
+                size+=child_size
+                height=max(height,child_height+1)
+            active.remove(identity)
+            summaries[identity]=size,height
+            return size,height
         elif v is not None and not isinstance(v,(str,int,float,bool)):
             raise DocumentError(f'Unsupported document value type: {type(v).__name__}')
-    check(result,set())
+        return 1,0
+    check(result)
 
 def read(path):
     return parse(Path(path).read_text(encoding="utf-8-sig"))
@@ -371,6 +391,13 @@ class Assembly:
             if instance['template']!='chain' or instance.get('layout_mode','rigid')!='rigid': continue
             members=[p for p in self.parts if p.startswith(instance['id']+'/')]
             for pid in members[1:]: groups.union(members[0],pid)
+        return groups.groups()
+
+    def connected_groups(self):
+        """Whole attachment components, including loose joints and flexible loads."""
+        groups=UnionFind(self.parts)
+        for joint in self.joints:
+            groups.union(joint['a']['part'],joint['b']['part'])
         return groups.groups()
 
     def joint_frames(self,joint):

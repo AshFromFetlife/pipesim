@@ -56,7 +56,8 @@ def _candidates(assembly,joint):
 
 def _plans(connectors,members,controls):
     # Try the fewest edited parts first, then the combinations nearest the new
-    # connection. A total time budget bounds combinatorial searches.
+    # connection. A finite plan matrix bounds combinatorial searches; editor
+    # callers can cancel without a machine-speed-dependent wall-time failure.
     for total in range(1,controls['unlock_connectors']+controls['resize_members']+1):
         choices=[]
         for nr in range(min(total,controls['resize_members'],len(members))+1):
@@ -150,10 +151,12 @@ def _materialize(working,proxy,joint,fit,released,stretch,controls):
                                       sorted(set(context)&set(working.parts)),angle),'adjustments':adjusted}
 
 
-def adjust_connection(assembly,joint,placed,controls):
+def adjust_connection(assembly,joint,placed,controls,*,cancelled=None):
     from .fitting import fit_connection
+    from .connection_jobs import check_cancelled
+    check_cancelled(cancelled)
     from .snapping import move_document
-    deadline=time.monotonic()+30
+    deadline=float('inf') if cancelled else time.monotonic()+30
     fallback=None;best_gap=float('inf')
     def gap(result):
         poses,fitted,*_=result['fit']
@@ -164,7 +167,7 @@ def adjust_connection(assembly,joint,placed,controls):
     # Prefer an exact fit. A permitted residual is a fallback, not a reason to
     # skip screw/length adjustments that the user explicitly requested.
     try:
-        fit=fit_connection(assembly,joint,placed,True,tolerance_mm=controls['tolerance_mm'],deadline=min(deadline,time.monotonic()+4))
+        fit=fit_connection(assembly,joint,placed,True,tolerance_mm=controls['tolerance_mm'],deadline=None if cancelled else min(deadline,time.monotonic()+4),cancelled=cancelled)
         fallback={'document':move_document(assembly,fit[0]),'fit':fit,'adjustments':{'unlocked':[],'resized':[]}}
         best_gap=gap(fallback)
         if best_gap<=.03: return fallback
@@ -173,12 +176,13 @@ def adjust_connection(assembly,joint,placed,controls):
     connectors,members=_candidates(assembly,joint)
     attempts=0
     for unlocked,resized in _plans(connectors,members,controls):
+        check_cancelled(cancelled)
         if attempts>=64 or time.monotonic()>deadline: break
         attempts+=1
         try:
             working,proxy,adapted,intent,released,stretch=_proxy(assembly,joint,placed,unlocked,resized,controls['max_length_change_mm'])
             fit=fit_connection(proxy,adapted,intent,True,tolerance_mm=controls['tolerance_mm'],
-                               deadline=min(deadline,time.monotonic()+4),check_collisions=not stretch)
+                               deadline=None if cancelled else min(deadline,time.monotonic()+4),check_collisions=not stretch,cancelled=cancelled)
             result=_materialize(working,proxy,joint,fit,released,stretch,controls)
             remaining=gap(result)
             if remaining<=.03: return result

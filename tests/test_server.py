@@ -32,6 +32,37 @@ def test_bootstrap_serves_real_library_and_offline_editor(editor):
     assert request(editor,'/vendor/three.module.js')[0]==200
 
 
+def test_connection_search_can_be_cancelled_before_and_during_execution(editor,monkeypatch,load):
+    from pipesim.connection_jobs import check_cancelled
+    entered=threading.Event();finished=threading.Event();response=[]
+    def search(assembly,*args,**kwargs):
+        entered.set()
+        try:
+            for _ in range(1000):
+                check_cancelled(kwargs['cancelled'])
+                threading.Event().wait(.005)
+            pytest.fail('Connection cancel did not reach search')
+        finally: finished.set()
+    monkeypatch.setattr('pipesim.snapping.connection_options',search)
+    body={'document':load('workbench').doc,'path':'design.pipe.yaml','member':'top','connector':'tee','port':'branch','job_id':'early-job'}
+    assert json.loads(request(editor,'/api/connection-cancel',{'job_id':'early-job'})[1])=={'cancelled':True}
+    assert json.loads(request(editor,'/api/snap-options',body)[1])=={'cancelled':True}
+    assert not entered.is_set()
+    body['job_id']='running-job'
+    thread=threading.Thread(target=lambda:response.append(json.loads(request(editor,'/api/snap-options',body)[1])))
+    thread.start()
+    try:
+        assert entered.wait(5)
+        request(editor,'/api/connection-cancel',{'job_id':'running-job'})
+        assert finished.wait(5)
+        thread.join(5)
+        assert not thread.is_alive()
+        assert response==[{'cancelled':True}]
+        assert not editor.connections.running
+    finally:
+        editor.connections.close();thread.join(6)
+
+
 def test_editor_port_cannot_be_shared_by_another_server(editor):
     with pytest.raises(OSError):
         EditorServer(editor.root,editor.design,editor.server_port)
@@ -281,7 +312,8 @@ def test_simulation_runs_as_a_cancellable_job_without_resending_design(editor,bl
     import time
     doc=copy.deepcopy(blank)
     doc['parts']=[{'id':'box','catalog':'generic.box','pose':{'position_mm':[0,0,500]}}]
-    _,raw=request(editor,'/api/simulate',{'document':doc,'duration':.02,'chain_links_per_body':5})
+    _,raw=request(editor,'/api/simulate',{'document':doc,'duration':.02,'chain_links_per_body':5,
+        'mode':'preview','preview_steps_per_second':2000,'preview_solver_iterations':480,'preview_beam_segment_mm':1000})
     job=json.loads(raw);assert job['status']=='running'
     deadline=time.monotonic()+30
     while job['status']=='running':
@@ -292,6 +324,10 @@ def test_simulation_runs_as_a_cancellable_job_without_resending_design(editor,bl
     assert 'result' not in job
     result=json.loads(request(editor,'/api/simulation-result',{'job_id':job['id']})[1])['result']
     assert result['frames']
+    assert result['mode']=='preview'
+    assert result['quality']['requested_steps_per_second']==2000
+    assert result['quality']['starting_solver_iterations']==480
+    assert result['quality']['beam_segment_mm']==1000
     job=json.loads(request(editor,'/api/simulate',{'document':doc,'duration':30})[1])
     with pytest.raises(urllib.error.HTTPError) as error:
         request(editor,'/api/simulation-cancel',{'job_id':job['id']},token=False)

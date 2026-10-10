@@ -144,15 +144,16 @@ def test_cube_long_randomized(tmp_path):
             child = subprocess.run(
                 [sys.executable, '-m', 'pytest', '-q', '-s', f'--basetemp={batch_dir}',
                  'tests/test_symmetry_cube_fuzz.py', 'tests/test_mirror_overlap_realworld.py',
-                 '-k', 'randomized_orthogonal_mirror_cubes_finalize_without_collisions or realworld_mirror_overlap_case or realworld_through_socket_case'],
+                 'tests/test_mirror_collision_geometry.py',
+                 '-k', 'randomized_orthogonal_mirror_cubes_finalize_without_collisions or realworld_mirror_overlap_case or realworld_through_socket_case or realworld_offset_socket_reflection'],
                 env=child_env, capture_output=True, text=True, check=False)
             if child.returncode:
                 pytest.fail(f'Cube fuzz root_seed={root_seed}, completed={completed}, '
                             f'batch_seeds={batch}, repro_dir={batch_dir}\n'
                             f'{child.stdout}\n{child.stderr}', pytrace=False)
             completed += len(batch)
-            print(f'cube mirror long completed_models={completed} '
+            print(f'cube mirror long completed_seeds={completed} workflow_cases={completed*4} '
                   f'elapsed_s={time.monotonic()-started:.0f} last_case_seed={batch[-1]}', flush=True)
     finally:
-        print(f'cube mirror long completed_models={completed}', flush=True)
+        print(f'cube mirror long completed_seeds={completed} workflow_cases={completed*4}', flush=True)
     assert completed > 0, 'Long cube fuzz budget did not permit one model'

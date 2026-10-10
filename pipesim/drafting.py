@@ -29,7 +29,7 @@ def runs(doc):
     return [run for group in doc.get('draft_subassemblies', []) for run in group['runs']]
 
 
-def _mirror_reopen_digest(document):
+def _mirror_reopen_digest(document, *, normalize_numbers=True):
     """Identify an unchanged exact design while ignoring generated analysis."""
     clean = copy.deepcopy(document)
     clean.pop('results', None)
@@ -37,7 +37,18 @@ def _mirror_reopen_digest(document):
     clean.get('metadata', {}).pop('draft_mirror_reopen', None)
     if not clean.get('metadata'):
         clean.pop('metadata', None)
-    return hashlib.sha256(json.dumps(clean, sort_keys=True, separators=(',', ':'),
+    # Browser JSON round trips turn 0.0 into 0 (and -0.0 into 0). Those are
+    # identical document values, not edits that invalidate the mirror source.
+    def canonical(value):
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        if isinstance(value, dict):
+            return {key: canonical(item) for key, item in value.items()}
+        return value
+    return hashlib.sha256(json.dumps(canonical(clean) if normalize_numbers else clean,
+                                     sort_keys=True, separators=(',', ':'),
                                      allow_nan=False).encode()).hexdigest()
 
 
@@ -75,7 +86,8 @@ def _reopen_mirrored_assembly(assembly, members):
             not isinstance(record.get('finished_members'), list) or
             not isinstance(record.get('mirror_group_ids'), list) or
             not isinstance(record.get('required_parts'), list) or
-            record.get('final_digest') != _mirror_reopen_digest(assembly.doc)):
+            (record.get('final_digest') != _mirror_reopen_digest(assembly.doc) and
+             record.get('final_digest') != _mirror_reopen_digest(assembly.doc, normalize_numbers=False))):
         return None
     chosen = set(members)
     related = set(record['required_parts'])

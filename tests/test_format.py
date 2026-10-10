@@ -2,7 +2,7 @@ import copy
 import json
 import numpy as np
 import pytest
-from pipesim.document import Assembly,DocumentError,parse,write,read,Library
+from pipesim.document import Assembly,DocumentError,check_values,parse,write,read,Library
 from pipesim.math3d import transform,pose_of,align_axis,segment_distance
 
 def test_duplicate_yaml_rejected():
@@ -12,6 +12,34 @@ def test_nonfinite_rejected(value):
     with pytest.raises(DocumentError,match='NaN'): parse('value: '+value)
 def test_recursive_alias_rejected():
     with pytest.raises(DocumentError,match='Recursive'): parse('value: &a [*a]')
+
+def test_large_plain_json_is_not_yaml_alias_expansion():
+    recording={'results':{'simulate':{'samples':[0]*1_000_001}}}
+    loaded=parse(json.dumps(recording))
+    assert len(loaded['results']['simulate']['samples'])==1_000_001
+
+def test_large_plain_document_still_rejects_nonfinite_values_at_the_end():
+    with pytest.raises(DocumentError,match='NaN'):
+        check_values({'samples':[0]*1_000_001+[float('nan')]})
+
+def test_exponential_yaml_alias_expansion_is_rejected():
+    lines=['base: &base [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]']
+    previous='base'
+    for index in range(7):
+        name=f'level{index}'
+        lines.append(f'{name}: &{name} ['+', '.join([f'*{previous}']*10)+']')
+        previous=name
+    with pytest.raises(DocumentError,match='alias expansion'):
+        parse('\n'.join(lines))
+
+def test_shared_aliases_preserve_values_and_validate_the_deepest_path():
+    loaded=parse('first: &a [1, 2, 3]\nsecond: *a\nthird: *a')
+    assert loaded['first']==loaded['second']==loaded['third']==[1,2,3]
+    shared=[0]
+    deep=shared
+    for _ in range(79): deep=[deep]
+    with pytest.raises(DocumentError,match='nesting'):
+        check_values({'shallow':shared,'deep':deep})
 def test_unsafe_yaml_tag_rejected():
     with pytest.raises(DocumentError): parse('value: !!python/object/apply:os.system [echo bad]')
 @pytest.mark.parametrize('change',[{'format':'pipesim/2'},{'units':'metres'},{'partz':[]}])

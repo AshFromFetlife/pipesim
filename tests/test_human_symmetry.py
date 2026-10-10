@@ -23,7 +23,7 @@ def design(axis='x'):
 
 
 @pytest.mark.parametrize('axis', ['x', 'y'])
-def test_human_fixes_to_a_vertical_mirror_line_and_restricts_sideways_movement(axis):
+def test_human_fixes_to_a_vertical_mirror_plane_and_restricts_normal_movement(axis):
     source = Assembly.from_doc(design(axis))
     document = set_human_symmetry(source, 'person', 'frame', 'center')
     assembly = Assembly.from_doc(document)
@@ -36,9 +36,37 @@ def test_human_fixes_to_a_vertical_mirror_line_and_restricts_sideways_movement(a
     moved = move_object(assembly, 'person', {'position_mm': [100, 200, 50], 'rotation_deg': [0, 0, 45]})
     assert moved['limited']
     new_pose = next(item['pose'] for item in moved['document']['objects'] if item['id'] == 'person')
-    assert new_pose['position_mm'] == ([0, 120, 50] if axis == 'x' else [300, 0, 50])
+    assert new_pose['position_mm'] == ([0, 200, 50] if axis == 'x' else [100, 0, 50])
     assert new_pose['rotation_deg'] == symmetry['rotation_deg']
     Assembly.from_doc(moved['document'])
+
+
+@pytest.mark.parametrize('axis', ['x', 'y'])
+@pytest.mark.parametrize('direction', ['tangent', 'vertical'])
+def test_whole_person_translation_in_mirror_plane_previews_and_commits(axis, direction):
+    document = design(axis)
+    document['objects'][0]['pose']['rotation_deg'] = [90, 0, 0 if axis == 'x' else 90]
+    document = set_human_symmetry(Assembly.from_doc(document), 'person', 'frame', 'center')
+    before = Assembly.from_doc(document)
+    target = copy.deepcopy(document['objects'][0]['pose'])
+    coordinate = (1 if axis == 'x' else 0) if direction == 'tangent' else 2
+    target['position_mm'][coordinate] += 175
+    preview = move_object(before, 'person', target, preview=True)
+    assert not preview['limited']
+    assert len(preview['poses']) == 19
+    assert before.doc == document
+    result = move_object(before, 'person', target)
+    assert not result['limited']
+    assert result['document']['objects'][0]['pose'] == target
+    after = Assembly.from_doc(result['document'])
+    delta = np.zeros(3)
+    delta[coordinate] = 175
+    for part_id, part in before.parts.items():
+        expected = part.matrix.copy()
+        if part_id.startswith('person/'):
+            expected[:3, 3] += delta
+            assert np.allclose(transform(preview['poses'][part_id]), expected, atol=1e-5)
+        assert np.allclose(after.parts[part_id].matrix, expected, atol=1e-5)
 
 
 @pytest.mark.parametrize(('axis', 'angles'), [

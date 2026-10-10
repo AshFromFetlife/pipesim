@@ -246,7 +246,7 @@ def restore_objects(original, document, base, library, poses=None):
 
 def move_object(assembly, object_id, target, *, preview=False):
     from .posing import _editable
-    from .snapping import (apply_rigid_draft_follow, check_rigid_draft_follow,
+    from .snapping import (_rigid_object_transforms, apply_rigid_draft_follow, check_rigid_draft_follow,
                            move_document, rigid_draft_follow)
     instance=next((o for o in assembly.doc.get('objects',[]) if o['id']==object_id),None)
     if instance is None: raise DocumentError('Select a grouped object to move as a whole')
@@ -260,27 +260,26 @@ def move_object(assembly, object_id, target, *, preview=False):
     members={pid for pid in assembly.parts if pid.startswith(object_id+'/')}
     poses={pid:pose_of(delta@assembly.parts[pid].matrix) for pid in members
            if not np.allclose(delta@assembly.parts[pid].matrix,assembly.parts[pid].matrix,atol=1e-7,rtol=0)}
-    if instance['template']=='chain' and poses and not assembly.doc.get('state',{}).get('joints'):
-        # A single-ended chain attached to a free connector can move as one
-        # rigid assembly. The chain's compact parent pose and the connector's
-        # authored pose must receive the same transform so the spherical joint
-        # never stretches. World anchors and reusable objects remain barriers.
-        component=set(members)
-        while True:
-            previous=len(component)
-            for joint in assembly.joints:
-                edge={joint['a']['part'],joint['b']['part']}
-                if edge&component: component|=edge
-            if len(component)==previous:break
-        hosts=component-members
-        direct={part['id'] for part in assembly.doc.get('parts',[])}
+    if poses:
+        # Whole-object layout transports the complete free attachment graph.
+        # Another reusable object is not a world fixing: keep its shape and
+        # carry it too, without recruiting internal joint travel or IK.
+        graph={pid:set() for pid in assembly.parts}
+        for joint in assembly.joints:
+            a,b=joint['a']['part'],joint['b']['part']
+            graph[a].add(b);graph[b].add(a)
+        for obj in assembly.doc.get('objects',[]):
+            parts=[pid for pid in assembly.parts if pid.startswith(obj['id']+'/')]
+            for pid in parts[1:]:
+                graph[parts[0]].add(pid);graph[pid].add(parts[0])
+        component=set(members);queue=list(members)
+        for pid in queue:
+            for other in graph[pid]-component:
+                component.add(other);queue.append(other)
         anchored={anchor['part'] for anchor in assembly.anchors}
-        if hosts and hosts<=direct and not anchored.intersection(component):
-            poses.update({pid:pose_of(delta@assembly.parts[pid].matrix) for pid in hosts
-                          if not np.allclose(delta@assembly.parts[pid].matrix,
-                                             assembly.parts[pid].matrix,atol=1e-7,rtol=0)})
+        if not anchored.intersection(component):
+            poses={pid:pose_of(delta@assembly.parts[pid].matrix) for pid in component}
     poses,run_transforms=rigid_draft_follow(assembly,poses)
-    direct={part['id'] for part in assembly.doc.get('parts',[])}
     if preview:
         from .snapping import _movement_coordinates
         candidate=copy.copy(assembly);candidate.parts={p:copy.copy(v) for p,v in assembly.parts.items()}
@@ -293,34 +292,25 @@ def move_object(assembly, object_id, target, *, preview=False):
         except DocumentError as exc:
             raise DocumentError(f'{exc}. Detach or loosen the attachment in Connections to structure before moving the whole object.') from exc
         return {'poses':poses,'moved':list(poses),'limited':limited,
-                'message':'The human stays on its mirror line' if limited else 'Whole object moved; limb pose preserved'}
+                'message':'The human stays in its mirror plane' if limited else 'Whole object moved; shape preserved'}
     document=copy.deepcopy(assembly.doc)
     if poses:
         try:
-            if (instance['template']=='chain' and not assembly.doc.get('state',{}).get('joints')
-                    and set(poses)-members<=direct):
-                # A whole-chain move only changes its parent pose, keeping long
-                # unposed chains compact and avoiding expansion/rebasing work.
-                from .snapping import _movement_coordinates
-                candidate=copy.copy(assembly);candidate.parts={p:copy.copy(v) for p,v in assembly.parts.items()}
-                for pid in poses: candidate.parts[pid].matrix=delta@assembly.parts[pid].matrix
-                _movement_coordinates(assembly,candidate)
-                next(o for o in document['objects'] if o['id']==object_id)['pose']=copy.deepcopy(target)
-                for spec in document.get('parts',[]):
-                    if spec['id'] in poses: spec['pose']=poses[spec['id']]
-                apply_rigid_draft_follow(document,run_transforms)
-                check_rigid_draft_follow(assembly,candidate,document,run_transforms)
-                document.pop('results',None);document.pop('build_plan',None)
-                return {'document':document,'poses':poses,'moved':list(poses),'limited':limited,'message':'Whole chain moved; shape preserved'}
-            editable=_editable(assembly,set(poses))
+            # Preserve compact and already-posed object components verbatim.
+            # Only saved joint coordinates or partial objects need baking.
+            try: _rigid_object_transforms(assembly,poses)
+            except DocumentError: editable=_editable(assembly,set(poses))
+            else: editable=_editable(assembly,set(poses)) if assembly.doc.get('state',{}).get('joints') else assembly
             document=move_document(editable,poses)
         except DocumentError as exc:
             raise DocumentError(f'{exc}. Detach or loosen the attachment in Connections to structure before moving the whole object.') from exc
         document=restore_objects(assembly.doc,document,assembly.base,assembly.library,{object_id:target})
     if instance.get('symmetry'):
-        next(o for o in document['objects'] if o['id']==object_id)['symmetry']['rotation_deg'] = list(target['rotation_deg'])
+        symmetry=next(o for o in document['objects'] if o['id']==object_id)['symmetry']
+        symmetry['rotation_deg'] = list(target['rotation_deg'])
+        symmetry['line_offset_mm'] = target['position_mm'][1 if symmetry['axis']=='x' else 0]
     return {'document':document,'poses':poses,'moved':list(poses),'limited':limited,
-            'message':'The human stays on its mirror line' if limited else 'Whole object moved; limb pose preserved'}
+            'message':'The human stays in its mirror plane' if limited else 'Whole object moved; shape preserved'}
 
 
 def update_object_parameters(assembly, object_id, parameters):
@@ -341,7 +331,7 @@ def update_object_parameters(assembly, object_id, parameters):
                      if before_joint is not None else 0.)
             a,b,_=after.joint_frames(joint)
             if np.linalg.norm(a-b)>max(.5,old_gap+.05):
-                raise DocumentError(f'{joint["id"]}: the shortened line cannot reach its attachment')
+                raise DocumentError(f'{joint["id"]}: the line edit did not preserve its attachment ({np.linalg.norm(a-b):.2f} mm residual)')
             if before_joint is not None and joint_kind(joint)=='fixed':
                 old_relative=(np.linalg.inv(assembly.parts[before_joint['a']['part']].matrix)@
                               assembly.parts[before_joint['b']['part']].matrix)

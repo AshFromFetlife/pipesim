@@ -1,4 +1,4 @@
-"""Fit two named attachment ports and join their connected rigid bodies."""
+"""Join attachment ports or apply an abstract load at an attachment frame."""
 
 import copy
 
@@ -7,6 +7,44 @@ import numpy as np
 from .document import Assembly, DocumentError
 from .math3d import align_axis, pose_of
 from .snapping import move_document
+
+
+def _connect_load(assembly, a, b, kind, poses):
+    """Preserve the load's pose and express the host pivot in its local frame."""
+    before=assembly
+    if poses:
+        assembly=Assembly.from_doc(move_document(assembly,poses),assembly.base,assembly.library)
+    load_side='b' if assembly.parts[b['part']].kind=='load' and not b.get('port') else 'a'
+    host_side='a' if load_side=='b' else 'b'
+    endpoints={'a':copy.deepcopy(a),'b':copy.deepcopy(b)}
+    host=assembly.parts[endpoints[host_side]['part']]
+    load=assembly.parts[endpoints[load_side]['part']]
+    host_endpoint=endpoints[host_side]
+    if host_endpoint.get('port') and host_endpoint['port'] not in host.ports:
+        raise DocumentError(f'{host.id}: unknown port {host_endpoint["port"]}')
+    local,local_axis=host.local_frame(host_endpoint)
+    pivot,axis=host.frame(host_endpoint)
+    # This is an applied load, so a reference to a bolt hole or socket locates
+    # its pivot without occupying that physical port.
+    endpoints[host_side]={'part':host.id,'frame':{'position_mm':local.tolist(),'axis':local_axis.tolist()}}
+    endpoints[load_side]={'part':load.id,'frame':{
+        'position_mm':(load.matrix[:3,:3].T@(pivot-load.matrix[:3,3])).tolist(),
+        'axis':(load.matrix[:3,:3].T@axis).tolist()}}
+    doc=copy.deepcopy(assembly.doc)
+    existing={joint['id'] for joint in assembly.joints}
+    number=1
+    while f'joint-{number}' in existing: number+=1
+    joint={'id':f'joint-{number}','type':kind,**endpoints,
+           'metadata':{'abstract_load_attachment':True,
+                       'hardware':'Abstract load applied at the host attachment frame'}}
+    doc.setdefault('joints',[]).append(joint)
+    doc.pop('results',None);doc.pop('build_plan',None)
+    final=Assembly.from_doc(doc,assembly.base,assembly.library)
+    changed={pid:pose_of(part.matrix) for pid,part in final.parts.items()
+             if not np.allclose(part.matrix,before.parts[pid].matrix,atol=1e-7,rtol=0)}
+    return {'document':doc,'joint':joint,'poses':changed,'moved':list(changed),
+            'move':None,'gap_mm':0.,'abstract_load':True,
+            'message':f'Attached abstract load {load.id} to {host.id} at its current position'}
 
 
 def connect_ports(assembly, a, b, kind='revolute', move='auto', poses=None,
@@ -22,6 +60,12 @@ def connect_ports(assembly, a, b, kind='revolute', move='auto', poses=None,
         raise DocumentError('Choose which connected body to move')
     if not isinstance(a, dict) or not isinstance(b, dict):
         raise DocumentError('Choose two attachment ports')
+    if a.get('part') not in assembly.parts or b.get('part') not in assembly.parts:
+        raise DocumentError('Choose two existing parts')
+    if a['part']==b['part']:
+        raise DocumentError('Choose two different parts')
+    if any(assembly.parts[end['part']].kind=='load' and not end.get('port') for end in (a,b)):
+        return _connect_load(assembly,a,b,kind,poses)
     endpoints = (a, b)
     for endpoint in endpoints:
         pid, port = endpoint.get('part'), endpoint.get('port')

@@ -4,6 +4,104 @@ on:
   workflow_dispatch:
 
 jobs:
+  dynamics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Verify rope continuity and dynamic beam regressions
+        run: python -m pytest -q tests/test_swing_dynamics.py
+      - name: Fuzz physical invariants on articulated assemblies
+        env:
+          PIPESIM_DYNAMICS_FUZZ_MINUTES: '45'
+        run: python -m pytest -s -q tests/test_dynamics_fuzz.py
+      - name: Keep exact failing simulations
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dynamics-fuzz-repro
+          path: fuzz-runs/dynamics/
+
+  editor-workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e ".[dev]"
+      - run: npm ci
+      - name: Verify the workflow oracles reject injected faults
+        run: node --test --test-name-pattern='geometry workflow oracles|anchored resize workflow oracles|free assembly workflow oracles|material workflow oracles|whole assembly workflow oracles|reinforcement workflow oracles' tests/editor-interactions.test.mjs
+      - name: Exercise mixed geometry workflows through the editor and API
+        env:
+          PIPESIM_WORKFLOW_MINUTES: '45'
+        run: npm run fuzz:editor
+      - name: Keep campaign counts and exact failure replays
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-workflow-fuzz
+          path: fuzz-runs/
+
+  abstract-loads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e ".[dev]"
+      - run: npm ci
+      - name: Fuzz abstract load attachment workflows
+        env:
+          PIPESIM_LOAD_FUZZ_CASES: '128'
+          PIPESIM_LOAD_FUZZ_REPRO_DIR: '.'
+        run: node --test --test-name-pattern='seeded abstract load' tests/editor-interactions.test.mjs
+      - name: Keep failing workflows
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: abstract-load-fuzz-repro
+          path: pipesim-load-fuzz-repro-*/workflow.json
+
+  human-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -e ".[dev]"
+      - run: npm ci
+      - name: Fuzz whole-person mirror workflows through the editor and API
+        env:
+          PIPESIM_HUMAN_FUZZ_CASES: '128'
+          PIPESIM_HUMAN_FUZZ_REPRO_DIR: '.'
+        run: node --test --test-name-pattern='seeded human mirror' tests/editor-interactions.test.mjs
+      - name: Keep failing workflows
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-editor-fuzz-repro
+          path: pipesim-human-fuzz-repro-*/workflow.json
+
   draft-repair:
     runs-on: ubuntu-latest
     timeout-minutes: 30

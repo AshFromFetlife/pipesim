@@ -3,6 +3,9 @@ from __future__ import annotations
 import copy
 import itertools
 import numpy as np
+
+# Socket alignment allowance shared by placement and independent validation.
+SOCKET_AXIS_MIN_DOT = .999
 import pybullet as pb
 from scipy.spatial import ConvexHull
 from .document import Assembly, DocumentError, joint_kind, fingerprint
@@ -16,7 +19,7 @@ class CollisionWorld:
         separate=copy.copy(assembly)
         separate.joints=[]; separate.anchors=[]
         separate.doc={**assembly.doc,'environment':{'ground':False},'drives':[]}
-        self.world=World(separate,static=True)
+        self.world=World(separate,static=True,collision_only=True)
         self.assembly=assembly
         self.boxes={pid:bounds(p) for pid,p in assembly.parts.items()}
         self.positions={pid:pb.getBasePositionAndOrientation(entry[0],physicsClientId=self.world.client) for pid,entry in self.world.part_map.items()}
@@ -105,7 +108,12 @@ def support(assembly,subset=None,tolerance_mm=1.,cancelled=None):
         results.append({'parts':group,'stable':bool(stable),'basis':'ground support polygon' if len(points) else 'no support','center_of_mass_mm':com.tolist(),'margin_mm':margin,'contacts_xy_mm':points.tolist()})
     return {'stable':all(g['stable'] for g in results),'components':results,'assumptions':['Gravity acts along -Z','Declared anchors have adequate capacity','No dynamic disturbances or friction analysis']}
 
-def validate(assembly,collisions=True,build=False,cancelled=None):
+def validate(assembly,collisions=True,build=False,cancelled=None,*,geometry=True,support_checks=True):
+    """Validate an assembly; rigid previews may reuse its unchanged geometry.
+
+    Support is optional for placement checks, where gravitational stability is
+    a separate warning and cannot determine whether two sockets can connect.
+    """
     assembly.require_finished('validation')
     from .drafting import THROUGH_ENGAGEMENT_ROUNDOFF_MM, _check_cancelled
     _check_cancelled(cancelled)
@@ -126,7 +134,7 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
                 if 'size_mm' in shape and any(v<=0 for v in shape['size_mm']): issue('DIMENSION','Box extents must be positive',[p.id])
                 if shape['type']=='mesh' and 'mass_kg' not in p.definition:
                     issue('MESH_MASS','Imported meshes need an explicit mass',[p.id])
-            mesh_for_part(p)
+            if geometry: mesh_for_part(p)
         except (ValueError,KeyError,TypeError) as exc: issue('GEOMETRY',str(exc),[p.id])
     for j in assembly.joints:
         _check_cancelled(cancelled)
@@ -158,7 +166,7 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
                 issue('PROFILE_MISMATCH','Member cross-section does not match the socket bore',[a.id,b.id],joint=j['id'])
             _,member_axis=b.frame(j['b'])
             alignment=float(axis@member_axis)
-            if (abs(alignment) if port.get('through') else alignment)<.999:
+            if (abs(alignment) if port.get('through') else alignment)<SOCKET_AXIS_MIN_DOT:
                 issue('AXIS_MISMATCH','Member is not aligned with the socket axis',[a.id,b.id],joint=j['id'])
             insertion=j.get('insertion_mm',0)
             if j.get('assembly')=='radial' and port.get('assembly')!='radial':
@@ -214,8 +222,13 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
         for key in ('driver','follower'):
             if drive[key] not in knownj: issue('DRIVE_REFERENCE',f"{drive['id']} references unknown joint {drive[key]}")
         if drive.get('type')=='gt2' and abs(drive.get('pitch_mm',2)-2)>1e-8: issue('BELT_PITCH','GT2 drive must use 2 mm pitch')
-    components=support(assembly,cancelled=cancelled) if not any(i['code'] in ('MASS','GEOMETRY','DIMENSION','LENGTH','WALL') for i in issues) else {'stable':False,'components':[]}
-    if not components['stable']: issue('UNSUPPORTED','One or more rigid components lacks a gravity support polygon or world anchor',severity='warning')
+    if not support_checks:
+        components={'stable':None,'components':[],'checked':False}
+    elif any(i['code'] in ('MASS','GEOMETRY','DIMENSION','LENGTH','WALL') for i in issues):
+        components={'stable':False,'components':[]}
+    else:
+        components=support(assembly,cancelled=cancelled)
+    if support_checks and not components['stable']: issue('UNSUPPORTED','One or more rigid components lacks a gravity support polygon or world anchor',severity='warning')
     if collisions and not any(i['severity']=='error' for i in issues):
         rigid={pid:i for i,g in enumerate(assembly.rigid_groups()) for pid in g}
         joints_by_pair={}
@@ -227,6 +240,11 @@ def validate(assembly,collisions=True,build=False,cancelled=None):
                 overlaps=[c for c in contacts if c[8]*1000 < -1.]
                 if not overlaps: continue
                 pair=joints_by_pair.get(frozenset([a,b]),[])
+                # An abstract load's display envelope does not define a real
+                # mating surface with the host where that load is applied.
+                if (assembly.parts[a].kind=='load' or assembly.parts[b].kind=='load') and any(
+                        j.get('metadata',{}).get('abstract_load_attachment') for j in pair):
+                    continue
                 sockets=[j for j in pair if j.get('type')=='socket']
                 overlaps=[c for c in overlaps if not any(
                     _socket_interface_contact(assembly,j,c) for j in sockets)]

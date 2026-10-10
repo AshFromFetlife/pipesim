@@ -75,6 +75,29 @@ def mesh_for_part(part,world=False):
 def bounds(part):
     return mesh_for_part(part,True).bounds
 
+
+def collision_bounds(part, mesh_cache=None):
+    """Conservative world bounds without constructing meshes for primitives."""
+    cache={} if mesh_cache is None else mesh_cache
+    boxes=[]
+    for shape,local in collision_primitives(part):
+        kind=shape['type'];center=np.zeros(3)
+        radius=shape.get('radius_mm',shape.get('diameter_mm',0)/2)
+        if kind=='box': half=np.asarray(shape['size_mm'])/2
+        elif kind=='sphere': half=np.full(3,radius)
+        elif kind=='cylinder': half=np.array([radius,radius,shape['length_mm']/2])
+        elif kind=='capsule': half=np.array([radius,radius,shape['length_mm']/2+radius])
+        else:
+            clean={k:v for k,v in shape.items() if k not in ('position_mm','rotation_deg','axis')}
+            key=(str((part.base/shape['file']).resolve()),shape.get('scale',1))
+            if key not in cache: cache[key]=shape_mesh(clean,part.base).bounds
+            box=cache[key];center=box.mean(axis=0);half=(box[1]-box[0])/2
+        matrix=part.matrix@local
+        middle=point(matrix,center);extent=np.abs(matrix[:3,:3])@half
+        boxes.append([middle-extent,middle+extent])
+    boxes=np.asarray(boxes)
+    return np.array([boxes[:,0].min(axis=0),boxes[:,1].max(axis=0)])
+
 def lowest_z(part, matrix=None):
     """Lowest world Z, with exact curved-primitive support and actual mesh vertices."""
     world=part.matrix if matrix is None else matrix

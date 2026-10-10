@@ -77,7 +77,57 @@ def sync_profile_strength(components, parameters, library):
     return components
 
 
-def generate(parameters, library, components=None):
+def _fit_span(points, distances, start, end, *, circular=False):
+    points = points.copy();total = distances.sum();gap = np.linalg.norm(end-start)
+    fallback = np.diff(points,axis=0)/distances[:,None]
+    if gap >= total-1e-8:
+        direction = (end-start)/max(gap,1e-9)
+        return start+np.r_[0,np.cumsum(distances)][:,None]*direction
+    old_axis=points[-1]-points[0];old_axis/=max(np.linalg.norm(old_axis),1e-9)
+    straight=max(np.linalg.norm(np.cross(p-points[0],old_axis)) for p in points)<1e-5
+    if (straight or circular) and len(distances)>1 and np.ptp(distances)<1e-7:
+        # An exact circular seed distributes a new bend across a long,
+        # straight run. Iterating from a taut line can create a local kink.
+        from scipy.optimize import brentq
+        count=len(distances);axis=(end-start)/max(gap,1e-9)
+        if gap<1e-9: axis=old_axis if np.linalg.norm(old_axis)>1e-7 else np.array([0.,0.,1.])
+        sideways=points[len(points)//2]-(start+end)/2;sideways-=axis*(sideways@axis)
+        if np.linalg.norm(sideways)<1e-7:
+            sideways=np.array([0.,0.,-1.]);sideways-=axis*(sideways@axis)
+        if np.linalg.norm(sideways)<1e-7: sideways=np.array([1.,0,0])
+        sideways/=np.linalg.norm(sideways)
+        step=brentq(lambda v: distances[0]*np.sin(count*v/2)/np.sin(v/2)-gap,1e-10,2*np.pi/count)
+        angles=(np.arange(count)-(count-1)/2)*step
+        segments=distances[:,None]*(np.cos(angles)[:,None]*axis-np.sin(angles)[:,None]*sideways)
+        return start+np.vstack((np.zeros(3),np.cumsum(segments,axis=0)))
+    # A shortened, perfectly straight chain needs a bend to leave the
+    # collinear singularity. Keep the perturbation deterministic.
+    progress=np.linspace(0,1,len(points))[:,None]
+    points+=(1-progress)*(start-points[0])+progress*(end-points[-1])
+    axis = (end-start)/max(gap,1e-9)
+    if len(points)>2 and max(np.linalg.norm(np.cross(p-start,axis)) for p in points)<1e-5:
+        sideways = np.cross(axis, [0,1,0] if abs(axis[1])<.9 else [1,0,0])
+        if np.linalg.norm(sideways)<1e-9: sideways=np.array([1.,0,0])
+        sideways/=np.linalg.norm(sideways)
+        points += np.sin(np.linspace(0,np.pi,len(points)))[:,None]*sideways*max(math.sqrt(max(0,total*total-gap*gap))*.6,1.)
+    for _ in range(100):
+        points[-1] = end
+        for i in range(len(distances)-1,-1,-1):
+            vector=points[i]-points[i+1];norm=np.linalg.norm(vector)
+            points[i]=points[i+1]+(vector/norm if norm>1e-9 else -fallback[i])*distances[i]
+        points[0] = start
+        for i, distance in enumerate(distances):
+            vector=points[i+1]-points[i];norm=np.linalg.norm(vector)
+            points[i+1]=points[i]+(vector/norm if norm>1e-9 else fallback[i])*distance
+        if np.linalg.norm(points[-1]-end)<1e-6: break
+    if np.linalg.norm(points[-1]-end)>1e-6 and len(distances)>1 and np.ptp(distances)<1e-7:
+        # Slow convergence near a straight configuration is not an impossible
+        # span. Equal segments have an exact circular-arc construction.
+        return _fit_span(points,distances,start,end,circular=True)
+    return points
+
+
+def generate(parameters, library, components=None, *, constraints=()):
     """Grow at the free end; retained links keep their edited geometry and pose."""
     from .math3d import align_axis
     info = dimensions(parameters, library)
@@ -106,6 +156,29 @@ def generate(parameters, library, components=None):
                 step = target-nodes[-1]
                 if np.linalg.norm(step) < 1e-9: step = direction
                 nodes.append(nodes[-1]+step/np.linalg.norm(step)*info['pitch_mm'])
+            # Chords across bends are shorter than their centreline stations.
+            # Normalizing each chord independently accumulates endpoint drift;
+            # changing material must instead redistribute the available slack.
+            end=target
+            if (abs(info['requested_length_mm']-old['requested_length_mm'])<1e-7 and
+                    np.linalg.norm(old_nodes[-1]-old_nodes[0])<=info['length_mm']+1e-7):
+                end=old_nodes[-1]
+            pins={0:np.asarray(nodes[0]),count:np.asarray(end)}
+            for distance,position,direction in constraints:
+                station=np.clip(distance/info['pitch_mm'],0,count)
+                index=min(count-1,max(0,int(math.floor(station))))
+                fraction=station-index
+                if fraction<1e-8:pins[index]=position
+                elif fraction>1-1e-8:pins[index+1]=position
+                else:
+                    # An interior attachment remains on a rigid link, not on
+                    # an invented hinge. Hold that link's tangent and fit the
+                    # flexible spans on either side to its two endpoints.
+                    pins[index]=position-direction*fraction*info['pitch_mm']
+                    pins[index+1]=position+direction*(1-fraction)*info['pitch_mm']
+            nodes=np.asarray(nodes)
+            for left,right in zip(sorted(pins),sorted(pins)[1:]):
+                nodes[left:right+1]=_fit_span(nodes[left:right+1],np.full(right-left,info['pitch_mm']),pins[left],pins[right])
             parts = []
             for i in range(1, count+1):
                 matrix = np.eye(4)
@@ -179,7 +252,24 @@ def resize(assembly, object_id, parameters):
     instance = next(o for o in document['objects'] if o['id'] == object_id)
     old_info = dimensions(instance.get('parameters', {}), assembly.library)
     new_info = dimensions(parameters, assembly.library)
-    generated = generate(parameters, assembly.library, instance.get('components'))
+    constraints=[]
+    if old_info['link_catalog']!=new_info['link_catalog']:
+        local_from_world=np.linalg.inv(transform(instance.get('pose')))
+        for joint in document.get('joints',[]):
+            for side in ('a','b'):
+                endpoint=joint[side];pid=endpoint['part']
+                if not pid.startswith(object_id+'/link-'):continue
+                part=assembly.parts[pid];local,_=part.local_frame(endpoint)
+                fraction=float((local-old_info['b'])@(old_info['a']-old_info['b'])/old_info['pitch_mm']**2)
+                number=int(pid.rsplit('-',1)[1])
+                distance=(new_info['length_mm'] if number==old_info['count'] and fraction>1-1e-6 else
+                          (number-1+fraction)*old_info['pitch_mm'])
+                if distance>new_info['length_mm']+1e-7:continue
+                center=old_info['b']+fraction*(old_info['a']-old_info['b'])
+                matrix=local_from_world@part.matrix
+                direction=matrix[:3,:3]@(old_info['a']-old_info['b'])/old_info['pitch_mm']
+                constraints.append((distance,point(matrix,center),direction))
+    generated = generate(parameters, assembly.library, instance.get('components'),constraints=constraints)
     members = {object_id+'/'+p['id'] for p in generated['parts']}
     removed = {p for p in assembly.parts if p.startswith(object_id+'/')}-members
     instance['parameters'] = copy.deepcopy(parameters)
@@ -407,50 +497,6 @@ def pose_chain(assembly, instance, selected, desired, mode='translate', endpoint
         a, b = (links[index].local_frame({'port': p})[0] for p in ('a', 'b'))
         target = nodes[index]+desired[:3,:3]@(a-b)
 
-    def solve_segment(points, distances, start, end):
-        points = points.copy();total = distances.sum();gap = np.linalg.norm(end-start)
-        fallback = np.diff(points,axis=0)/distances[:,None]
-        if gap >= total-1e-8:
-            direction = (end-start)/max(gap,1e-9)
-            return start+np.r_[0,np.cumsum(distances)][:,None]*direction
-        old_axis=points[-1]-points[0];old_axis/=max(np.linalg.norm(old_axis),1e-9)
-        straight=max(np.linalg.norm(np.cross(p-points[0],old_axis)) for p in points)<1e-5
-        if straight and len(distances)>1 and np.ptp(distances)<1e-7:
-            # An exact circular seed distributes a new bend across a long,
-            # straight run. Iterating from a taut line can create a local kink.
-            from scipy.optimize import brentq
-            count=len(distances);axis=(end-start)/max(gap,1e-9)
-            if gap<1e-9: axis=old_axis
-            sideways=points[len(points)//2]-(start+end)/2;sideways-=axis*(sideways@axis)
-            if np.linalg.norm(sideways)<1e-7:
-                sideways=np.array([0.,0.,-1.]);sideways-=axis*(sideways@axis)
-            if np.linalg.norm(sideways)<1e-7: sideways=np.array([1.,0,0])
-            sideways/=np.linalg.norm(sideways)
-            step=brentq(lambda v: distances[0]*np.sin(count*v/2)/np.sin(v/2)-gap,1e-10,2*np.pi/count)
-            angles=(np.arange(count)-(count-1)/2)*step
-            segments=distances[:,None]*(np.cos(angles)[:,None]*axis-np.sin(angles)[:,None]*sideways)
-            return start+np.vstack((np.zeros(3),np.cumsum(segments,axis=0)))
-        # A shortened, perfectly straight chain needs a bend to leave the
-        # collinear singularity. Keep the perturbation deterministic.
-        progress=np.linspace(0,1,len(points))[:,None]
-        points+=(1-progress)*(start-points[0])+progress*(end-points[-1])
-        axis = (end-start)/max(gap,1e-9)
-        if len(points)>2 and max(np.linalg.norm(np.cross(p-start,axis)) for p in points)<1e-5:
-            sideways = np.cross(axis, [0,1,0] if abs(axis[1])<.9 else [1,0,0])
-            if np.linalg.norm(sideways)<1e-9: sideways=np.array([1.,0,0])
-            sideways/=np.linalg.norm(sideways)
-            points += np.sin(np.linspace(0,np.pi,len(points)))[:,None]*sideways*max(math.sqrt(max(0,total*total-gap*gap))*.6,1.)
-        for _ in range(100):
-            points[-1] = end
-            for i in range(len(distances)-1,-1,-1):
-                vector=points[i]-points[i+1];norm=np.linalg.norm(vector)
-                points[i]=points[i+1]+(vector/norm if norm>1e-9 else -fallback[i])*distances[i]
-            points[0] = start
-            for i, distance in enumerate(distances):
-                vector=points[i+1]-points[i];norm=np.linalg.norm(vector)
-                points[i+1]=points[i]+(vector/norm if norm>1e-9 else fallback[i])*distance
-            if np.linalg.norm(points[-1]-end)<1e-6: break
-        return points
 
     actual = assembly;blocked = None
     for fraction in (1., .5, .25, .125, .0625, .03125, .015625):
@@ -471,7 +517,7 @@ def pose_chain(assembly, instance, selected, desired, mode='translate', endpoint
         constraints = {**handles, **pinned}
         result=nodes.copy();ordered=sorted(constraints)
         for left,right in zip(ordered,ordered[1:]):
-            result[left:right+1]=solve_segment(nodes[left:right+1],lengths[left:right],constraints[left],constraints[right])
+            result[left:right+1]=_fit_span(nodes[left:right+1],lengths[left:right],constraints[left],constraints[right])
         first,last=ordered[0],ordered[-1]
         result[first]=constraints[first];result[last]=constraints[last]
         # Unconstrained tails follow the bend without a variable per joint.

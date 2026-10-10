@@ -105,7 +105,7 @@ function setPose(object,pose={}){object.position.fromArray(pose.position_mm||[0,
 function getPose(object){const e=new THREE.Euler().setFromQuaternion(object.quaternion,'ZYX');return {position_mm:object.position.toArray().map(v=>+v.toFixed(5)),rotation_deg:[e.x,e.y,e.z].map(v=>+THREE.MathUtils.radToDeg(v).toFixed(5))};}
 function status(text){$('#status-text').textContent=text;}
 function toast(text,error=false){clearTimeout(toastTimer);const el=$('#toast');el.textContent=text;el.className=error?'error':'';toastTimer=setTimeout(()=>el.classList.add('hidden'),error?9000:4500);}
-const EDITOR_API_VERSION=25;
+const EDITOR_API_VERSION=26;
 let serverApiVersion=null;
 const SERVER_UPDATE_MESSAGE=`The PipeSim server at ${window.location.host} is older than this editor. Save your work, stop the process using that address, start the server again, then reload this tab.`;
 const EDITOR_UPDATE_MESSAGE='This PipeSim tab is older than the running server. Save any unsaved work, then reload this tab.';
@@ -521,6 +521,7 @@ function attachGizmo(){
   if(instance){
     setPose(wholeObjectHandle,instance.pose);
     wholeObjectHandle.position.copy(partObjects.get(instance.id+'/pelvis')?.position||selected.position);wholeObjectHandle.updateMatrix();
+    if(state.tool==='translate'&&instance.symmetry)gizmo[instance.symmetry.axis==='x'?'showX':'showY']=false;
     gizmo.attach(wholeObjectHandle);gizmo.setMode(state.tool);return;
   }
   const group=state.scene.groups.find(g=>g.includes(state.selected))||[state.selected];
@@ -1118,12 +1119,19 @@ function snapSettingsDialog(){
       <div class="fields"><div class="field"><label>SECOND HANDLE · GROW</label><input id="pref-resize-key-2-grow" maxlength="1" value="${esc(preferences.resizeHandle2GrowKey)}"></div>
       <div class="field"><label>SECOND HANDLE · SHRINK</label><input id="pref-resize-key-2-shrink" maxlength="1" value="${esc(preferences.resizeHandle2ShrinkKey)}"></div></div>
       <p>The first and second handles correspond to the two visible ends. Shift also applies to keyboard resizing. A flexible line changes by at least one full segment per keypress.</p></section>
-    <section><h3>RENDER &amp; SIMULATION</h3><div class="fields"><div class="field"><label>IMAGE WIDTH · px</label><input id="pref-width" type="number" min="320" max="4096" step="1" value="${preferences.renderWidth}"></div>
+    <section><h3>RENDER</h3><div class="fields"><div class="field"><label>IMAGE WIDTH · px</label><input id="pref-width" type="number" min="320" max="4096" step="1" value="${preferences.renderWidth}"></div>
       <div class="field"><label>IMAGE HEIGHT · px</label><input id="pref-height" type="number" min="240" max="4096" step="1" value="${preferences.renderHeight}"></div></div>
       <div class="fields"><div class="field"><label>LIGHTING</label><select id="pref-light">${options([['studio','Studio'],['technical','Technical'],['flat','Flat']],preferences.renderLighting)}</select></div>
       <div class="field"><label>BACKGROUND</label><select id="pref-background">${options([['#edf1f3','Soft grey'],['#ffffff','White'],['transparent','Transparent']],preferences.renderBackground)}</select></div></div>
-      <div class="fields"><div class="field"><label>SIMULATION · SECONDS</label><input id="pref-sim-seconds" type="number" min="0.1" max="30" step="any" value="${preferences.simulationSeconds}"></div>
-      <div class="field"><label>CHAIN LINKS PER BODY</label><input id="pref-chain-links" type="number" min="1" max="1000" step="1" value="${preferences.simulationChainLinks}"></div></div>
+      </section><section><h3>SIMULATION</h3><div class="fields"><div class="field"><label for="pref-sim-seconds">DEFAULT DURATION · SECONDS</label><input id="pref-sim-seconds" type="number" min="0.1" max="30" step="any" value="${preferences.simulationSeconds}"></div>
+      <div class="field"><label for="pref-sim-mode">DEFAULT MODE</label><select id="pref-sim-mode">${options([['preview','Preview'],['full','Full physics']],preferences.simulationMode)}</select></div></div>
+      <p>Preview approximates motion more quickly. Full physics uses individual links and finer beam and solver settings. Recordings remember which mode produced them.</p>
+      <h4>PREVIEW QUALITY</h4><div class="fields"><div class="field"><label for="pref-chain-links">MAX LINKS PER RIGID BODY</label><input id="pref-chain-links" type="number" min="1" max="1000" step="1" value="${preferences.simulationChainLinks}"></div>
+      <div class="field"><label for="pref-preview-beam">BEAM SEGMENT LENGTH · mm</label><input id="pref-preview-beam" type="number" min="400" max="2000" step="1" value="${preferences.previewBeamSegmentMm}"></div></div>
+      <p>Larger groups and longer beam segments reduce detail. Groups stay smaller where needed to preserve flexibility and bends. Members shorter than two beam segments stay rigid in Preview; longer members can bend. Attachments, mass, and rope length remain represented; rupture locations are approximate.</p>
+      <div class="fields"><div class="field"><label for="pref-preview-steps">PHYSICS STEPS PER SECOND</label><input id="pref-preview-steps" type="number" min="240" max="4000" step="1" value="${preferences.previewStepsPerSecond}"></div>
+      <div class="field"><label for="pref-preview-iterations">STARTING SOLVER ITERATIONS</label><input id="pref-preview-iterations" type="number" min="40" max="1000" step="1" value="${preferences.previewSolverIterations}"></div></div>
+      <p>Higher values spend more time resolving motion and contacts. Preview increases contact effort if joints drift, and retries difficult cases with Full physics when needed. These four settings apply only to Preview.</p>
       <div class="single-field"><label>YELLOW DEFLECTION WARNING · mm</label><input id="pref-deflection-warning" type="number" min="0.01" max="100000" step="any" value="${preferences.deflectionWarningMm}"></div>
       <p>In validation and playback, red marks predicted yielding or possible fracture. Yellow marks displacement above this threshold.</p></section>
   </div>`);
@@ -1148,7 +1156,9 @@ function snapSettingsDialog(){
       defaultHumanMassKg:$('#pref-human-mass').value,defaultChainLengthMm:$('#pref-chain-length').value,
       renderWidth:$('#pref-width').value,renderHeight:$('#pref-height').value,renderLighting:$('#pref-light').value,
       renderBackground:$('#pref-background').value,simulationSeconds:$('#pref-sim-seconds').value,
-      simulationChainLinks:$('#pref-chain-links').value,deflectionWarningMm:$('#pref-deflection-warning').value,connectionLocked:$('#pref-lock').checked,
+      simulationChainLinks:$('#pref-chain-links').value,simulationMode:$('#pref-sim-mode').value,
+      previewStepsPerSecond:$('#pref-preview-steps').value,previewSolverIterations:$('#pref-preview-iterations').value,
+      previewBeamSegmentMm:$('#pref-preview-beam').value,deflectionWarningMm:$('#pref-deflection-warning').value,connectionLocked:$('#pref-lock').checked,
       connectionToleranceMm:$('#pref-tolerance').value,resizeConnectorMode:$('#pref-resize-mode').value,
       resizeShiftMode:$('#pref-resize-shift').value,resizeAutoConnect:$('#pref-resize-auto').checked,
       resizeCaptureMm:$('#pref-resize-capture').value,resizeCaptureDeg:$('#pref-resize-angle').value,
@@ -1159,6 +1169,7 @@ function snapSettingsDialog(){
     if(persist)next=saveSnapDefaults(window.localStorage,next);
     state.snapSettings=next;state.snap=next.gridEnabled;state.connectionSnap=next.connectionsEnabled;updateSnapControls();clearSnapPreview();closeModal();
     preferences=persist?savePreferences(window.localStorage,chosen):chosen;
+    state.simulationMode=preferences.simulationMode;
     grid.visible=preferences.gridVisible;$('#grid-button').classList.toggle('active',grid.visible);
     floor.visible=preferences.floorVisible;camera.fov=preferences.cameraFovDeg;camera.updateProjectionMatrix();
     state.ports=preferences.portsVisible;$('#ports-button').classList.toggle('active',state.ports);updatePorts();
@@ -1303,6 +1314,25 @@ async function finishPlacement(){
   if(!matches.length){await placeWithoutConnection(poses,drag.revision);return;}
   await offerConnection(matches,poses,drag.revision);
 }
+let connectionSearchJob=null;
+function cancelConnectionSearch(){
+  const job=connectionSearchJob;if(!job||job.cancelled)return;
+  job.cancelled=true;api('connection-cancel',{document:null,job_id:job.id}).catch(()=>{});
+  status('Cancelling connection search…');
+}
+$('#cancel-connection-search').onclick=cancelConnectionSearch;
+async function searchConnection(options){
+  cancelConnectionSearch();
+  const job={id:Date.now().toString(36)+Math.random().toString(36).slice(2),cancelled:false};
+  connectionSearchJob=job;$('#cancel-connection-search').classList.remove('hidden');
+  try{
+    const result=await api('snap-options',{...options,job_id:job.id});
+    if(job.cancelled||result.cancelled){const error=new Error('Connection search cancelled');error.name='ConnectionCancelled';throw error;}
+    return result;
+  }finally{
+    if(connectionSearchJob===job){connectionSearchJob=null;$('#cancel-connection-search').classList.add('hidden');}
+  }
+}
 async function offerConnection(matches,poses={},revision=state.revision,recordUndo=true,movingId=null){
   if(matches[0]?.kind==='hinge'){
     state.placementPending=true;gizmo?.detach();status('Aligning hinge bolt holes…');
@@ -1341,12 +1371,12 @@ async function offerConnection(matches,poses={},revision=state.revision,recordUn
   }
   state.placementPending=true;gizmo?.detach();status('Checking connection and movement…');
   try{
-    const data=await api('snap-options',{...matches[0],poses});
+    const data=await searchConnection({...matches[0],poses,first_valid:clearConnectionIntent(matches)});
     if(revision!==state.revision){restorePlacement();return;}
     const choice=data.options.find(o=>o.move===data.recommended);
     if(clearConnectionIntent(matches)&&choice?.available&&!choice.requires_preview){await acceptPlacement(choice,revision,recordUndo);toast('Connected '+matches[0].connector+' to '+matches[0].member+'.');status('Connection created');return;}
     connectionReview(matches,poses,revision,data,null,recordUndo);
-  }catch(e){restorePlacement();toast(e.message,true);}
+  }catch(e){restorePlacement();if(e.name==='ConnectionCancelled')status(e.message);else toast(e.message,true);}
 }
 function connectionReview(matches,poses={},revision=state.revision,initial=null,replaceJoint=null,recordUndo=true){
   state.placementPending=true;gizmo?.detach();let result=initial,chosen=null,requestVersion=0,previewRenderer=null,previewControls=null,previewObjects=null;
@@ -1405,6 +1435,7 @@ function connectionReview(matches,poses={},revision=state.revision,initial=null,
     drawPreview();
   }
   async function refresh(force=false){
+    cancelConnectionSearch();
     const request=++requestVersion;chosen=null;$('#modal-actions .primary').disabled=true;forceButton.disabled=true;clearSnapPreview();$('#snap-adjustments').innerHTML='';
     const match=matches[+$('#snap-target').value];const socket=state.scene.parts.find(p=>p.id===match.connector).ports[match.port];
     const field=$('#snap-station')||$('#snap-insertion');
@@ -1412,7 +1443,7 @@ function connectionReview(matches,poses={},revision=state.revision,initial=null,
     for(const input of fitControls.querySelectorAll('input'))if(!input.checkValidity()){input.reportValidity();forceButton.disabled=false;$('#snap-review-status').textContent='Choose valid fit limits before searching.';return;}
     $('#snap-review-status').textContent=force?'Searching hinge rotations and slides together… You can cancel while the search runs.':'Checking available movement…';
     try{
-      const data=await api('snap-options',{...match,poses,force,replace_joint:replaceJoint,locked:$('#snap-lock').checked,
+      const data=await searchConnection({...match,poses,force,replace_joint:replaceJoint,locked:$('#snap-lock').checked,
         tolerance_mm:+$('#snap-tolerance').value,force_options:{unlock_connectors:+$('#snap-unlock-count').value,resize_members:+$('#snap-resize-count').value,max_length_change_mm:+$('#snap-resize-mm').value},
         ...(socket.through?{at_mm:+$('#snap-station').value}:{end:$('#snap-end').value,insertion_mm:+$('#snap-insertion').value})});
       if(request!==requestVersion||session!==reviewVersion||revision!==state.revision)return;
@@ -1421,11 +1452,11 @@ function connectionReview(matches,poses={},revision=state.revision,initial=null,
   }
   function settings(){
     const match=matches[+$('#snap-target').value],fitting=state.scene.parts.find(p=>p.id===match.connector),member=state.scene.parts.find(p=>p.id===match.member),socket=fitting.ports[match.port];
-    $('#snap-settings').innerHTML=socket.through?`<div class="single-field"><label for="snap-station">SOCKET CENTRE FROM PIPE START · mm</label><input id="snap-station" type="number" min="${socket.engagement_mm/2}" max="${member.length_mm-socket.engagement_mm/2}" step="any" value="${match.at_mm??member.length_mm/2}"></div><p>${Number((member.length_mm/2).toFixed(4))} mm centres this fitting on a ${Number(member.length_mm.toFixed(4))} mm pipe. The pipe keeps its cut length.</p>`:`<div class="single-field"><label for="snap-end">PIPE END</label><select id="snap-end"><option value="start">Start</option><option value="end">End</option></select></div><div class="single-field"><label for="snap-insertion">DEPTH INSIDE SOCKET · mm</label><input id="snap-insertion" type="number" min="${socket.min_engagement_mm}" max="${socket.engagement_mm}" step="any" value="${match.insertion_mm??Math.min(30,socket.engagement_mm*.8)}"></div>`;
+    $('#snap-settings').innerHTML=socket.through?`<div class="single-field"><label for="snap-station">SOCKET CENTRE FROM PIPE START · mm</label><input id="snap-station" type="number" min="${socket.engagement_mm/2}" max="${member.length_mm-socket.engagement_mm/2}" step="any" value="${match.at_mm??member.length_mm/2}"></div><p>${Number((member.length_mm/2).toFixed(4))} mm centres this fitting on a ${Number(member.length_mm.toFixed(4))} mm pipe. The pipe keeps its cut length.</p>`:`<div class="single-field"><label for="snap-end">PIPE END</label><select id="snap-end"><option value="start">Start</option><option value="end">End</option></select></div><div class="single-field"><label for="snap-insertion">DEPTH INSIDE SOCKET · mm</label><input id="snap-insertion" type="number" min="${socket.min_engagement_mm}" max="${socket.engagement_mm}" step="any" value="${Number((match.insertion_mm??Math.min(30,socket.engagement_mm*.8)).toFixed(4))}"></div>`;
     if($('#snap-end'))$('#snap-end').value=match.end||'start';
     $$('#snap-settings input, #snap-settings select').forEach(e=>e.onchange=()=>refresh());
   }
-  reviewCleanup=()=>{reviewVersion++;requestVersion++;previewControls?.dispose();if(previewObjects)dispose(previewObjects);previewRenderer?.dispose();previewRenderer=null;$('#modal').classList.remove('connection-modal');restorePlacement();};
+  reviewCleanup=()=>{cancelConnectionSearch();reviewVersion++;requestVersion++;previewControls?.dispose();if(previewObjects)dispose(previewObjects);previewRenderer?.dispose();previewRenderer=null;$('#modal').classList.remove('connection-modal');restorePlacement();};
   $('#snap-target').onchange=()=>{settings();refresh();};$('#snap-move').onchange=chooseMovement;$('#snap-lock').onchange=()=>refresh();
   const old=state.doc.joints?.find(j=>j.id===replaceJoint);if(old){$('#snap-lock').checked=!!old.locked;$('#snap-tolerance').value=old.fit_tolerance_mm??preferences.connectionToleranceMm;}
   settings();if(initial)showResult(initial);else refresh();
@@ -2262,7 +2293,7 @@ function renderObjectInspector(instance,selectedPart){
       <option value="" ${current?'':'selected'}>Free pose</option>
       ${current?`<option value="current" selected>Current line · ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm</option>`:''}
       ${planes.map(({group,plane},index)=>`<option value="${index}">${esc(group.id)} · ${esc(plane.axis.toUpperCase())} = ${esc(plane.offset_mm)} mm</option>`).join('')}
-    </select></div><p>${current?`Centerline fixed at ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm and ${current.axis==='x'?'Y':'X'} = ${esc(current.line_offset_mm)} mm. The whole person moves vertically and can rotate while its left-right axis stays perpendicular to the mirror; arms and legs pose in mirrored pairs.`:
+    </select></div><p>${current?`Centerline stays in the mirror plane at ${esc(current.axis.toUpperCase())} = ${esc(current.offset_mm)} mm. The whole person moves along the plane and vertically, and can rotate while its left-right axis stays perpendicular to the mirror; arms and legs pose in mirrored pairs.`:
       'Choose a vertical draft mirror. The current position sets the centerline; mirrored arms and legs will pose together.'}</p>
       ${planes.length?'':'<p>Add an X or Y draft mirror plane to use this constraint.</p>'}
       ${state.mirrorPoseError?.startsWith(instance.id+':')?`<p class="issue error">${esc(state.mirrorPoseError)}</p>`:''}`;
@@ -2272,7 +2303,7 @@ function renderObjectInspector(instance,selectedPart){
       const choice=planes[Number(e.target.value)];
       objectEdit('human-symmetry',{object:instance.id,...(e.target.value===''?{}:{group:choice.group.id,plane:choice.plane.id})});
     };
-    if(current)$$('[data-pose="position_mm"]').forEach(input=>{if(+input.dataset.axis<2)input.disabled=true;});
+    if(current)$$('[data-pose="position_mm"]').forEach(input=>{if(+input.dataset.axis===(current.axis==='x'?0:1))input.disabled=true;});
   }
   if(chain){
     $('#inspector [data-object-mode="whole"]').textContent='Move whole line';
@@ -2320,7 +2351,7 @@ function renderObjectInspector(instance,selectedPart){
 }
 
 function renderChecks(){const result=state.checks,analysis=state.analysis;$('#inspector').innerHTML=`<div class="inspect-section"><div class="report-head"><div class="report-symbol ${result&&!result.valid?'error':''}">${result?(result.valid?'✓':'!'):'◇'}</div><div><h2>${result?(result.valid?'Geometry checked':'Review connections'):'Check the design'}</h2><div class="subtle">Sockets · alignment · collisions</div></div></div><button class="inspect-action" data-run="validate">${state.busy?'Working…':'Run validation'}</button>${result?`<div class="metric-cards"><div class="metric"><strong>${result.summary.errors}</strong><span>ERRORS</span></div><div class="metric"><strong>${result.summary.warnings}</strong><span>ADVISORIES</span></div></div>`:''}</div><div class="inspect-section"><h3>STRUCTURAL RESPONSE</h3><p>3D beam analysis of the current load case. Review the material and connector assumptions with the results.</p><button class="inspect-action secondary" data-run="analyse">Calculate stress & deflection</button>${analysis?`<p><b>${esc(analysis.status)}</b></p>${analysis.message?'<p>'+esc(analysis.message)+'</p>':''}${(analysis.members||[]).map(m=>`<button class="issue" data-result-part="${esc(m.part)}"><div class="issue-code">${esc(m.part)}</div><div class="property-row"><span>Peak stress</span><strong>${m.max_von_mises_mpa.toFixed(2)} MPa</strong></div><div class="property-row"><span>Deflection</span><strong>${m.max_displacement_mm.toFixed(3)} mm</strong></div></button>`).join('')}<p>Model results · unverified strength data remains unknown.</p>`:''}</div>${result?'<div class="inspect-section"><h3>FINDINGS</h3>'+result.issues.map((i,index)=>`<button class="issue ${i.severity}" data-result-finding="${index}" data-result-part="${esc(i.parts?.[0]||'')}"><div class="issue-code">${esc(i.code)}</div><p>${esc(i.message)}</p></button>`).join('')+'</div>':''}`;bindOperations();}
-function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label>DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="1" value="${state.simulationOptions?.duration||Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||preferences.simulationSeconds))}"></div><div class="single-field"><label for="sim-chain-links">Chain links per rigid body</label><input id="sim-chain-links" type="number" min="1" max="1000" step="1" value="${state.simulationOptions?.chain_links_per_body||preferences.simulationChainLinks}" ${state.busy?'disabled':''}></div><p>1 keeps full flexibility. Higher values make groups of links rigid for faster simulation. Attachment links stay flexible.</p><button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${r?`<div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><button class="inspect-action secondary" id="render-recording-video">Render recording as video</button><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(c.id)}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part||e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$('#fit-human').onclick=fitDialog;if($('#render-recording-video'))$('#render-recording-video').onclick=videoRenderDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;updateSimulationProgress();}
+function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label>DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="1" value="${state.simulationOptions?.duration||Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||preferences.simulationSeconds))}"></div><div class="single-field"><label for="sim-mode">SIMULATION MODE</label><select id="sim-mode" ${state.busy?'disabled':''}>${[['preview','Preview'],['full','Full physics']].map(([value,label])=>`<option value="${value}" ${(state.simulationMode||preferences.simulationMode)===value?'selected':''}>${label}</option>`).join('')}</select></div><p>Preview quality is configured in Preferences. Full physics retains individual links and finer beam detail.</p><button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${r?`<p id="simulation-recording-mode">${r.mode==='preview'?(r.quality?.resolved_mode==='full'?'Preview recording - automatically refined to Full physics':'Preview recording - motion and damage are approximate'):'Full physics recording'}</p><div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><button class="inspect-action secondary" id="render-recording-video">Render recording as video</button><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(c.id)}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part||e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$('#sim-mode').onchange=()=>{state.simulationMode=$('#sim-mode').value;};$('#fit-human').onclick=fitDialog;if($('#render-recording-video'))$('#render-recording-video').onclick=videoRenderDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;updateSimulationProgress();}
 function renderBuild(){const p=state.plan;$('#inspector').innerHTML=`<div class="inspect-section"><h2>A plan you can build.</h2><p>Find an insertion order with clear paths and stable intermediate structures.</p><button class="inspect-action" data-run="plan">${state.busy?'Checking insertion paths…':'Find assembly order'}</button>${p?`<div class="report-head" style="margin-top:17px"><div class="report-symbol ${p.status==='buildable'?'':'warn'}">${p.status==='buildable'?'✓':'?'}</div><div><b>${esc(p.status)}</b><div class="subtle">${p.steps.length} assembly steps</div></div></div>${p.reason?'<p>'+esc(p.reason)+'</p>':''}`:''}</div>${p?.status==='buildable'?`<div class="inspect-section"><h3>STEP ${state.step+1} OF ${p.steps.length}</h3><p>${esc(p.steps[state.step].instruction)}</p>${p.steps[state.step].fasten.map(f=>'<p>↳ '+esc(f.action)+'</p>').join('')}<button class="inspect-action" id="export-build">Export illustrated build book ↗</button></div><div class="inspect-section"><h3>ASSEMBLY ORDER</h3>${p.steps.map((s,i)=>`<button class="build-step ${i===state.step?'active':''}" data-step="${i}"><span>${String(s.number).padStart(2,'0')}</span>${esc(s.part)}</button>`).join('')}</div>`:''}`;bindOperations();$$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));if($('#export-build'))$('#export-build').onclick=()=>exportBuild();}
 function findingReference(button){
   const finding=state.checks?.issues[Number(button.dataset.resultFinding)]||{};
@@ -2408,7 +2439,7 @@ async function generateSimulation(options){
     throw error;
   }
 }
-async function run(operation){if(state.busy)return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value||3),chain_links_per_body:Number($('#sim-chain-links')?.value||1),deflection_warning_mm:preferences.deflectionWarningMm}:{};if(operation==='simulate'){state.simulationError=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
+async function run(operation){if(state.busy)return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value||3),mode:state.simulationMode||preferences.simulationMode,chain_links_per_body:(state.simulationMode||preferences.simulationMode)==='preview'?preferences.simulationChainLinks:1,preview_steps_per_second:preferences.previewStepsPerSecond,preview_solver_iterations:preferences.previewSolverIterations,preview_beam_segment_mm:preferences.previewBeamSegmentMm,deflection_warning_mm:preferences.deflectionWarningMm}:{};if(operation==='simulate'){state.simulationError=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
   try{const result=operation==='simulate'?await generateSimulation(extra):await api(operation,extra);if(!result)return;if(revision!==state.revision){toast('The design changed during the calculation. Run it again for the current design.');return;}state.doc.results||={};state.doc.results[operation]=result;state.dirty=true;
     if(operation==='validate'){state.checks=result;status(result.valid?'Geometry checks passed':'Design has '+result.summary.errors+' errors');}
     if(operation==='analyse'){state.analysis=result;status('Structural analysis: '+result.status);applyStructuralColors();}
@@ -2724,6 +2755,8 @@ function boundedPlacementDelta(drag,delta){
   const target=origin.clone().add(delta).clamp(drag.placement.bounds.min,drag.placement.bounds.max);
   target.z=Math.max(Math.min(0,origin.z),target.z);
   const result=target.sub(origin);
+  const symmetry=drag.objectId&&state.doc.objects?.find(object=>object.id===drag.objectId)?.symmetry;
+  if(symmetry)result[symmetry.axis]=0;
   return draftRun(state.doc,drag.id)?mirrorConstrainedDelta(drag.group,result):result;
 }
 function nearbyGeometryPoint(context,exact=true){
@@ -2924,6 +2957,7 @@ window.addEventListener('blur',()=>{if(localRotationHeld){localRotationHeld=fals
 document.addEventListener('keydown',e=>{
   const key=e.key.toLowerCase();
   if((e.ctrlKey||e.metaKey)&&key==='o'){e.preventDefault();if(!$('#modal').open)chooseDesignFile();return;}
+  if(e.key==='Escape'&&connectionSearchJob){e.preventDefault();cancelConnectionSearch();if($('#modal').open)closeModal();return;}
   if(e.key==='Escape'&&dragStart){e.preventDefault();cancelPlacement();setTool('select');return;}
   if(e.key==='Escape'&&resizeDrag){e.preventDefault();clearResizeDrag();return;}
   if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)||document.activeElement?.isContentEditable||$('#modal').open)return;
@@ -3063,18 +3097,18 @@ function jointCreateDialog(){
         Math.abs((first.diameter_mm||0)-(port.diameter_mm||0))<=1)
       .map(([name,port])=>({part,name,firstName,distance:position(selected,first).distanceTo(position(part,port))})));
   }).sort((a,b)=>a.distance-b.distance)[0];
-  const other=complement?.part||parts.find(part=>part.id!==selected.id);
+  const other=complement?.part||parts.find(part=>part.id!==selected.id&&part.kind==='load')||parts.find(part=>part.id!==selected.id);
   const options=parts.map(part=>`<option value="${esc(part.id)}">${esc(part.id)} · ${esc(part.label||part.catalog||part.kind)}</option>`).join('');
   const raw={id:'attachment-'+(state.doc.joints?.length||0),type:'fixed',
     a:{part:selected.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},
     b:{part:other.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},
     metadata:{hardware:'Specify the actual bolt, bracket or connector and its installation method'}};
   const revision=state.revision;let preview=null,request=0;
-  modal('Add joint or attachment',`<p>Choose the parts and their attachment ports. The preview aligns the port centres and axes, including hinge bolt holes.</p>
+  modal('Add joint or attachment',`<p>Choose the parts and their attachment points. Named ports align when joined. Abstract loads need no port and attach at their current position.</p>
     <div class="single-field"><label for="joint-part-a">FIRST PART</label><select id="joint-part-a">${options}</select></div>
-    <div class="single-field"><label for="joint-port-a">ATTACHMENT PORT</label><select id="joint-port-a"></select></div>
+    <div class="single-field"><label for="joint-port-a">ATTACHMENT POINT</label><select id="joint-port-a"></select></div>
     <div class="single-field"><label for="joint-part-b">SECOND PART</label><select id="joint-part-b">${options}</select></div>
-    <div class="single-field"><label for="joint-port-b">ATTACHMENT PORT</label><select id="joint-port-b"></select></div>
+    <div class="single-field"><label for="joint-port-b">ATTACHMENT POINT</label><select id="joint-port-b"></select></div>
     <div class="fields"><div class="field"><label for="joint-create-type">JOINT</label><select id="joint-create-type"><option value="revolute">Hinge · rotates</option><option value="fixed">Fixed</option><option value="spherical">Ball · rotates freely</option></select></div>
     <div class="field"><label for="joint-create-move">PARTS TO MOVE</label><select id="joint-create-move"><option value="auto">Automatic</option><option value="a">First connected body</option><option value="b">Second connected body</option></select></div></div>
     <p id="joint-create-status" role="status">Checking the selected ports…</p>
@@ -3083,7 +3117,7 @@ function jointCreateDialog(){
     {label:'Join selected ports',primary:true,action:async()=>{
       if(!preview||revision!==state.revision)throw new Error('Refresh the connection preview first.');
       const payload=values();const result=await api('connect-ports',payload);
-      closeModal();await acceptPlacement(result,revision);toast('Joint created at the selected ports.');
+      closeModal();await acceptPlacement(result,revision);toast(result.abstract_load?'Load attached.':'Joint created at the selected ports.');
     }}]);
   const join=$('#modal-actions .primary');join.disabled=true;
   $('#joint-part-a').value=selected.id;$('#joint-part-b').value=other.id;
@@ -3095,27 +3129,34 @@ function jointCreateDialog(){
     }catch(error){toast(error.message,true);}
   };
   function fillPort(partField,portField,preferred){
-    const part=parts.find(item=>item.id===$(partField).value),ports=part?usable(part):[];
-    $(portField).innerHTML=ports.length?ports.map(([name,port])=>`<option value="${esc(name)}">${esc(name)} · ${esc(port.type)}</option>`).join(''):'<option value="">No free attachment ports</option>';
+    const part=parts.find(item=>item.id===$(partField).value);
+    const load=part?.kind==='load',hasLoad=['#joint-part-a','#joint-part-b'].some(id=>parts.find(p=>p.id===$(id).value)?.kind==='load');
+    const ports=load?[]:part?(hasLoad?Object.entries(part.ports||{}):usable(part)):[];
+    const origin=load?'<option value="@load">Abstract load · no port needed</option>':hasLoad?'<option value="@origin">Part origin · no port needed</option>':'';
+    $(portField).innerHTML=origin+ports.map(([name,port])=>`<option value="${esc(name)}">${esc(name)} · ${esc(port.type)}</option>`).join('')||'<option value="">No free attachment ports</option>';
+    $(portField).disabled=load;
     if(ports.some(([name])=>name===preferred))$(portField).value=preferred;
     else if(ports.some(([name])=>name==='hinge'))$(portField).value='hinge';
   }
-  function values(){return {a:{part:$('#joint-part-a').value,port:$('#joint-port-a').value},
-    b:{part:$('#joint-part-b').value,port:$('#joint-port-b').value},
+  function values(){const endpoint=side=>{const part=$('#joint-part-'+side).value,port=$('#joint-port-'+side).value;return {part,...(port&&!port.startsWith('@')?{port}:{})};};return {a:endpoint('a'),
+    b:endpoint('b'),
     type:$('#joint-create-type').value,move:$('#joint-create-move').value};}
   async function refresh(){
     const current=++request;preview=null;join.disabled=true;clearSnapPreview();
-    const payload=values();if(!payload.a.port||!payload.b.port||payload.a.part===payload.b.part){
+    const payload=values(),abstractLoad=[payload.a,payload.b].some(end=>parts.find(part=>part.id===end.part)?.kind==='load'&&!end.port);
+    $('#joint-create-move').disabled=abstractLoad;join.textContent=abstractLoad?'Attach load':'Join selected ports';
+    if(!$('#joint-port-a').value||!$('#joint-port-b').value||payload.a.part===payload.b.part){
       $('#joint-create-status').textContent='Choose two different parts with free attachment ports.';return;}
     $('#joint-create-status').textContent='Checking fit and existing connections…';
     try{const result=await api('connect-ports',{...payload,preview:true});
       if(current!==request||revision!==state.revision)return;
       preview=result;join.disabled=false;showPosePreview(result.poses);
-      $('#joint-create-status').textContent=`Ready: ${result.gap_mm.toFixed(1)} mm between ports. ${result.move?'The '+(result.move==='a'?'first':'second')+' connected body moves into place.':'Both bodies stay fixed.'}`;
+      $('#joint-create-status').textContent=result.abstract_load?'Ready: the abstract load attaches without a port. Both parts keep their current positions.':`Ready: ${result.gap_mm.toFixed(1)} mm between ports. ${result.move?'The '+(result.move==='a'?'first':'second')+' connected body moves into place.':'Both bodies stay fixed.'}`;
     }catch(error){if(current===request)$('#joint-create-status').textContent=error.message;}
   }
-  $('#joint-part-a').onchange=()=>{fillPort('#joint-part-a','#joint-port-a');refresh();};
-  $('#joint-part-b').onchange=()=>{fillPort('#joint-part-b','#joint-port-b');refresh();};
+  const refill=()=>{for(const side of ['a','b'])fillPort('#joint-part-'+side,'#joint-port-'+side,$('#joint-port-'+side).value);refresh();};
+  $('#joint-part-a').onchange=refill;
+  $('#joint-part-b').onchange=refill;
   for(const id of ['#joint-port-a','#joint-port-b','#joint-create-type','#joint-create-move'])$(id).onchange=refresh;
   reviewCleanup=()=>{request++;clearSnapPreview();};
   fillPort('#joint-part-a','#joint-port-a',complement?.firstName);

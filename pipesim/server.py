@@ -21,7 +21,7 @@ from .document import Assembly,Library,DocumentError,read,write,parse,plain,DATA
 WEB=Path(__file__).parent/'web'
 BUNDLED_MESHES=(DATA/'libraries'/'meshes').resolve()
 DESIGN_SUFFIXES={'.yaml','.yml','.json'}
-EDITOR_API_VERSION=25
+EDITOR_API_VERSION=26
 
 def bundled_mesh(relative):
     path=(BUNDLED_MESHES/relative).resolve()
@@ -48,6 +48,8 @@ class EditorServer(ThreadingHTTPServer):
         self.previews=PreviewCache()
         from .simulation_jobs import SimulationJobs
         self.simulations=SimulationJobs()
+        from .connection_jobs import ConnectionJobs
+        self.connections=ConnectionJobs()
         self.draft_jobs={}; self.draft_jobs_lock=threading.Lock()
         self.autosave_lock=threading.Lock()
         self.human_model_cache={}
@@ -56,6 +58,7 @@ class EditorServer(ThreadingHTTPServer):
         with self.draft_jobs_lock:
             for event in self.draft_jobs.values(): event.set()
         self.simulations.close()
+        self.connections.close()
         super().server_close()
     def path(self,relative):
         path=(self.root/relative).resolve()
@@ -260,6 +263,20 @@ class Handler(BaseHTTPRequestHandler):
             if route in ('/api/simulation-status','/api/simulation-cancel','/api/simulation-result'):
                 result=self.server.simulations.get(data['job_id'],cancel=route=='/api/simulation-cancel',
                                                    include_result=route=='/api/simulation-result')
+            elif route=='/api/connection-cancel':
+                result=self.server.connections.cancel(data['job_id'])
+            elif route=='/api/snap-options':
+                from .snapping import connection_options
+                from .connection_jobs import check_cancelled
+                def search(cancelled):
+                    check_cancelled(cancelled)
+                    assembly=self.assembly(data['document'],base)
+                    check_cancelled(cancelled)
+                    return connection_options(assembly,data['member'],data['connector'],data['port'],
+                        data.get('end','start'),data.get('insertion_mm'),data.get('at_mm'),data.get('locked',True),
+                        data.get('poses'),data.get('replace_joint'),data.get('force',False),data.get('tolerance_mm',2.),data.get('force_options'),
+                        first_valid=data.get('first_valid',False),cancelled=cancelled)
+                result=self.server.connections.run(data.get('job_id'),search)
             elif route in ('/api/draft-finalize-cancel','/api/draft-repair-cancel'):
                 with self.server.draft_jobs_lock:
                     event=self.server.draft_jobs.get(data['job_id'])
@@ -533,11 +550,6 @@ class Handler(BaseHTTPRequestHandler):
                     from .wheels import mount_wheel
                     result=mount_wheel(assembly,data.get('wheel'),data.get('target'))
                     result['scene']=self.scene(self.assembly(result['document'],base))
-                elif route=='/api/snap-options':
-                    from .snapping import connection_options
-                    result=connection_options(assembly,data['member'],data['connector'],data['port'],
-                        data.get('end','start'),data.get('insertion_mm'),data.get('at_mm'),data.get('locked',True),
-                        data.get('poses'),data.get('replace_joint'),data.get('force',False),data.get('tolerance_mm',2.),data.get('force_options'))
                 elif route=='/api/validate':
                     if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before validation')
                     from .validation import validate
@@ -551,7 +563,10 @@ class Handler(BaseHTTPRequestHandler):
                     duration=float(data.get('duration',3))
                     if duration>30: raise DocumentError('Editor simulations are limited to 30 seconds; use the CLI for longer runs')
                     result=self.server.simulations.start(assembly,duration=duration,fps=30,
-                        chain_links_per_body=data.get('chain_links_per_body',1),
+                        chain_links_per_body=data.get('chain_links_per_body'),mode=data.get('mode','full'),
+                        preview_steps_per_second=data.get('preview_steps_per_second',1000),
+                        preview_solver_iterations=data.get('preview_solver_iterations',240),
+                        preview_beam_segment_mm=data.get('preview_beam_segment_mm',800),
                         deflection_warning_mm=float(data.get('deflection_warning_mm',10)))
                 elif route=='/api/plan':
                     if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before build planning')

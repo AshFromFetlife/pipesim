@@ -1,0 +1,336 @@
+{
+  "version": 1,
+  "seed": 0,
+  "family": "comb",
+  "doc": {
+    "format": "pipesim/1",
+    "units": "mm-kg-s-N-deg",
+    "name": "Geometry workflow 0",
+    "parts": [
+      {
+        "id": "tee-0",
+        "catalog": "tubeclamp.TC104C",
+        "pose": {
+          "position_mm": [
+            -398.57956459745765,
+            575.1607679296285,
+            2869.64072171133
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "tee-1",
+        "catalog": "tubeclamp.TC104C",
+        "pose": {
+          "position_mm": [
+            -398.57956459745765,
+            575.1607679296285,
+            3205.347994538024
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "tee-2",
+        "catalog": "tubeclamp.TC104C",
+        "pose": {
+          "position_mm": [
+            -398.57956459745765,
+            575.1607679296285,
+            3541.055267364718
+          ],
+          "rotation_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    ],
+    "joints": [],
+    "anchors": [],
+    "draft_subassemblies": [
+      {
+        "id": "frame",
+        "runs": [
+          {
+            "id": "branch-0",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -365.5395645974577,
+              575.1607679296285,
+              2869.64072171133
+            ],
+            "end_mm": [
+              194.4693375983834,
+              575.1607679296285,
+              2869.64072171133
+            ],
+            "attachments": []
+          },
+          {
+            "id": "branch-1",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -365.5395645974577,
+              575.1607679296285,
+              3205.347994538024
+            ],
+            "end_mm": [
+              233.64180869186293,
+              575.1607679296285,
+              3205.347994538024
+            ],
+            "attachments": []
+          },
+          {
+            "id": "branch-2",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              255.73944453146305,
+              575.1607679296285,
+              3541.055267364718
+            ],
+            "end_mm": [
+              -365.5395645974577,
+              575.1607679296285,
+              3541.055267364718
+            ],
+            "attachments": []
+          },
+          {
+            "id": "rail",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -398.57956459745765,
+              575.1607679296285,
+              2533.933448884636
+            ],
+            "end_mm": [
+              -398.57956459745765,
+              575.1607679296285,
+              3876.762540191412
+            ],
+            "attachments": []
+          },
+          {
+            "id": "spare",
+            "catalog": "tubeclamp.tube-C",
+            "start_mm": [
+              -1898.5795645974576,
+              575.1607679296285,
+              2533.933448884636
+            ],
+            "end_mm": [
+              -1898.5795645974576,
+              575.1607679296285,
+              3133.933448884636
+            ],
+            "attachments": []
+          }
+        ]
+      }
+    ]
+  },
+  "model": {
+    "spans": {
+      "branch-0": [
+        [
+          -365.5395645974577,
+          575.1607679296285,
+          2869.64072171133
+        ],
+        [
+          194.4693375983834,
+          575.1607679296285,
+          2869.64072171133
+        ]
+      ],
+      "branch-1": [
+        [
+          -365.5395645974577,
+          575.1607679296285,
+          3205.347994538024
+        ],
+        [
+          233.64180869186293,
+          575.1607679296285,
+          3205.347994538024
+        ]
+      ],
+      "branch-2": [
+        [
+          255.73944453146305,
+          575.1607679296285,
+          3541.055267364718
+        ],
+        [
+          -365.5395645974577,
+          575.1607679296285,
+          3541.055267364718
+        ]
+      ],
+      "rail": [
+        [
+          -398.57956459745765,
+          575.1607679296285,
+          2533.933448884636
+        ],
+        [
+          -398.57956459745765,
+          575.1607679296285,
+          3876.762540191412
+        ]
+      ],
+      "spare": [
+        [
+          -1898.5795645974576,
+          575.1607679296285,
+          2533.933448884636
+        ],
+        [
+          -1898.5795645974576,
+          575.1607679296285,
+          3133.933448884636
+        ]
+      ]
+    },
+    "fittings": {
+      "tee-0": {
+        "position_mm": [
+          -398.57956459745765,
+          575.1607679296285,
+          2869.64072171133
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      },
+      "tee-1": {
+        "position_mm": [
+          -398.57956459745765,
+          575.1607679296285,
+          3205.347994538024
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      },
+      "tee-2": {
+        "position_mm": [
+          -398.57956459745765,
+          575.1607679296285,
+          3541.055267364718
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "edges": [
+      {
+        "member": "branch-0",
+        "connector": "tee-0",
+        "port": "branch",
+        "end": "start"
+      },
+      {
+        "member": "branch-1",
+        "connector": "tee-1",
+        "port": "branch",
+        "end": "start"
+      },
+      {
+        "member": "branch-2",
+        "connector": "tee-2",
+        "port": "branch",
+        "end": "end"
+      },
+      {
+        "member": "rail",
+        "connector": "tee-0",
+        "port": "through"
+      },
+      {
+        "member": "rail",
+        "connector": "tee-1",
+        "port": "through"
+      },
+      {
+        "member": "rail",
+        "connector": "tee-2",
+        "port": "through"
+      }
+    ],
+    "mirror": null
+  },
+  "actions": [
+    {
+      "kind": "connect",
+      "member": "branch-0",
+      "connector": "tee-0",
+      "port": "branch",
+      "end": "start"
+    },
+    {
+      "kind": "connect",
+      "member": "rail",
+      "connector": "tee-0",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "rail",
+      "connector": "tee-1",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "branch-2",
+      "connector": "tee-2",
+      "port": "branch",
+      "end": "end"
+    },
+    {
+      "kind": "connect",
+      "member": "rail",
+      "connector": "tee-2",
+      "port": "through"
+    },
+    {
+      "kind": "connect",
+      "member": "branch-1",
+      "connector": "tee-1",
+      "port": "branch",
+      "end": "start"
+    },
+    {
+      "kind": "mirror-cycle",
+      "member": "branch-1",
+      "axis": 0,
+      "delta": -32,
+      "edge": {
+        "member": "rail",
+        "connector": "tee-2",
+        "port": "through"
+      },
+      "endpoint": "end",
+      "mirrorAxis": "y"
+    }
+  ]
+}

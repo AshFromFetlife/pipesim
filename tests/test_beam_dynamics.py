@@ -8,6 +8,26 @@ from pipesim.fea import analyse
 from pipesim.physics import simulate, _beam_deflection_mm
 
 
+def test_sliding_guide_keeps_its_continuous_track(load):
+    from pipesim.beam_dynamics import prepare_beams
+    assembly=load('sliding-collar')
+    dynamic,model,analysis=prepare_beams(assembly)
+    assert 'guide' not in model
+    assert dynamic.parts['guide'].length==2000
+    assert analysis['rigid_sliding_guides']==['guide']
+
+
+def test_moving_person_does_not_force_a_stiff_frame_into_beam_elements(load):
+    from pipesim.beam_dynamics import prepare_beams
+    assembly=load('human-pull-up');joints=copy.deepcopy(assembly.joints)
+    dynamic,model,analysis=prepare_beams(assembly)
+    assert analysis['status']=='mechanism'
+    assert analysis['beam_selection_reference']=='temporarily_locked_pose'
+    assert not model
+    assert dynamic is assembly
+    assert assembly.joints==joints
+
+
 def cantilever(load, factory, *, height=1000, ground=False, platform=False, overload=False):
     doc = copy.deepcopy(load('cantilever').doc)
     doc['parts'][0]['parameters']['length_mm'] = 5000
@@ -52,6 +72,28 @@ def test_long_cantilever_sags_in_free_space(load, factory):
     assert result['frames'][-1]['beam_status']['beam']['deflection_mm']>70
     assert not result['frames'][-1]['beam_status']['beam']['yielded']
     assert .7*predicted<result['frames'][-1]['beam_status']['beam']['deflection_mm']<1.3*predicted
+    assert result['final_max_speed_m_s']<.25
+
+
+def test_preview_cantilever_preserves_elastic_deflection_with_fewer_elements(load,factory):
+    from pipesim.math3d import point,transform
+    assembly=cantilever(load,factory,ground=False)
+    predicted=analyse(assembly)['members'][0]['max_displacement_mm']
+    result=simulate(assembly,3,5,mode='preview')
+    assert result['quality'].get('resolved_mode')!='full'
+    assert len(result['beam_model']['beam']['segments'])<10
+    status=result['frames'][-1]['beam_status']['beam']
+    assert not status['yielded']
+    def tip(recording,index):
+        model=recording['beam_model']['beam']
+        return point(transform(recording['frames'][index]['parts'][model['segments'][-1]]),
+                     [0,0,model['segment_length_mm']/2])
+    # Compare the same physical endpoint. Element-centre displacement samples
+    # different locations when Preview changes the mesh resolution.
+    preview_tip=tip(result,-1)
+    assert .7*predicted<np.linalg.norm(preview_tip-tip(result,0))<1.3*predicted
+    full=simulate(assembly,3,5)
+    assert np.linalg.norm(preview_tip-tip(full,-1))<.2*np.linalg.norm(tip(full,-1)-tip(full,0))
     assert result['final_max_speed_m_s']<.25
 
 

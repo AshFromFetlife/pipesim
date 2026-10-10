@@ -1,10 +1,11 @@
 import copy
+import json
 
 import numpy as np
 import pybullet as pb
 import pytest
 
-from pipesim.document import DocumentError
+from pipesim.document import DocumentError, parse
 from pipesim.editing import expand_objects, snapshot_design
 from pipesim.grouping import regroup_object, update_object_parameters
 from pipesim.human import humanoid, reach
@@ -154,6 +155,33 @@ def test_edited_human_updates_flexibility_activity_strength_and_keeps_pose(blank
     changed=factory(update_object_parameters(changed,'person',parameters))
     assert all(not j.get('motor') for j in changed.joints)
     assert all(j['metadata']['human_activity']['mode']=='struggle' for j in changed.joints)
+
+
+def test_struggle_mode_change_after_large_recording_preserves_authored_pose(blank,factory):
+    assembly=person(blank,factory,posture_control='fidget',movement_seed=41)
+    original={pid:part.matrix.copy() for pid,part in assembly.parts.items()}
+    with World(assembly) as world:
+        frame=world.snapshot()
+    def values(value):
+        return 1+sum(values(item) for item in
+                     (value.values() if isinstance(value,dict) else value if isinstance(value,list) else []))
+    count=1_000_001//values(frame)+1
+    frames=[{**copy.deepcopy(frame),'time_s':i/120} for i in range(count)]
+    doc=copy.deepcopy(assembly.doc)
+    doc['results']={'simulate':{'fps':120,'frames':frames,'duration_s':frames[-1]['time_s']}}
+    text=json.dumps(doc)
+    assert values(doc)>1_000_000 and len(text.encode())<32*1024*1024
+    # Exercise both saved-document parsing and the same assembly/update path
+    # used by the inspector's JSON request, with independent frame containers.
+    recorded=factory(parse(text))
+    parameters={**recorded.doc['objects'][0]['parameters'],'posture_control':'struggle'}
+    changed=factory(update_object_parameters(recorded,'person',parameters))
+    assert all(np.allclose(changed.parts[pid].matrix,matrix) for pid,matrix in original.items())
+    assert all(j['metadata']['human_activity']['mode']=='struggle' for j in changed.joints)
+    assert all(not j.get('motor') for j in changed.joints)
+    assert not changed.doc.get('results')
+    assert len(recorded.doc['results']['simulate']['frames'])==count
+    assert recorded.doc['objects'][0]['parameters']['posture_control']=='fidget'
 
 
 def test_unrestricted_elbow_reach_handles_three_axes(blank,factory):

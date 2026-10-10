@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "vendor": "node scripts/vendor.mjs",
-    "check": "node --check pipesim/web/app.js && node --check pipesim/web/human-model.js && node --test tests/editor-snapping.test.mjs tests/editor-interactions.test.mjs tests/preferences.test.mjs tests/resize-shortcuts.test.mjs tests/human-model.test.mjs",
+    "check": "node --check pipesim/web/app.js && node --check pipesim/web/human-model.js && node --test tests/editor-snapping.test.mjs tests/editor-interactions.test.mjs tests/preferences.test.mjs tests/resize-shortcuts.test.mjs tests/human-model.test.mjs tests/fuzz-editor-campaign.test.mjs",
+    "fuzz:editor": "node scripts/fuzz-editor-workflows.mjs",
     "human-render-fixtures": "node scripts/human-model-render-fixtures.mjs"
   },
   "dependencies": {

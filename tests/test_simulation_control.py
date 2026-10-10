@@ -54,6 +54,7 @@ def test_grouped_simulation_keeps_saved_pose_and_reports_approximation(factory,b
     for pid,pose in result['frames'][0]['parts'].items():
         assert transform(pose)==pytest.approx(assembly.parts[pid].matrix,abs=.002)
     frozen=result['chain_simplification']['frozen_joints']
+    assert 'chain/join-2' not in frozen, 'saved bend was frozen into a permanent kink'
     for jid in frozen:
         assert all(frame['joints'][jid]==result['frames'][0]['joints'][jid] for frame in result['frames'])
         assert all(jid not in frame['reactions'] for frame in result['frames'])
@@ -107,7 +108,7 @@ def test_worker_progress_result_cancellation_and_restart(factory,blank):
     jobs=SimulationJobs()
     try:
         assembly=chain(factory,blank,3)
-        job=jobs.start(assembly,duration=.02,chain_links_per_body=2)
+        job=jobs.start(assembly,duration=.02,chain_links_per_body=2,mode='preview')
         deadline=time.monotonic()+30
         while job['status']=='running':
             assert time.monotonic()<deadline
@@ -116,6 +117,7 @@ def test_worker_progress_result_cancellation_and_restart(factory,blank):
         assert 'result' not in job
         result=jobs.get(job['id'],include_result=True)['result']
         assert result['frames'] and result['chain_simplification']['links_per_body']==2
+        assert result['mode']=='preview'
         running=jobs.start(assembly,duration=30)
         directory=jobs.jobs[running['id']]['directory'].name
         with pytest.raises(ValueError,match='already running'): jobs.start(assembly,duration=30)

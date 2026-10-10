@@ -1,4 +1,4 @@
-"""A reference human constrained to a vertical line in a draft mirror plane."""
+"""A reference human constrained to a draft mirror plane with paired limb poses."""
 from __future__ import annotations
 
 import copy
@@ -39,9 +39,7 @@ def project_object_pose(pose, symmetry, reference_pose=None):
     result = copy.deepcopy(pose)
     position = list(result.get('position_mm', [0, 0, 0]))
     normal = {'x': 0, 'y': 1}[symmetry['axis']]
-    tangent = 1 - normal
     position[normal] = symmetry['offset_mm']
-    position[tangent] = symmetry['line_offset_mm']
     result['position_mm'] = position
     result.setdefault('rotation_deg', list(symmetry['rotation_deg']))
     if not rotation_preserves_mirror(result, symmetry):
@@ -90,7 +88,7 @@ def validate_human_symmetry(assembly):
             raise DocumentError('The human mirror line needs a fixed facing direction')
         expected = project_object_pose(instance.get('pose', {}), symmetry)
         if not np.allclose(transform(expected), transform(instance.get('pose')), atol=1e-5, rtol=0):
-            raise DocumentError(f"{instance['id']}: keep the whole person on the mirror line")
+            raise DocumentError(f"{instance['id']}: keep the whole person in the mirror plane")
         prefix = instance['id'] + '/'
         world = reflection(symmetry)
         for name in CENTRAL_PARTS:

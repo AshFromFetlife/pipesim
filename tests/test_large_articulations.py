@@ -54,11 +54,15 @@ def test_heavy_load_on_chain_with_external_top_attachment_stays_supported(factor
     doc=copy.deepcopy(assembly.doc)
     top=assembly.parts['chain/link-1'].frame({'port':'b'})[0]
     doc['anchors']=[{'part':'fixture','surface':'ceiling'}]
+    # Keep the fixed box clear of the chain. Removing the top joint must
+    # leave a free-fall control, without deep initial collision impulses.
+    fixture_offset=np.array([0,0,100])
     doc['parts'].append({'id':'fixture','catalog':'generic.box',
         'parameters':{'width_mm':50,'depth_mm':50,'height_mm':50,'mass_kg':5},
-        'pose':{'position_mm':top.tolist()}})
+        'pose':{'position_mm':(top+fixture_offset).tolist()}})
     doc['joints'].append({'id':'top-hook','type':'spherical',
-        'a':{'part':'fixture'},'b':{'part':'chain/link-1','port':'b'}})
+        'a':{'part':'fixture','frame':{'position_mm':(-fixture_offset).tolist()}},
+        'b':{'part':'chain/link-1','port':'b'}})
     assembly=factory(doc)
     initial=np.array(assembly.parts['load'].matrix[:3,3])
     chain_reach=sum(np.linalg.norm(
@@ -75,6 +79,11 @@ def test_heavy_load_on_chain_with_external_top_attachment_stays_supported(factor
     assert max(np.linalg.norm(positions-top,axis=1))<=chain_reach+load_mount_offset+10
     assert set(result['frames'][-1]['joints'])=={j['id'] for j in assembly.joints}
     doc['joints']=[j for j in doc['joints'] if j['id']!='top-hook']
+    with physics.World(factory(doc)) as world:
+        pb.performCollisionDetection(physicsClientId=world.client)
+        fixture_body=world.part_map['fixture'][0]
+        assert not any(contact[8]<-.001 and fixture_body in contact[1:3]
+                       for contact in pb.getContactPoints(physicsClientId=world.client))
     loose=physics.simulate(factory(doc),.7,10)
     assert loose['frames'][-1]['parts']['load']['position_mm'][2]<initial[2]-1500
 
