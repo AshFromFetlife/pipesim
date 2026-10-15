@@ -199,6 +199,11 @@ def set_human_symmetry(assembly, object_id, group_id=None, plane_id=None, *, ado
         moved = Assembly.from_doc(document, assembly.base, assembly.library)
         document = _match_limb_pose(moved, next(item for item in document['objects'] if item['id'] == object_id), symmetry)
     constrained = next(item for item in document['objects'] if item['id'] == object_id)
+    # Matrix pose extraction can produce signed zero after a reflection.
+    # Keep the saved inspector coordinates stable across mirror entry paths.
+    if 'position_mm' in constrained.get('pose', {}):
+        constrained['pose']['position_mm'] = [0. if value == 0 else value
+                                               for value in constrained['pose']['position_mm']]
     constrained.pop('mirror_pose_free', None)
     constrained['symmetry'] = symmetry
     try:

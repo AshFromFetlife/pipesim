@@ -23,9 +23,10 @@ def _worker(assembly, options, directory, updates, log_progress):
     try:
         result=simulate(assembly,progress=progress,**options)
         payload={'result':plain(result)}
+        target=Path(directory)/'result.json'
     except Exception as exc:
         payload={'error':str(exc)}
-    target=Path(directory)/'result.json'
+        target=Path(directory)/'error.json'
     pending=target.with_suffix('.tmp')
     pending.write_text(json.dumps(payload,allow_nan=False),encoding='utf-8')
     pending.replace(target)
@@ -67,28 +68,32 @@ class SimulationJobs:
             try: job['progress']=job['updates'].get_nowait()
             except queue.Empty: break
         process=job['process']
-        target=Path(job['directory'].name)/'result.json'
+        directory=Path(job['directory'].name)
+        target=directory/'result.json'
+        error=directory/'error.json'
         if target.exists():
-            # Loading once avoids copying a large recording on every poll.
-            payload=json.loads(target.read_text(encoding='utf-8'))
-            job.update(payload)
-            job['status']='failed' if 'error' in payload else 'completed'
+            job['status']='completed'
+            self._stop(job,cleanup=False)
+        elif error.exists():
+            job.update(json.loads(error.read_text(encoding='utf-8')))
+            job['status']='failed'
             self._stop(job)
         elif not process.is_alive():
             job.update(status='failed',error=f"Simulation worker exited unexpectedly (code {process.exitcode})")
             self._stop(job)
 
-    def _stop(self,job):
+    def _stop(self,job,*,cleanup=True):
         process=job['process']
         if process.is_alive(): process.terminate()
         process.join(timeout=2)
         if process.is_alive(): process.kill();process.join(timeout=2)
         process.close()
         job['updates'].close()
-        job['directory'].cleanup()
+        if cleanup: job['directory'].cleanup()
 
     def _dispose(self,job):
         if job['status']=='running': self._stop(job)
+        else: job['directory'].cleanup()
 
     def _public(self,job,include_result=False):
         fields=('id','status','progress','error')+ (('result',) if include_result else ())
@@ -105,7 +110,18 @@ class SimulationJobs:
                 self._stop(job)
                 job['status']='cancelled'
                 print('Simulation cancelled',flush=True)
-            return self._public(job,include_result)
+            value=self._public(job)
+            if include_result and job['status']=='completed':
+                value.update(json.loads((Path(job['directory'].name)/'result.json').read_text(encoding='utf-8')))
+            return value
+
+    def result_bytes(self,job_id):
+        with self.lock:
+            job=self.jobs.get(job_id)
+            if job is None: raise DocumentError('Simulation job not found; the server may have restarted')
+            self._refresh(job)
+            if job['status']!='completed': return None
+            return (Path(job['directory'].name)/'result.json').read_bytes()
 
     def close(self):
         with self.lock:

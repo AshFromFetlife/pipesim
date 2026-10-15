@@ -114,6 +114,121 @@ def capture_scene(blank, side, socket_type):
     return doc
 
 
+def centered_socket_scene(blank, side, *, offset=0, half_span=500,
+                          socket_distance=700, y=0, z=0, min_insertion=15):
+    """A mirrored crossbar reaches an end socket held by a separate leg."""
+    doc = copy.deepcopy(blank)
+    sign = -1 if side == 'start' else 1
+    x = offset + sign*socket_distance
+    inward = [1, 0, 0] if side == 'start' else [-1, 0, 0]
+    doc['parts'] = [{'id': 'socket', 'pose': {'position_mm': [x, y, z]},
+                     'body': {'kind': 'connector', 'mass_kg': .2,
+                              'geometry': [{'type': 'sphere', 'radius_mm': 12}],
+                              'ports': {
+                                  'branch': {'type': 'socket', 'profile': 'round',
+                                             'diameter_mm': 42.4, 'position_mm': [0, 0, 0],
+                                             'axis': inward, 'engagement_mm': 40,
+                                             'min_engagement_mm': min_insertion},
+                                  'vertical': {'type': 'socket', 'profile': 'round',
+                                               'diameter_mm': 42.4, 'position_mm': [0, 0, 0],
+                                               'axis': [0, 0, 1], 'through': True,
+                                               'engagement_mm': 40,
+                                               'min_engagement_mm': 15}}}}]
+    doc['draft_subassemblies'] = [{'id': 'frame', 'runs': [
+        {'id': 'pipe', 'catalog': 'tubeclamp.tube-C',
+         'start_mm': [offset-half_span, y, z],
+         'end_mm': [offset+half_span, y, z], 'attachments': []},
+        {'id': 'leg', 'catalog': 'tubeclamp.tube-C',
+         'start_mm': [x, y, z-500], 'end_mm': [x, y, z+500],
+         'attachments': [{'connector': 'socket', 'port': 'vertical'}]}],
+        'mirrors': [{'id': 'midplane', 'axis': 'x', 'offset_mm': offset,
+                     'scope': 'scene', 'run_modes': {'pipe': 'centered',
+                                                   'leg': 'free'}}]}]
+    return doc
+
+
+@pytest.mark.parametrize('side', ('start', 'end'))
+@pytest.mark.parametrize('cursor_offset', (-20, 0, 20))
+@pytest.mark.parametrize('locked', (False, True))
+def test_centered_end_snap_extends_both_sides_into_supported_socket(
+        factory, blank, side, cursor_offset, locked):
+    doc = centered_socket_scene(blank, side)
+    if locked:
+        doc['draft_subassemblies'][0]['runs'][0]['locked_length_mm'] = 1000
+    before = factory(doc)
+    # The cursor can stop short of, at, or slightly past the socket mouth.
+    requested = 2*(700+cursor_offset)
+    result = resize_drag(before, 'pipe', requested, side, capture_mm=40)
+    after = factory(result['document'])
+    pipe = next(run for run in runs(after.doc) if run['id'] == 'pipe')
+    depth = max(15, cursor_offset)
+    assert pipe['attachments'] == [{'connector': 'socket', 'port': 'branch',
+                                    'end': side, 'insertion_mm': depth}]
+    start, end = effective(after, 'pipe')
+    assert np.allclose(start, [-700-depth, 0, 0])
+    assert np.allclose(end, [700+depth, 0, 0])
+    assert result['length_mm'] == pytest.approx(2*(700+depth))
+    assert pipe.get('locked_length_mm') == (pytest.approx(result['length_mm'])
+                                           if locked else None)
+    assert after.doc['parts'] == before.doc['parts']
+    assert next(run for run in runs(after.doc) if run['id'] == 'leg') == \
+        next(run for run in runs(before.doc) if run['id'] == 'leg')
+    assert all(not item['conflicts'] for item in preview(after))
+    exact_valid(after)
+
+
+@pytest.mark.parametrize('side', ('start', 'end'))
+def test_centered_end_capture_moves_a_loose_socket_without_changing_span(
+        factory, blank, side):
+    doc = centered_socket_scene(blank, side)
+    doc['draft_subassemblies'][0]['runs'] = doc['draft_subassemblies'][0]['runs'][:1]
+    doc['draft_subassemblies'][0]['mirrors'][0]['run_modes'].pop('leg')
+    before = factory(doc)
+    result = resize_drag(before, 'pipe', 1400, side, capture_mm=40)
+    after = factory(result['document'])
+    start, end = effective(after, 'pipe')
+    assert np.allclose(start, [-700, 0, 0])
+    assert np.allclose(end, [700, 0, 0])
+    assert result['length_mm'] == pytest.approx(1400)
+    assert len(next(run for run in runs(after.doc) if run['id'] == 'pipe')['attachments']) == 1
+    assert after.doc['parts'][0]['pose']['position_mm'][0] == pytest.approx(
+        -685 if side == 'start' else 685)
+    exact_valid(after)
+
+
+def _check_generated_centered_snap(factory, blank, case_seed, index):
+    rng = random.Random(case_seed)
+    side = ('start', 'end')[index % 2]
+    offset = rng.uniform(-400, 400)
+    half_span = rng.uniform(280, 600)
+    distance = half_span+rng.uniform(120, 320)
+    minimum = rng.uniform(12, 26)
+    y, z = rng.uniform(-600, 600), rng.uniform(100, 900)
+    doc = centered_socket_scene(blank, side, offset=offset, half_span=half_span,
+                                socket_distance=distance, y=y, z=z,
+                                min_insertion=minimum)
+    locked = rng.randrange(2) == 0
+    if locked:
+        doc['draft_subassemblies'][0]['runs'][0]['locked_length_mm'] = 2*half_span
+    before = factory(doc)
+    cursor_offset = rng.uniform(-25, min(minimum-1, 10))
+    result = resize_drag(before, 'pipe', 2*(distance+cursor_offset), side,
+                         capture_mm=40)
+    after = factory(result['document'])
+    pipe = next(run for run in runs(after.doc) if run['id'] == 'pipe')
+    context = f'centered snap seed={case_seed} index={index} side={side}'
+    assert len(pipe['attachments']) == 1, context
+    depth = max(minimum, cursor_offset)
+    first, last = effective(after, 'pipe')
+    assert np.allclose((first+last)/2, [offset, y, z], atol=.01), context
+    assert np.linalg.norm(last-first) == pytest.approx(2*(distance+depth), abs=.01), context
+    assert pipe.get('locked_length_mm') == (pytest.approx(result['length_mm'])
+                                           if locked else None), context
+    assert after.doc['parts'] == before.doc['parts'], context
+    assert all(not item['conflicts'] for item in preview(after)), context
+    exact_valid(after)
+
+
 @pytest.mark.parametrize('side', ('start', 'end'))
 @pytest.mark.parametrize('socket_type', ('through', 'end'))
 def test_extension_captures_reached_socket_and_finalizes(factory, blank, side, socket_type):
@@ -251,7 +366,27 @@ def _check_generated_capture_shrink(factory, blank, case_seed, index):
     context = (f'case_seed={case_seed} index={index} side={side} '
                f'socket={socket_type} mirrors={mirror_count}')
     before = factory(doc)
-    assert all(not item['conflicts'] for item in preview(before)), context
+    shown_by_id = {item['id']: item for item in preview(before)}
+    # The random rigid transform sometimes makes a free mirrored crossbar
+    # cross the plane obliquely. That is visible guidance, never a blocker.
+    for run in runs(before.doc):
+        layout = _layout(before, run)
+        span = layout['end'] - layout['start']
+        length = np.linalg.norm(span)
+        for plane in before.doc['draft_subassemblies'][0]['mirrors']:
+            if plane.get('run_modes', {}).get(run['id']) != 'free':
+                continue
+            axis = 'xyz'.index(plane['axis'])
+            first = layout['start'][axis] - plane['offset_mm']
+            last = layout['end'][axis] - plane['offset_mm']
+            oblique_crossing = (first * last < 0 and abs(last-first) >= .05 and
+                                np.linalg.norm(np.delete(span, axis)) >
+                                length * np.sin(np.deg2rad(5)))
+            shown = shown_by_id[run['id']]
+            has_warning = any(item['code'] == 'MIRROR_SELF_INTERSECTION' and
+                              item['plane'] == plane['id'] for item in shown['warnings'])
+            assert has_warning == oblique_crossing, context
+    assert all(not item['conflicts'] for item in shown_by_id.values()), context
     captured = resize_drag(before, 'pipe', 1200, side, capture_mm=40,
                            auto_connect=True)
     assert captured['status'] == 'resized', f'{context}: {captured}'
@@ -322,6 +457,8 @@ def test_generated_mirror_capture_and_shrink_sequences(factory, blank):
         case_seed = listed[index] if listed else int(replay) if replay else rng.getrandbits(64)
         _check_generated_capture_shrink(factory, blank, case_seed,
                                         replay_index if replay else index_base+index)
+        _check_generated_centered_snap(factory, blank, case_seed,
+                                       replay_index if replay else index_base+index)
 
 
 def test_long_generated_mirror_capture_and_shrink_sequences(factory, blank, tmp_path):

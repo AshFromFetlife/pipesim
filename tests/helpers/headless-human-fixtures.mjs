@@ -3,21 +3,23 @@
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {makeRig,exportRig,humanScene,SEGMENTS} from './human-rig-fixtures.mjs';
+import {makeRig,exportRig,humanScene,encodeIdentityInverseBinds,SEGMENTS} from './human-rig-fixtures.mjs';
 import {humanPhysicsFixture} from './human-physics-fixture.mjs';
 import {RetargetedHuman} from '../../pipesim/web/human-model.js';
 
 const directory=process.argv[2];await mkdir(directory,{recursive:true});
 const poses=humanPhysicsFixture(),cases=[];
-for(const variant of ['mixamo','blender','rotated','vrm',...process.argv.slice(3)]){
+for(const variant of ['mixamo','blender','rotated','vrm','mixed','identity','omitted',...process.argv.slice(3)]){
   const real=variant.endsWith('.glb'),name=real?variant.split(/[\\/]/).pop().slice(0,-4):variant;
-  const source=real?null:makeRig({variant:variant==='rotated'?'mixamo':variant,rootRotation:variant==='rotated'});
-  const bytes=real?new Uint8Array(await readFile(variant)).buffer:await exportRig(source);await writeFile(`${directory}/${name}.glb`,Buffer.from(bytes));
+  const source=real?null:makeRig({variant:['rotated','mixed','identity','omitted'].includes(variant)?'mixamo':variant,rootRotation:variant==='rotated'});
+  if(['mixed','identity','omitted'].includes(variant))encodeIdentityInverseBinds(source,variant==='mixed'?['left_thigh','right_thigh']:undefined);
+  const bytes=real?new Uint8Array(await readFile(variant)).buffer:await exportRig(source,{omitInverseBinds:variant==='omitted'});await writeFile(`${directory}/${name}.glb`,Buffer.from(bytes));
   // Pixel/material tests run in Python. CPU reference skinning does not need a
   // DOM image decoder for the optional textured real-world models.
   const gltf=await new GLTFLoader().register(()=>({name:'REFERENCE_NO_TEXTURES',loadTexture:()=>Promise.resolve(null)})).parseAsync(bytes,'');
   const {human,parts}=humanScene();human.rest_parts=poses.standing.parts.map(p=>({id:p.id,pose:p.pose}));human.joints=poses.standing.joints;
   human.render_model={file:name+'.glb',enabled:true,extra_bones:{Hair:{mode:'weighted_ball_joint',mass:.12,limit_deg:35},Pocket:{mode:'damped_spring',rotation_deg:[10,20,30]},IndexFinger:{mode:'fixed_angle_to_parent',rotation_deg:[12,-23,34]}}};
+  if(variant==='rotated')human.render_model.body_proportions={neck:.72,shoulders:1.18,torso:.9,upper_arms:1.06};
   if(variant==='vrm')human.render_model.bone_map=Object.fromEntries(SEGMENTS.map((s,i)=>[s,gltf.parser.json.nodes.findIndex(n=>n.name==='Joint_'+i)]));
   for(const p of poses.standing.parts){const part=parts.get('person/'+p.id);part.position.fromArray(p.pose.position_mm);part.rotation.set(...p.pose.rotation_deg.map(THREE.MathUtils.degToRad),'ZYX');part.updateMatrixWorld(true);}
   const model=new RetargetedHuman(gltf,human,parts),frames=[];

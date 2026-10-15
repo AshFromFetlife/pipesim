@@ -28,6 +28,8 @@ def test_bootstrap_serves_real_library_and_offline_editor(editor):
     status,raw=request(editor,'/api/bootstrap'); data=json.loads(raw)
     assert status==200 and len(data['scene']['parts'])==13
     assert data['api_version']==EDITOR_API_VERSION
+    from pipesim.human_assets import MAX_ASSET_BYTES
+    assert data['human_import_max_bytes']==MAX_ASSET_BYTES
     assert 'porta.DOW-19' in data['library']
     assert request(editor,'/vendor/three.module.js')[0]==200
 
@@ -204,6 +206,18 @@ def test_chain_snapshot_keeps_grouping_length_controls_and_physical_joints(edito
     _,raw=request(editor,'/api/object-parameters',{'document':captured,'object':'chain','parameters':{'length_mm':200}})
     assert len(json.loads(raw)['scene']['parts'])==10
 
+def test_chain_pose_api_returns_grouped_shaped_line(editor,blank):
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'rope','template':'chain',
+                     'parameters':{'length_mm':600,'link_catalog':'generic.rope-nylon-10'},
+                     'pose':{'position_mm':[0,0,800]}}]
+    _,raw=request(editor,'/api/chain-pose',{'document':doc,'object':'rope','preset':'teardrop'})
+    result=json.loads(raw)
+    assert result['changed']
+    assert result['document']['objects'][0]['components']['parts']
+    assert len(result['scene']['chains'])==1
+    assert result['scene']['chains'][0]['id']=='rope'
+
 def test_mutations_require_same_origin_session_token(editor):
     for headers,token in (({},False),({'Origin':'https://untrusted.example'},True)):
         with pytest.raises(urllib.error.HTTPError) as error: request(editor,'/api/save',{},token,headers)
@@ -272,6 +286,35 @@ def test_human_import_is_textured_portable_and_survives_pose_snapshots(editor,bl
     assert disabled['humans'][0]['render_model']['metadata']==imported['metadata']
 
 
+def test_human_import_above_old_http_and_asset_limits_reopens(editor,blank):
+    from test_human_assets import skinned_fixture,encoded,glb
+    data,binary=skinned_fixture()
+    binary=binary.ljust(31*1024*1024,b'\0')
+    data['buffers']=[{'byteLength':len(binary)}]
+    raw=glb(data,binary)
+    payload={'filename':'large-avatar.glb','content_base64':encoded(raw)}
+    imported=json.loads(request(editor,'/api/import-human-model',payload)[1])
+    assert imported['metadata']['vertex_count']==3
+    assert len(request(editor,imported['url'])[1])>=len(binary)
+    doc=copy.deepcopy(blank)
+    doc['objects']=[{'id':'person','template':'human','render_model':imported['render_model']}]
+    scene=json.loads(request(editor,'/api/resolve',{'document':doc})[1])
+    assert 'load_error' not in scene['humans'][0]['render_model']
+    assert scene['humans'][0]['render_model']['url']==imported['url']
+
+
+@pytest.mark.parametrize('route,constant',[('/api/import-human-model','MAX_HUMAN_IMPORT_REQUEST_BYTES'),
+                                         ('/api/resolve','MAX_JSON_REQUEST_BYTES')])
+def test_oversized_upload_returns_json_instead_of_resetting_socket(editor,monkeypatch,route,constant):
+    monkeypatch.setattr('pipesim.server.'+constant,1024*1024)
+    with pytest.raises(urllib.error.HTTPError) as error:
+        request(editor,route,{'padding':'x'*(2*1024*1024)})
+    assert error.value.code==413
+    message=json.loads(error.value.read())['error']
+    assert '2.0 MiB' in message and '1.0 MiB' in message
+    assert request(editor,'/api/bootstrap')[0]==200
+
+
 def test_human_assets_cannot_escape_workspace_or_load_remote_resources(editor,blank):
     from test_human_assets import skinned_fixture,encoded
     doc=copy.deepcopy(blank)
@@ -313,7 +356,7 @@ def test_simulation_runs_as_a_cancellable_job_without_resending_design(editor,bl
     doc=copy.deepcopy(blank)
     doc['parts']=[{'id':'box','catalog':'generic.box','pose':{'position_mm':[0,0,500]}}]
     _,raw=request(editor,'/api/simulate',{'document':doc,'duration':.02,'chain_links_per_body':5,
-        'mode':'preview','preview_steps_per_second':2000,'preview_solver_iterations':480,'preview_beam_segment_mm':1000})
+        'mode':'preview','preview_steps_per_second':120,'preview_solver_iterations':80,'preview_beam_segment_mm':1000})
     job=json.loads(raw);assert job['status']=='running'
     deadline=time.monotonic()+30
     while job['status']=='running':
@@ -325,8 +368,8 @@ def test_simulation_runs_as_a_cancellable_job_without_resending_design(editor,bl
     result=json.loads(request(editor,'/api/simulation-result',{'job_id':job['id']})[1])['result']
     assert result['frames']
     assert result['mode']=='preview'
-    assert result['quality']['requested_steps_per_second']==2000
-    assert result['quality']['starting_solver_iterations']==480
+    assert result['quality']['requested_steps_per_second']==120
+    assert result['quality']['starting_solver_iterations']==80
     assert result['quality']['beam_segment_mm']==1000
     job=json.loads(request(editor,'/api/simulate',{'document':doc,'duration':30})[1])
     with pytest.raises(urllib.error.HTTPError) as error:

@@ -1,0 +1,514 @@
+{
+  "format": "pipesim/1",
+  "units": "mm-kg-s-N-deg",
+  "name": "Untitled creation",
+  "parts": [
+    {
+      "id": "tc101c-1",
+      "catalog": "tubeclamp.TC101C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          664.38676,
+          -610,
+          1490
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          180
+        ]
+      }
+    },
+    {
+      "id": "tc101c-1-copy",
+      "catalog": "tubeclamp.TC101C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          664.38676,
+          -610,
+          1290
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          180
+        ]
+      }
+    },
+    {
+      "id": "tc101c-1-copy-2",
+      "catalog": "tubeclamp.TC101C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          664.38676,
+          -610,
+          1090
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          180
+        ]
+      }
+    },
+    {
+      "id": "tc101c-1-copy-3",
+      "catalog": "tubeclamp.TC101C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          664.38676,
+          -610,
+          890
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          180
+        ]
+      }
+    },
+    {
+      "id": "tc101c-1-copy-4",
+      "catalog": "tubeclamp.TC101C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          664.38676,
+          -610,
+          690
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          180
+        ]
+      }
+    },
+    {
+      "id": "tc101c-1-copy-5",
+      "catalog": "tubeclamp.TC101C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          664.38676,
+          -610,
+          490
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          180
+        ]
+      }
+    },
+    {
+      "id": "tc167mc-1",
+      "catalog": "tubeclamp.TC167MC",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          0,
+          -610,
+          1490
+        ],
+        "rotation_deg": [
+          0,
+          90,
+          0
+        ]
+      }
+    },
+    {
+      "id": "tc167mc-1-copy",
+      "catalog": "tubeclamp.TC167MC",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          340,
+          -610,
+          1490
+        ],
+        "rotation_deg": [
+          0,
+          90,
+          0
+        ]
+      }
+    },
+    {
+      "id": "tc101c-1-copy-6",
+      "catalog": "tubeclamp.TC101C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          664.38676,
+          -610,
+          1840
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          180
+        ]
+      }
+    },
+    {
+      "id": "tc173mc-1",
+      "catalog": "tubeclamp.TC173MC",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          158.88676,
+          -610,
+          1840
+        ],
+        "rotation_deg": [
+          0,
+          90,
+          0
+        ]
+      }
+    },
+    {
+      "id": "d-shackle-1",
+      "catalog": "generic.d-shackle",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          700,
+          -4300,
+          240
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  ],
+  "joints": [],
+  "anchors": [],
+  "draft_subassemblies": [
+    {
+      "id": "draft-1",
+      "runs": [
+        {
+          "id": "tube-c-1",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            664.38676,
+            -609.9999999999998,
+            -30
+          ],
+          "end_mm": [
+            664.38676,
+            -609.9999999999998,
+            1970
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1",
+              "port": "through"
+            },
+            {
+              "connector": "tc101c-1-copy",
+              "port": "through"
+            },
+            {
+              "connector": "tc101c-1-copy-2",
+              "port": "through"
+            },
+            {
+              "connector": "tc101c-1-copy-3",
+              "port": "through"
+            },
+            {
+              "connector": "tc101c-1-copy-4",
+              "port": "through"
+            },
+            {
+              "connector": "tc101c-1-copy-5",
+              "port": "through"
+            },
+            {
+              "connector": "tc101c-1-copy-6",
+              "port": "through"
+            }
+          ],
+          "roll_deg": 0
+        },
+        {
+          "id": "tube-c-2",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            628.88676,
+            -610,
+            1490
+          ],
+          "end_mm": [
+            -628.88676,
+            -609.9999999999999,
+            1490
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            },
+            {
+              "connector": "tc167mc-1",
+              "port": "through"
+            },
+            {
+              "connector": "tc167mc-1-copy",
+              "port": "through"
+            }
+          ],
+          "roll_deg": 90
+        },
+        {
+          "id": "tube-c-2-copy",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            628.88676,
+            -610,
+            1290
+          ],
+          "end_mm": [
+            -628.88676,
+            -609.9999999999999,
+            1290
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1-copy",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            }
+          ],
+          "roll_deg": 90
+        },
+        {
+          "id": "tube-c-2-copy-2",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            628.88676,
+            -610,
+            1090
+          ],
+          "end_mm": [
+            -628.88676,
+            -609.9999999999999,
+            1090
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1-copy-2",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            }
+          ],
+          "roll_deg": 90
+        },
+        {
+          "id": "tube-c-2-copy-3",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            628.88676,
+            -610,
+            890
+          ],
+          "end_mm": [
+            -628.88676,
+            -609.9999999999999,
+            890
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1-copy-3",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            }
+          ],
+          "roll_deg": 90
+        },
+        {
+          "id": "tube-c-2-copy-4",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            628.88676,
+            -610,
+            690
+          ],
+          "end_mm": [
+            -628.88676,
+            -609.9999999999999,
+            690
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1-copy-4",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            }
+          ],
+          "roll_deg": 90
+        },
+        {
+          "id": "tube-c-2-copy-5",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            628.88676,
+            -610,
+            490
+          ],
+          "end_mm": [
+            -628.88676,
+            -609.9999999999999,
+            490
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1-copy-5",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            }
+          ],
+          "roll_deg": 90
+        },
+        {
+          "id": "tube-c-2-copy-6",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            628.88676,
+            -610,
+            1840
+          ],
+          "end_mm": [
+            -628.88676,
+            -609.9999999999999,
+            1840
+          ],
+          "attachments": [
+            {
+              "connector": "tc101c-1-copy-6",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            },
+            {
+              "connector": "tc173mc-1",
+              "port": "through"
+            }
+          ],
+          "roll_deg": 90
+        }
+      ],
+      "mirrors": [
+        {
+          "id": "mirror-1",
+          "axis": "x",
+          "offset_mm": 0,
+          "scope": "scene",
+          "run_modes": {
+            "tube-c-1": "free",
+            "tube-c-2": "centered",
+            "tube-c-2-copy": "centered",
+            "tube-c-2-copy-2": "centered",
+            "tube-c-2-copy-3": "centered",
+            "tube-c-2-copy-4": "centered",
+            "tube-c-2-copy-5": "centered",
+            "tube-c-2-copy-6": "centered"
+          }
+        }
+      ],
+      "mirror_parts": [
+        "tc101c-1-copy",
+        "tc101c-1-copy-2",
+        "tc101c-1-copy-3",
+        "tc101c-1-copy-4",
+        "tc101c-1-copy-5",
+        "tc101c-1-copy-6",
+        "tc167mc-1-copy"
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "chain-1",
+      "template": "chain",
+      "parameters": {
+        "length_mm": 1252.9502874749032,
+        "link_catalog": "generic.rope-jute-6"
+      },
+      "pose": {
+        "position_mm": [
+          200,
+          -660,
+          1710
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  ],
+  "metadata": {
+    "quick_detached": [
+      {
+        "owner": "tube-c-2-copy-2",
+        "joints": [],
+        "draft_attachments": [
+          {
+            "run": "tube-c-2-copy-2",
+            "attachment": {
+              "connector": "tc101c-1-copy-2",
+              "port": "branch",
+              "end": "start",
+              "insertion_mm": 24
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "libraries": []
+}

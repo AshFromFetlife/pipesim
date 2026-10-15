@@ -12,12 +12,24 @@ import pytest
 from PIL import Image
 from scipy.spatial.transform import Rotation
 from pipesim.document import Assembly, DocumentError
-from pipesim.human_rendering import HumanSkin
+from pipesim.human_rendering import HumanSkin, fitted_human_anchors
 from pipesim.math3d import transform
 from pipesim.rendering import Renderer, render_image, render_video, find_ffmpeg
 from pipesim.human_assets import _read_container
 
 ROOT=Path(__file__).resolve().parents[1]
+
+
+def test_missing_intermediate_neck_still_receives_neck_fit():
+    target = {'pelvis': np.array([0., 0., 0.]), 'lumbar': np.array([0., 0., 100.]),
+              'thorax': np.array([0., 0., 250.]), 'neck': np.array([0., 0., 500.]),
+              'head': np.array([0., 0., 600.])}
+    source = {name: point.copy() for name, point in target.items() if name != 'neck'}
+    target.update({name: np.zeros(3) for name in ('left_clavicle', 'left_upper_arm', 'left_forearm', 'left_hand',
+        'left_thigh', 'left_shin', 'left_foot', 'right_clavicle', 'right_upper_arm', 'right_forearm',
+        'right_hand', 'right_thigh', 'right_shin', 'right_foot')})
+    fitted = fitted_human_anchors(source, target, {'neck': .6})
+    assert fitted['head'][2] == pytest.approx(460)
 
 
 @pytest.fixture(scope='module')
@@ -36,7 +48,7 @@ def assembly(directory,case,enabled=True):
         'environment':{'ground':False}},directory)
 
 
-@pytest.mark.parametrize('variant',['mixamo','blender','rotated','vrm'])
+@pytest.mark.parametrize('variant',['mixamo','blender','rotated','vrm','mixed','identity','omitted'])
 def test_headless_matches_browser_bones_and_every_weighted_vertex(rigs,variant):
     directory,cases=rigs; case=next(c for c in cases if c['variant']==variant)
     skin=HumanSkin(directory/(variant+'.glb'),case['human'])
@@ -50,6 +62,19 @@ def test_headless_matches_browser_bones_and_every_weighted_vertex(rigs,variant):
             np.testing.assert_allclose(skin.vertices(primitive),mesh['vertices'],atol=3e-4,err_msg=variant+'/'+frame['name'])
 
 
+@pytest.mark.parametrize('variant',['mixed','identity','omitted'])
+def test_equivalent_skin_encodings_preserve_actual_vertex_geometry(rigs,variant):
+    directory,cases=rigs
+    original=next(c for c in cases if c['variant']=='mixamo')
+    encoded=next(c for c in cases if c['variant']==variant)
+    skin=HumanSkin(directory/(variant+'.glb'),encoded['human'])
+    skin.update({pid:transform(pose) for pid,pose in original['frames'][0]['poses'].items()},0)
+    for frame in original['frames']:
+        skin.update({pid:transform(pose) for pid,pose in frame['poses'].items()},frame['time_s'])
+        for primitive,mesh in zip(skin.primitives,frame['meshes'],strict=True):
+            np.testing.assert_allclose(skin.vertices(primitive),mesh['vertices'],atol=.002,err_msg=variant+'/'+frame['name'])
+
+
 def test_headless_mapped_bone_offsets_match_post_retarget_local_rotation(rigs):
     directory,cases=rigs; case=copy.deepcopy(next(c for c in cases if c['variant']=='mixamo'))
     poses={pid:transform(pose) for pid,pose in case['frames'][0]['poses'].items()}
@@ -59,6 +84,21 @@ def test_headless_mapped_bone_offsets_match_post_retarget_local_rotation(rigs):
     i=adjusted.mapping['left_clavicle']
     expected=baseline.world[i,:3,:3]@Rotation.from_euler('XYZ',angles,degrees=True).as_matrix()
     np.testing.assert_allclose(adjusted.world[i,:3,:3],expected,atol=2e-6)
+
+
+def test_headless_imported_neck_and_shoulders_follow_saved_fit_controls(rigs):
+    directory, cases = rigs
+    case = copy.deepcopy(next(c for c in cases if c['variant'] == 'mixamo'))
+    poses = {pid: transform(pose) for pid, pose in case['frames'][0]['poses'].items()}
+    original = HumanSkin(directory/'mixamo.glb', case['human'])
+    original.update(poses, 0)
+    case['human']['render_model']['body_proportions'] = {'neck': .7, 'shoulders': 1.2}
+    adjusted = HumanSkin(directory/'mixamo.glb', case['human'])
+    adjusted.update(poses, 0)
+    def distance(skin, a, b):
+        return np.linalg.norm(skin.world[skin.mapping[a], :3, 3] - skin.world[skin.mapping[b], :3, 3])
+    assert distance(adjusted, 'neck', 'head') / distance(original, 'neck', 'head') == pytest.approx(.7)
+    assert distance(adjusted, 'thorax', 'left_clavicle') / distance(original, 'thorax', 'left_clavicle') == pytest.approx(1.2)
 
 
 @pytest.mark.parametrize('variant',['mixamo','blender'])

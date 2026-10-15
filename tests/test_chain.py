@@ -1,16 +1,18 @@
 import copy
 import math
+import random
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from pipesim.chain import dimensions, generate
+from pipesim.chain import _commit_link_poses, dimensions, generate, pose_chain
 from pipesim.document import Assembly, DocumentError, write
 from pipesim.editing import expand_objects
 from pipesim.grouping import (attach_part, detach_attachment, move_object, regroup_object,
                               set_object_layout, update_object_parameters)
 from pipesim.math3d import align_axis, pose_of, transform
-from pipesim.posing import Mechanism, transform_part
+from pipesim.posing import Mechanism, commit_transform, transform_part
 from pipesim.snapping import _movement_coordinates
 from pipesim.validation import validate
 
@@ -366,3 +368,58 @@ def test_rope_can_land_on_a_curved_forearm_surface(factory,blank):
     after=factory(result['document'])
     a,b,_=after.joint_frames(result['joint'])
     assert np.linalg.norm(a-b)<.5
+
+
+MIRRORED_CHAIN_FIXTURE=Path(__file__).parent/'fixtures'/'chain_semi_circle_attachment.json'
+
+
+@pytest.mark.parametrize('seed',range(8))
+def test_mirrored_semi_circle_attachment_stays_on_fast_path(seed,monkeypatch):
+    """A mirror-generated link must not turn a 30-link pose into general IK."""
+    rng=random.Random(seed)
+    original=Assembly.load(MIRRORED_CHAIN_FIXTURE)
+    doc=copy.deepcopy(original.doc)
+    target=next(p for p in doc['parts'] if p['id']=='tc173mc-1-mirror-mirror-1')
+    target['pose']['position_mm']=[value+rng.uniform(-2,2) for value in target['pose']['position_mm']]
+    decoy=next(p for p in doc['parts'] if p['id']=='chain-1/link-1-mirror-mirror-1')
+    for index in range(rng.randrange(5)):
+        extra=copy.deepcopy(decoy)
+        extra['id']=f'chain-1/link-{index+2}-mirror-fuzz-{seed}'
+        doc['parts'].append(extra)
+    assembly=Assembly.from_doc(doc,original.base,original.library)
+
+    def slow_path(*args,**kwargs):
+        pytest.fail(f'mirrored attachment fell back to general IK or full regroup (seed={seed})')
+    monkeypatch.setattr('pipesim.posing.transform_part',slow_path)
+    monkeypatch.setattr('pipesim.posing.commit_transform',slow_path)
+    result=attach_part(assembly,'chain-1','chain-1/link-1',
+                       {'part':target['id'],'port':'hinge'},'spherical',part_port='b')
+    after=Assembly.from_doc(result['document'],assembly.base,assembly.library)
+    assert len(result['moved'])==30
+    assert 'components' in after.doc['objects'][0]
+    assert len(after.doc['objects'][0]['components']['parts'])==30
+    assert any(p['id']=='chain-1/link-1-mirror-mirror-1' for p in after.doc['parts'])
+    assert np.linalg.norm(after.joint_frames(result['joint'])[0]-after.joint_frames(result['joint'])[1])<.5
+
+
+def test_direct_chain_pose_save_matches_general_joint_rebase():
+    assembly=Assembly.load(MIRRORED_CHAIN_FIXTURE)
+    doc=copy.deepcopy(assembly.doc)
+    instance=doc['objects'][0]
+    instance['layout_mode']='posable'
+    assembly.doc=doc
+    part=assembly.parts['chain-1/link-1']
+    goal=assembly.parts['tc173mc-1-mirror-mirror-1'].frame({'port':'hinge'})[0]
+    desired=part.matrix.copy()
+    desired[:3,3]+=goal-part.frame({'port':'b'})[0]
+    preview=pose_chain(assembly,instance,part.id,desired,endpoint='b',preview=True)
+    direct=_commit_link_poses(assembly,instance,preview['poses'])
+    reference=commit_transform(assembly,preview['poses'])
+    assert 'pose_preset' not in direct['objects'][0]
+    assert 'pose_preset' not in reference['objects'][0]
+    saved=Assembly.from_doc(direct,assembly.base,assembly.library)
+    generic=Assembly.from_doc(reference,assembly.base,assembly.library)
+    for name in saved.parts:
+        assert np.allclose(saved.parts[name].matrix,generic.parts[name].matrix,atol=1e-6,rtol=0)
+    limits={j['id']:j.get('limits') for j in generic.joints}
+    assert all(j.get('limits')==limits[j['id']] for j in saved.joints)

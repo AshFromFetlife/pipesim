@@ -256,7 +256,17 @@ def validate(assembly,collisions=True,build=False,cancelled=None,*,geometry=True
                 for j in pair:
                     if j.get('type')=='socket': continue
                     pa,_,_=assembly.joint_frames(j)
-                    if all(np.linalg.norm(np.array(c[5])*1000-pa)<12 for c in overlaps): allowed=True
+                    radius=12
+                    if j.get('type')=='spherical':
+                        endpoints=(j['a'],j['b'])
+                        ports=[assembly.parts[end['part']].ports.get(end.get('port'),{})
+                               for end in endpoints]
+                        if (all(port.get('type')=='eye' and port.get('assembly')=='hook'
+                                for port in ports) and
+                            any(port.get('snap_role')=='shackle' for port in ports)):
+                            # The linked ring passes through the shackle's bow.
+                            radius=35
+                    if all(np.linalg.norm(np.array(c[5])*1000-pa)<radius for c in overlaps): allowed=True
                 if allowed: continue
                 severity='error' if rigid[a]==rigid[b] else 'warning'
                 issue('INTERSECTION',f'Parts penetrate by {max(-c[8]*1000 for c in overlaps):.2f} mm',[a,b],severity,depth_mm=max(-c[8]*1000 for c in overlaps))

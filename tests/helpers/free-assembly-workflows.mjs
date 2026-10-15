@@ -9,6 +9,7 @@ import {matrix,endpoints,closePoint,random,v} from './geometry-workflow-model.mj
 
 export function registerFreeAssemblyWorkflows({test,editor,post,workspace}) {
   const fixture='tests/fixtures/four-way-swing';
+  let fixtureAssets;
   function pose(m) {
     const q=new THREE.Quaternion().setFromRotationMatrix(m),e=new THREE.Euler().setFromQuaternion(q,'ZYX');
     return {position_mm:new THREE.Vector3().setFromMatrixPosition(m).toArray(),rotation_deg:[e.x,e.y,e.z].map(THREE.MathUtils.radToDeg)};
@@ -21,7 +22,10 @@ export function registerFreeAssemblyWorkflows({test,editor,post,workspace}) {
     return members;
   }
   async function exercise(spec,{fault=null,retain=true}={}) {
-    await cp(join(fixture,'assets'),join(workspace(),'output','assets'),{recursive:true});
+    // The editor loads meshes asynchronously. Recopying the same destination
+    // between cases can replace a mesh while a previous load is still in flight.
+    fixtureAssets??=cp(join(fixture,'assets'),join(workspace(),'output','assets'),{recursive:true});
+    await fixtureAssets;
     let ui;const failures=[],requests=[],responses=[];
     try {
       ui=await editor(structuredClone(spec.document),null,{

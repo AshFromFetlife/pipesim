@@ -59,15 +59,21 @@ def _transverse_response(part, nodes):
     return strongest
 
 
-def prepare_beams(assembly, *, maximum_segment_mm=400, minimum_deflection_mm=1, minimum_segments=3):
+def prepare_beams(assembly, *, maximum_segment_mm=400, minimum_deflection_mm=1, minimum_segments=3,
+                  segment_mm_by_part=None, enabled_parts=None):
     """Return an ephemeral assembly and source/element metadata.
 
     FEA decides which members need bending. The FEA displacement is only a
     selection signal: it is never used as an imposed pose, since its linear
     small-deflection assumption is invalid near the floor or another body.
     """
+    segment_mm_by_part=segment_mm_by_part or {}
+    def segment_limit(part): return segment_mm_by_part.get(part.id,maximum_segment_mm)
+    if enabled_parts is not None and not enabled_parts:
+        return assembly, {}, {'status':'preview_rigid_beams','members':[]}
     potential=[p for p in assembly.parts.values() if p.kind=='member'
-               and p.length>=2*maximum_segment_mm and p.shapes
+               and (enabled_parts is None or p.id in enabled_parts)
+               and p.length>=2*segment_limit(p) and p.shapes
                and all(_axial_shape(shape,p.length) is not None for shape in p.shapes)
                and p.definition.get('material_data',{}).get('youngs_modulus_pa')]
     if not potential:
@@ -111,7 +117,7 @@ def prepare_beams(assembly, *, maximum_segment_mm=400, minimum_deflection_mm=1, 
     values = {row['part']: row for row in selection['members']}
     selected = {}
     for pid, part in assembly.parts.items():
-        if pid in guides: continue
+        if pid in guides or (enabled_parts is not None and pid not in enabled_parts): continue
         row = values.get(pid)
         if fallback:
             if pid not in potential_ids: continue
@@ -127,7 +133,7 @@ def prepare_beams(assembly, *, maximum_segment_mm=400, minimum_deflection_mm=1, 
             if not row: continue
             direction=_transverse_response(part,selection['nodes'])
             if np.linalg.norm(direction)<minimum_deflection_mm: continue
-        if part.length < 2*maximum_segment_mm or not part.shapes:
+        if part.length < 2*segment_limit(part) or not part.shapes:
             continue
         if any(_axial_shape(shape, part.length) is None for shape in part.shapes):
             continue
@@ -136,7 +142,7 @@ def prepare_beams(assembly, *, maximum_segment_mm=400, minimum_deflection_mm=1, 
         if not youngs or not math.isfinite(youngs):
             continue
         section = section_properties(part)
-        count = min(32, max(minimum_segments, math.ceil(part.length / maximum_segment_mm)))
+        count = min(32, max(minimum_segments, math.ceil(part.length / segment_limit(part))))
         selected[pid] = (part, row, section, count, direction)
     if not selected:
         return assembly, {}, structural

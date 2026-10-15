@@ -13,7 +13,7 @@ from pipesim.document import Assembly, read
 from pipesim.document import DocumentError
 from pipesim.drafting import preview
 from pipesim.math3d import align_axis, pose_of
-from pipesim.resize_drag import _frame, resize_drag
+from pipesim.resize_drag import _frame, _valid_against, resize_drag
 from pipesim.validation import validate
 
 
@@ -31,6 +31,21 @@ def sample(blank, *, attached=True, extra=False):
         'start_mm':[0,0,0],'end_mm':[1000,0,0],
         'attachments':[{'connector':'fitting','port':'bore'}] if attached else []}]}]
     return doc
+
+
+def test_free_mirror_overlap_warning_does_not_block_resize_validation(blank):
+    doc = copy.deepcopy(blank)
+    doc['draft_subassemblies'] = [{'id': 'frame', 'runs': [{'id': 'pipe',
+        'catalog': 'tubeclamp.tube-C', 'start_mm': [0, -500, 100],
+        'end_mm': [0, 500, 100], 'attachments': []}],
+        'mirrors': [{'id': 'plane', 'axis': 'x', 'offset_mm': 0,
+                     'run_modes': {'pipe': 'free'}}]}]
+    before = Assembly.from_doc(doc)
+    doc['draft_subassemblies'][0]['runs'][0]['start_mm'] = [-500, -500, 100]
+    doc['draft_subassemblies'][0]['runs'][0]['end_mm'] = [500, 500, 100]
+    after = Assembly.from_doc(doc)
+    assert preview(after)[0]['warnings'][0]['code'] == 'MIRROR_SELF_INTERSECTION'
+    _valid_against(before, after, set())
 
 
 @pytest.mark.parametrize('side',['start','end'])

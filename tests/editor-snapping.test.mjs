@@ -51,6 +51,30 @@ test('a fitting cannot snap to a pipe in its own rigid body',()=>{
   const s=setup();s.scene.groups=[['pipe','tee']];assert.equal(s.candidates().length,0);
 });
 
+test('seeded rename matrix uses current display names without changing snap identities',()=>{
+  let seed=0x92f4a;
+  const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed;};
+  const labels=['CrossBar','Rail <b>one</b>','左支柱','tee / pipe','Name & "quote"','same name'];
+  const s=setup(),baseline=s.candidates()[0];
+  for(let i=0;i<64;i++){
+    for(const part of s.scene.parts)part.label=i%7?labels[random()%labels.length]+' '+random():undefined;
+    const match=s.candidates()[0];
+    assert.equal(match.label,`${s.scene.parts[1].label||'tee'} / through → ${s.scene.parts[0].label||'pipe'} · 500.0 mm from start`);
+    assert.deepEqual({...match,label:null},{...baseline,label:null});
+  }
+});
+
+test('a detached through fitting already on its pipe keeps its physical station',()=>{
+  const s=setup();
+  s.scene.parts[0].length_mm=1600;
+  s.matrices.set('pipe',new THREE.Matrix4().makeTranslation(0,0,800));
+  s.matrices.set('tee',new THREE.Matrix4().makeTranslation(0,0,848));
+  // At this view scale the fitting is within the old 8 px midpoint magnet.
+  const match=connectionCandidates(s.scene,s.matrices,['tee'],s.camera,300,200)[0];
+  assert.ok(match);
+  assert.ok(Math.abs(match.at_mm-848)<1e-8);
+});
+
 test('dragging an eye near a clevis captures hinge bolt ports despite a small hole offset',()=>{
   const {camera}=setup();
   const eye={type:'eye',assembly:'bolt',position_mm:[0,0,0],axis:[0,-1,0]};
@@ -63,11 +87,48 @@ test('dragging an eye near a clevis captures hinge bolt ports despite a small ho
   assert.equal(matches().length,1);assert.equal(matches()[0].kind,'hinge');
   assert.deepEqual(matches()[0].male,{part:'male',port:'hinge'});
   assert.deepEqual(matches()[0].female,{part:'female',port:'hinge'});
+  scene.parts[0].label='Renamed eye';scene.parts[1].label='Renamed clevis';
+  assert.equal(matches()[0].label,'Renamed eye / hinge ↔ Renamed clevis / hinge · hinge bolt');
+  assert.deepEqual(matches()[0].male,{part:'male',port:'hinge'});
+  assert.deepEqual(matches()[0].female,{part:'female',port:'hinge'});
   scene.joints.push({id:'used',a:{part:'female',port:'hinge'},b:{part:'other',port:'eye'}});
   assert.equal(matches().length,0);
   scene.joints=[];scene.groups=[['male','female']];assert.equal(matches().length,0);
   scene.groups=[['male'],['female']];clevis.diameter_mm=12;eye.diameter_mm=8;
   assert.equal(matches().length,0,'incompatible bolt bores must not capture');
+});
+
+test('D-shackle drag captures chain eyes and bolt holes while respecting its shared pin',()=>{
+  const {camera}=setup();
+  const shackle={id:'shackle',kind:'connector',ports:{
+    eye:{type:'eye',assembly:'hook',snap_role:'shackle',position_mm:[0,0,10],axis:[1,0,0]},
+    pin_hook:{type:'eye',assembly:'hook',snap_role:'shackle',position_mm:[0,0,-15],axis:[1,0,0],excludes:['pin_bolt']},
+    pin_bolt:{type:'clevis',assembly:'bolt',snap_role:'shackle',diameter_mm:8,position_mm:[0,0,-15],axis:[1,0,0],excludes:['pin_hook']}
+  }};
+  const chain={id:'chain',kind:'chain',ports:{end:{type:'eye',assembly:'hook',position_mm:[0,0,0],axis:[0,1,0]}}};
+  const bolt={id:'bolt',kind:'connector',ports:{eye:{type:'eye',assembly:'bolt',diameter_mm:10.6,position_mm:[0,0,0],axis:[0,1,0]}}};
+  const scene={parts:[shackle,chain,bolt],groups:[['shackle'],['chain'],['bolt']],joints:[]};
+  const matrices=new Map([['shackle',new THREE.Matrix4().makeTranslation(12,0,500)],
+    ['chain',new THREE.Matrix4().makeTranslation(0,0,500)],
+    ['bolt',new THREE.Matrix4().makeTranslation(0,0,480)]]);
+  const matches=hingeCandidates(scene,matrices,['shackle'],camera,900,600);
+  assert.ok(matches.some(c=>c.kind==='hook'&&c.male.port==='eye'&&c.female.part==='chain'));
+  assert.ok(matches.some(c=>c.kind==='hinge'&&c.female.port==='pin_bolt'&&c.male.part==='bolt'));
+  const hole={id:'hole',kind:'connector',ports:{bolt1:{type:'bolt',assembly:'bolt',diameter_mm:8,position_mm:[0,0,0],axis:[0,0,1]}}};
+  scene.parts.push(hole);scene.groups.push(['hole']);matrices.set('hole',new THREE.Matrix4().makeTranslation(0,0,480));
+  assert.ok(hingeCandidates(scene,matrices,['shackle'],camera,900,600)
+    .some(c=>c.kind==='hinge'&&c.male.part==='hole'&&c.female.port==='pin_bolt'));
+  hole.ports.bolt1.diameter_mm=12;
+  assert.equal(hingeCandidates(scene,matrices,['shackle'],camera,900,600)
+    .some(c=>c.kind==='hinge'&&c.male.part==='hole'),false,'oversized hole must not capture');
+  scene.joints=[{id:'pin-used',a:{part:'shackle',port:'pin_hook'},b:{part:'chain',port:'end'}}];
+  assert.equal(socketOccupied(scene,'shackle','pin_bolt'),true);
+  assert.equal(hingeCandidates(scene,matrices,['shackle'],camera,900,600)
+    .some(c=>c.kind==='hinge'&&c.female.port==='pin_bolt'),false);
+  scene.joints=[];scene.parts=[chain,{...chain,id:'other'}];scene.groups=[['chain'],['other']];
+  matrices.set('other',new THREE.Matrix4().makeTranslation(12,0,500));
+  assert.equal(hingeCandidates(scene,matrices,['chain'],camera,900,600).length,0,
+    'unmarked chain links do not acquire extra drag magnets');
 });
 
 test('through station keeps the full socket on the pipe',()=>{
@@ -87,6 +148,8 @@ test('rotation aligns with an angled part without leaving the handle plane',()=>
   s.matrices.set('reference',new THREE.Matrix4().makeRotationZ(ThreeAngle(17)));
   const match=rotationAlignment(s.scene,s.matrices,['tee'],'tee',3,new THREE.Vector3(0,0,1));
   assert.ok(match.label.startsWith('reference'));assert.ok(Math.abs(match.angleDeg-1)<1e-7);
+  s.scene.parts.at(-1).label='Square frame';
+  assert.ok(rotationAlignment(s.scene,s.matrices,['tee'],'tee',3,new THREE.Vector3(0,0,1)).label.startsWith('Square frame'));
   const corrected=new THREE.Matrix4().makeRotationFromQuaternion(match.correction).multiply(s.matrices.get('tee'));
   assert.ok(corrected.elements.every((v,i)=>Math.abs(v-s.matrices.get('reference').elements[i])<1e-7));
 });

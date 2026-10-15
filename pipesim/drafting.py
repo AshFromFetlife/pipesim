@@ -423,23 +423,28 @@ def _inferred_through(assembly, allow_near=False):
 
 def preview(assembly):
     """Small visual proxies; the resolved Assembly remains exact-only."""
-    from .symmetry import mirror_run_conflict
+    from .symmetry import mirror_free_run_overlap, mirror_run_conflict
     result = []
     planes = {run['id']: group.get('mirrors', []) for group in assembly.doc.get('draft_subassemblies', [])
               for run in group['runs']}
     for run in runs(assembly.doc):
         layout = _layout(assembly, run)
         conflicts = list(layout['conflicts'])
+        warnings = []
         for plane in planes.get(run['id'], []):
-            conflict = mirror_run_conflict(layout, plane, plane.get('run_modes', {}).get(run['id'], 'free'))
+            mode = plane.get('run_modes', {}).get(run['id'], 'free')
+            conflict = (mirror_free_run_overlap(layout, plane) if mode == 'free' else
+                        mirror_run_conflict(layout, plane, mode))
             if conflict:
-                conflicts.append({'run': run['id'], 'plane': plane['id'], **conflict})
+                (warnings if mode == 'free' else conflicts).append(
+                    {'run': run['id'], 'plane': plane['id'], **conflict})
         definition = _definition(assembly, run, layout['length'])
         result.append({'id': run['id'], 'label': run['id']+' · draft', 'catalog': run['catalog'], 'kind': 'member',
                        'draft': True, 'pose': layout['pose'], 'geometry': definition['geometry'],
                        'ports': {}, 'section': definition.get('section', {}), 'length_mm': layout['length'],
-                       'mass_kg': 0., 'color': '#5ba9b5' if not conflicts else '#cf815d',
-                       'conflicts': conflicts, 'attachments': run.get('attachments', [])})
+                       'mass_kg': 0., 'color': '#5ba9b5' if not conflicts and not warnings else '#cf815d',
+                       'conflicts': conflicts, 'warnings': warnings,
+                       'attachments': run.get('attachments', [])})
     return result
 
 
@@ -739,7 +744,39 @@ def _relax(assembly, selected, cancelled=None):
             errors.extend(x[6*i+3:6*i+6]*.3)
         return np.asarray(errors, dtype=float)
 
-    solution = least_squares(residual, np.zeros(count), jac_sparsity=pattern.tocsr(),
+    initial = np.zeros(count)
+    # A side socket facing away from the mirror needs a large turn. Starting
+    # the local solver at zero may tip the attached upright instead; at a
+    # half-turn, the axial error even has zero first derivative. Use the
+    # through bore as the turning axis to retain the leg's plumb line.
+    for group in selected:
+        for run in group['runs']:
+            ends = [a for a in run.get('attachments', []) if a.get('end') in ('start', 'end')]
+            if len(ends) != 1:
+                continue
+            attachment = ends[0]
+            variable = index.get(attachment['connector'])
+            if variable is None or np.linalg.norm(initial[6*variable+3:6*variable+6]) > 0:
+                continue
+            through = next((a for other in group['runs'] for a in other.get('attachments', [])
+                            if a['connector'] == attachment['connector'] and
+                            a.get('end') not in ('start', 'end')), None)
+            if through is None:
+                continue
+            source = _socket(assembly, attachment)[3]
+            turn_axis = _socket(assembly, through)[3]
+            for plane in group.get('mirrors', []):
+                if plane.get('run_modes', {}).get(run['id']) != 'centered':
+                    continue
+                mirror_axis = AXES[plane['axis']]
+                sign = 1 if run['end_mm'][mirror_axis] >= run['start_mm'][mirror_axis] else -1
+                expected = sign if attachment['end'] == 'start' else -sign
+                target = np.zeros(3); target[mirror_axis] = expected
+                if source @ target < .95 and abs(turn_axis @ target) < .1:
+                    angle = np.arctan2(turn_axis @ np.cross(source, target), source @ target)
+                    initial[6*variable+3:6*variable+6] = turn_axis*angle
+                break
+    solution = least_squares(residual, initial, jac_sparsity=pattern.tocsr(),
                              tr_solver='lsmr', max_nfev=80, ftol=1e-8, xtol=1e-8, gtol=1e-8)
     residual(solution.x)
     changed = {pid for i, group in enumerate(movable) for pid in group if
@@ -989,6 +1026,7 @@ def finalize(assembly, subassembly=None, check_collisions=True, cancelled=None, 
     groups = _scope(assembly, subassembly, run_id, include_run_ids=include_run_ids)
     document = copy.deepcopy(assembly.doc)
     conflicts = _mirror_conflicts(assembly, groups)
+    joint_ids = {joint['id'] for joint in document.get('joints', [])}
     for group in groups:
         for run in group['runs']:
             _check_cancelled(cancelled)
@@ -1009,9 +1047,20 @@ def finalize(assembly, subassembly=None, check_collisions=True, cancelled=None, 
                     through = bool(socket.get('through'))
                     station = next((s for a, s in layout['through'] if a is attachment), None)
                     endpoint = {'part': run['id'], **({'at_mm': round(station, 6)} if through else {'end': attachment['end']})}
-                    jid = f"{attachment['connector']}-{attachment['port']}-{run['id']}"
-                    document.setdefault('joints', []).append({'id': jid, 'type': 'socket', 'a': {'part': attachment['connector'], 'port': attachment['port']},
-                                                               'b': endpoint, 'insertion_mm': 0. if through else attachment['insertion_mm'], 'locked': True})
+                    # Reopening changes the pipe's representation, not its
+                    # screw state, fit allowance, hardware notes or limits.
+                    # Endpoints/stations follow the edited draft. Copied or
+                    # mirrored attachments get unique IDs on materialization.
+                    saved = copy.deepcopy(attachment.get('joint', {}))
+                    root = saved.get('id', f"{attachment['connector']}-{attachment['port']}-{run['id']}")
+                    jid, index = root, 2
+                    while jid in joint_ids:
+                        jid = f'{root}-{index}'; index += 1
+                    joint_ids.add(jid)
+                    document.setdefault('joints', []).append({**saved, 'id': jid, 'type': 'socket',
+                        'a': {'part': attachment['connector'], 'port': attachment['port']}, 'b': endpoint,
+                        'insertion_mm': 0. if through else attachment['insertion_mm'],
+                        'locked': saved.get('locked', False) if saved else True})
             except (DocumentError, ValueError) as exc:
                 conflicts.append({'run': run['id'], 'code': 'DRAFT_INVALID', 'message': str(exc)})
     if conflicts:
@@ -1080,7 +1129,7 @@ def reopen(assembly, members):
         touching = [end for end in ends if end['part'] in selected_set]
         if not touching:
             continue
-        if len(touching) != 1 or joint['type'] != 'socket' or not joint.get('locked'):
+        if len(touching) != 1 or joint['type'] != 'socket':
             raise DocumentError(f"{joint['id']}: draft mode cannot represent this pipe joint")
         member_end = touching[0]
         connector_end = ends[1] if ends[0] is member_end else ends[0]
@@ -1088,7 +1137,7 @@ def reopen(assembly, members):
         socket = connector.ports.get(connector_end.get('port'))
         if socket is None or socket.get('type') != 'socket':
             raise DocumentError(f"{joint['id']}: draft mode needs a connector socket")
-        attachment = {'connector': connector.id, 'port': connector_end['port']}
+        attachment = {'connector': connector.id, 'port': connector_end['port'], 'joint': copy.deepcopy(joint)}
         if socket.get('through'):
             if 'at_mm' not in member_end:
                 raise DocumentError(f"{joint['id']}: through socket needs a pipe station")
@@ -1141,4 +1190,6 @@ def reopen(assembly, members):
     doc.pop('results', None); doc.pop('build_plan', None)
     preview(Assembly.from_doc(doc, assembly.base, assembly.library))
     return {'status': 'reopened', 'document': doc, 'subassembly': group_id,
-            'converted_parts': selected, 'removed_joints': sorted(removed_joints)}
+            'converted_parts': selected, 'removed_joints': sorted(removed_joints),
+            'preserved_loose_connections': sum(not joint.get('locked', False) for joint in assembly.joints
+                                               if joint['id'] in removed_joints)}

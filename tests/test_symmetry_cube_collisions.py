@@ -2,6 +2,7 @@
 
 import copy
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -41,6 +42,53 @@ def cube_corner(base, reach=300, origin=(0, 0, 1000)):
             'attachments': [{'connector': 'corner', 'port': axis,
                              'end': 'start', 'insertion_mm': 30}]})
     return doc
+
+
+def square_corner_with_seam_ends(base, reach=300, origin=(0, 0, 1000)):
+    """Two quarter-frame pipes stop at their mirror planes without a fitting."""
+    doc = cube_corner(base, reach=reach, origin=origin)
+    group = doc['draft_subassemblies'][0]
+    group['runs'] = [run for run in group['runs'] if run['id'] != 'z-edge']
+    group['mirrors'] = [plane for plane in group['mirrors'] if plane['axis'] != 'z']
+    for plane in group['mirrors']:
+        plane['run_modes'] = {}
+    for run in group['runs']:
+        axis = 'xyz'.index(run['id'][0])
+        run['end_mm'][axis] = origin[axis]
+    return doc
+
+
+def test_two_mirror_seams_finalize_as_one_connected_square(editor):
+    source = square_corner_with_seam_ends(editor.root)
+    status, raw = request(editor, '/api/draft-finalize', {'document': source})
+    result = json.loads(raw)
+    assert status == 200 and result['status'] == 'finalized', result
+    assert not result['document'].get('draft_subassemblies')
+    exact = Assembly.from_doc(result['document'], editor.root)
+    assert len(exact.parts) == 8  # Four corners and four continuous pipes.
+    assert len(exact.joints) == 8
+    assert len(exact.rigid_groups()) == 1
+    assert validate(exact)['valid']
+
+
+@pytest.mark.parametrize('selected', [False, True])
+def test_two_mirror_scaffold_with_socket_rotation_finalizes_connected(editor, selected):
+    # Reduced from the reported scaffold: its centered spans drift only
+    # 0.15 mm sideways because the source socket is rotated a fraction of a
+    # degree. They must remain one pipe across each mirror.
+    source = json.loads((Path(__file__).parent / 'fixtures' /
+        'two_mirror_scaffold_drift.json').read_text(encoding='utf-8'))
+    status, raw = request(editor,
+        '/api/draft-finalize-selected' if selected else '/api/draft-finalize',
+        {'document': source, **({'run': 'tube-c-1'} if selected else {})})
+    result = json.loads(raw)
+    assert status == 200 and result['status'] == 'finalized', result
+    assert not result['document'].get('draft_subassemblies')
+    exact = Assembly.from_doc(result['document'], editor.root)
+    assert len(exact.parts) == 24
+    assert len(exact.joints) == 28
+    assert len(exact.rigid_groups()) == 1
+    assert validate(exact)['valid']
 
 
 def test_three_mirrors_materialize_one_corner_into_connected_cube(tmp_path):

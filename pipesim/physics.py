@@ -20,6 +20,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import pybullet as pb
 from scipy.spatial.transform import Rotation
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import lsmr
 from .document import Assembly, DocumentError, joint_kind, fingerprint
 from .math3d import transform, pose_of, point, unit, UnionFind, align_axis
 from .geometry import collision_primitives, mesh_for_part, shape_mesh
@@ -101,15 +103,16 @@ def _inertia(parts,reference):
     return float(mass),com,inertia
 
 class World:
-    def __init__(self,assembly,dt=1/240,static=False,*,progress=None,collision_only=False,preview_iterations=None):
+    def __init__(self,assembly,dt=1/240,static=False,*,progress=None,collision_only=False,preview_iterations=None,preview_wheel_profile=0):
         if collision_only and not static:
             raise ValueError('Collision-only worlds must be static')
         self.collision_only=collision_only
         self.preview_iterations=preview_iterations
-        self._preview_requested_iterations=preview_iterations
-        self._preview_quiet_steps=0
-        self.preview_refinements=0
-        self._preview_contact_frequency=4000
+        self.preview_wheel_profile=preview_wheel_profile
+        self.preview_refinements=preview_wheel_profile
+        anchored={a['part'] for a in assembly.anchors}
+        self._preview_line_mass_floor=min(.1,.03*max((sum(assembly.parts[pid].mass for pid in group)
+            for group in assembly.rigid_groups() if not set(group)&anchored),default=0.)) if preview_iterations is not None else 0.
         assembly.require_finished('simulation')
         self.assembly=assembly
         self.progress=progress or Progress()
@@ -120,6 +123,7 @@ class World:
         self.static=static
         self.part_map={}; self.joint_map={}; self.body_ids=[]; self.constraints=[]
         self.events=[]; self.elapsed=0.; self._mesh_number=0
+        self._full_line_check_stride=max(1,round(.001/dt)); self._line_step_count=0
         self.broken=set(); self.reference_coordinates={}
         # A severed flexible line remains two connected lengths. Solver
         # reactions on its newly free ends must not fracture every link.
@@ -165,6 +169,11 @@ class World:
         link=ET.SubElement(robot,'link',name=name)
         # Fixed collision queries need neither rendered meshes nor mass integration.
         mass,com,inertia=(1.,np.zeros(3),np.eye(3)) if self.collision_only else _inertia(parts,reference)
+        if self.preview_iterations is not None and all(p.kind=='chain' for p in parts) and mass>0:
+            # Condition the coarse line's inertia for the bounded preview solve.
+            # Source masses and Full physics are unchanged.
+            factor=max(1.,self._preview_line_mass_floor/mass)
+            mass*=factor;inertia*=factor
         inertial=ET.SubElement(link,'inertial')
         ET.SubElement(inertial,'origin',xyz=_floats(com),rpy='0 0 0')
         ET.SubElement(inertial,'mass',value=str(mass))
@@ -174,7 +183,7 @@ class World:
         preview_rope=self._preview_rope_collision(parts) if self.preview_iterations is not None else None
         for p in parts:
             self.progress.check()
-            if not self.collision_only:
+            if not self.collision_only and self.preview_iterations is None:
                 visual=ET.SubElement(link,'visual')
                 _origin(visual,inv@p.matrix)
                 geom=ET.SubElement(visual,'geometry')
@@ -215,13 +224,13 @@ class World:
         removes overlapping convex-mesh contacts inside a grouped cable without
         disabling its contacts with the ground or other objects.
         """
-        if not all(p.kind=='chain' and p.definition.get('flexible_profile')=='rope' for p in parts):return None
+        if not all(p.kind=='chain' for p in parts):return None
         radii=[s.get('radius_mm',s.get('diameter_mm',0)/2) for p in parts for s in p.shapes]
         if not radii or min(radii)<=0:return None
         endpoints=np.array([p.frame({'port':port})[0] for p in parts for port in ('a','b')])
         vectors=[p.matrix[:3,:3]@(p.local_frame({'port':'a'})[0]-p.local_frame({'port':'b'})[0]) for p in parts]
         direction=np.sum(vectors,axis=0)
-        if np.linalg.norm(direction)<.999*sum(np.linalg.norm(v) for v in vectors):return None
+        if np.linalg.norm(direction)<.98*sum(np.linalg.norm(v) for v in vectors):return None
         axis=unit(direction)
         stations=endpoints@axis
         center=endpoints.mean(axis=0);center+=axis*((stations.min()+stations.max())/2-center@axis)
@@ -253,6 +262,17 @@ class World:
         self._chain_joints=[j for j in assembly.joints if j.get('metadata',{}).get('chain_link')
             and joint_kind(j)=='spherical' and not (j.get('motor') or j.get('break_torque_nm')
                 or j['id'] in driven)]
+        self._webbing_joints=[]
+        self._webbing_inertia={}
+        for joint in self._chain_joints:
+            first=assembly.parts[joint['a']['part']].definition
+            second=assembly.parts[joint['b']['part']].definition
+            stiffness=first.get('bend_stiffness_nm_rad')
+            damping=first.get('bend_damping_nm_s_rad')
+            if (first.get('flexible_profile')=='strap' and
+                    second.get('flexible_profile')=='strap' and stiffness is not None):
+                self._webbing_joints.append((joint,np.asarray(stiffness,float),
+                                             np.asarray(damping or [0,0,0],float)))
         self._line_joints=self._chain_joints+[j for j in assembly.joints
             if j.get('metadata',{}).get('simplified_chain')]
         self._beam_joints=[j for j in assembly.joints if j.get('metadata',{}).get('beam_hinge')]
@@ -385,6 +405,8 @@ class World:
             # timesteps, retaining the real masses and all obstacle contacts.
             metal_links=any(assembly.parts[j['a']['part']].definition.get('flexible_profile','chain')=='chain'
                             for j in self._chain_joints)
+            webbing_links=any(assembly.parts[j['a']['part']].definition.get('flexible_profile')=='strap'
+                              for j in self._chain_joints)
             correction_fraction=1.
             if not self._beam_joints:
                 self.substeps*=2
@@ -395,20 +417,41 @@ class World:
             # Preserve the correction rate per second when refining time.
             # Holding ERP fixed would double the separating velocity created
             # by an overlap, undoing the benefit of the smaller timestep.
-            erp=1-(1-.02)**correction_fraction
+            # Yielding beams and wide webbing under a heavy load can pull
+            # joints visibly apart despite many solver iterations. Correct
+            # those positions by 5% per internal step instead of doubling
+            # Full physics substeps. Ordinary rope and interlocking metal
+            # rings keep gentler correction for their contact dynamics.
+            stronger_joints=self.preview_iterations is None and not metal_links and (bool(self._beam_joints) or webbing_links)
+            erp=.05 if stronger_joints else 1-(1-.02)**correction_fraction
             contact_erp=1-(1-contact_erp)**correction_fraction
             pb.setPhysicsEngineParameter(numSubSteps=self.substeps,erp=erp,contactERP=contact_erp,physicsClientId=self.client)
         if self.preview_iterations is not None:
+            # Preview has a bounded budget, independent of impact/gap severity.
             self.solver_iterations=self.preview_iterations
-            frequency=self._preview_contact_frequency if self._chain_joints or self._beam_joints else 480
-            self.substeps=max(1,math.ceil(self.dt*frequency-1e-9))
-            self._preview_contact_erp=contact_erp if self._chain_joints else .02
-            self._preview_joint_erp=.02
-            tuning={}
-            if self._chain_joints:
-                tuning={'erp':1-(1-self._preview_joint_erp)**(8000*self.dt/self.substeps),
-                        'contactERP':1-(1-self._preview_contact_erp)**(4000*self.dt/self.substeps)}
-            pb.setPhysicsEngineParameter(numSolverIterations=self.solver_iterations,numSubSteps=self.substeps,physicsClientId=self.client,**tuning)
+            # A free wheeled frame transfers an articulated load through small
+            # wheel/floor contacts. Four 60 Hz Preview substeps can let a wheel
+            # cross the floor before the contact and joint impulses settle,
+            # injecting enough energy to launch the whole assembly. Keep the
+            # larger fixed contact budget local to ground-contact wheel scenes.
+            wheels_on_ground=self.ground is not None and any(
+                part.kind=='wheel' for part in assembly.parts.values())
+            wheel_profiles=((16,True,False),(16,True,True),(12,False,True),
+                            (12,False,False),(16,False,True),(16,False,False),
+                            (12,True,True))
+            if wheels_on_ground:
+                self.substeps,scale_correction,extra_iterations=wheel_profiles[self.preview_wheel_profile]
+                if extra_iterations:self.solver_iterations=max(self.solver_iterations,120)
+            else:
+                self.substeps=4;scale_correction=False
+            # Hold the contact correction rate roughly constant as the outer
+            # preview rate or internal substeps change. A fixed ERP at 3840
+            # substeps/s can turn a shallow wheel contact into a huge impulse.
+            correction_fraction=720*self.dt/self.substeps if scale_correction else 1.
+            pb.setPhysicsEngineParameter(numSolverIterations=self.solver_iterations,numSubSteps=self.substeps,
+                                         erp=1-(1-.2)**correction_fraction,
+                                         contactERP=1-(1-.1)**correction_fraction,
+                                         physicsClientId=self.client)
         for j in loops: self._loop(j)
         for j in self._chain_joints: self._loop(j,chain=True)
         humans=[p for p in assembly.parts.values() if p.kind=='human']
@@ -762,6 +805,10 @@ class World:
             if j['id'] in self.broken: continue
             mapping=self.joint_map.get(j['id'],{})
             if j['id'] in self._chain_constraints and j.get('break_force_n'):
+                # Fast Preview preserves line topology: coarse constraint and
+                # contact corrections cannot provide reliable material stress.
+                # Full physics evaluates the catalogue breaking load.
+                if self.preview_iterations is not None: continue
                 if self._chain_line_by_joint.get(j['id']) in self._fractured_lines:
                     continue
                 # On a two-ended line the span force is the actual material
@@ -785,8 +832,9 @@ class World:
                 depth=port.get('engagement_mm',30)
                 lo,hi=(-depth/2,depth/2) if port.get('through') else (-depth,0)
                 if min(endpoints)>hi+1 or max(endpoints)<lo-1:
-                    detach.append(j['id']); self.events.append({'time_s':self.elapsed,'type':'socket_disengaged','joint':j['id'],'continued_as':'detached rigid body'})
-            if mapping and (j.get('break_force_n') or j.get('break_torque_nm')):
+                    detach.append(j['id']); self.events.append({'time_s':self.elapsed,'type':'socket_disengaged','joint':j['id'],
+                        'member_end_stations_mm':endpoints,'socket_interval_mm':[lo,hi],'continued_as':'detached rigid body'})
+            if self.preview_iterations is None and mapping and (j.get('break_force_n') or j.get('break_torque_nm')):
                 reactions=[self.joint_state(j['id'],c) for c in mapping]
                 force=max(np.linalg.norm(s[2][:3]) for s in reactions)
                 torque=max(np.linalg.norm(s[2][3:])+abs(s[3]) for s in reactions)
@@ -932,9 +980,240 @@ class World:
         # Implicit viscous damping cannot reverse the relative velocity in a
         # single step, even for a light segment in a closed frame.
         torque=elastic_torque-damping*velocity/(1+damping*self.dt*inverse_inertia)
+        if self.preview_iterations is not None:
+            stiffness=joint['metadata']['stiffness_nm_rad']
+            torque=(elastic_torque-damping*velocity)/(1+self.dt*(damping+self.dt*stiffness)*inverse_inertia)
         for pid,sign in ((a,-1),(b,1)):
             body,link,_=self.part_map[pid]
             pb.applyExternalTorque(body,link,sign*axis*torque,pb.WORLD_FRAME,physicsClientId=self.client)
+
+    def _webbing_bend_efforts(self):
+        """Soft local-axis bending for flat webbing with ball-joint freedom.
+
+        X spans the width, Y the thickness and Z the length. A finite spring
+        about every axis allows a diagonal belt to twist and hang under gravity;
+        the much stronger Y spring discourages edgewise zigzags. The implicit
+        denominator bounds each light segment's velocity change at Preview dt.
+        """
+        if not self._webbing_joints: return
+        matrices={};velocities={};inverse_tensors={};torques={}
+        for joint,stiffness,damping in self._webbing_joints:
+            first,second=(joint[end]['part'] for end in ('a','b'))
+            if first not in matrices:
+                matrices[first]=self.part_matrix(first)
+                velocities[first]=np.asarray(self.part_velocity(first)[1])
+            if second not in matrices:
+                matrices[second]=self.part_matrix(second)
+                velocities[second]=np.asarray(self.part_velocity(second)[1])
+            rotation=matrices[first][:3,:3]
+            relative=Rotation.from_matrix(rotation.T@matrices[second][:3,:3]).as_rotvec()
+            speed=rotation.T@(velocities[second]-velocities[first])
+            inverse=np.zeros(3)
+            for pid in (first,second):
+                if pid not in inverse_tensors:
+                    body,link,local=self.part_map[pid]
+                    key=(body,link)
+                    if key not in self._webbing_inertia:
+                        mass,_,diagonal,_,orientation,*_=pb.getDynamicsInfo(
+                            body,link,physicsClientId=self.client)
+                        self._webbing_inertia[key]=(mass,np.asarray(diagonal),
+                                                    Rotation.from_quat(orientation).as_matrix())
+                    mass,diagonal,orientation=self._webbing_inertia[key]
+                    if mass<=0:
+                        inverse_tensors[pid]=np.zeros((3,3))
+                    else:
+                        inertia_axes=matrices[pid][:3,:3]@local[:3,:3].T@orientation
+                        inverse_tensors[pid]=(inertia_axes/np.maximum(diagonal,1e-12))@inertia_axes.T
+                inverse+=np.sum(rotation*(inverse_tensors[pid]@rotation),axis=0)
+            torque=-(stiffness*relative+damping*speed)/(
+                1+self.dt*(damping+self.dt*stiffness)*inverse)
+            world=rotation@torque
+            for pid,sign in ((first,-1),(second,1)):
+                body,link,_=self.part_map[pid]
+                key=(body,link)
+                if self._webbing_inertia[key][0]>0:
+                    torques[key]=torques.get(key,np.zeros(3))+sign*world
+        for (body,link),torque in torques.items():
+            pb.applyExternalTorque(body,link,torque,pb.WORLD_FRAME,
+                                   physicsClientId=self.client)
+
+    def _full_line_gap_exceeds(self,limit_mm):
+        for joint in self._chain_joints:
+            if joint['id'] in self.broken: continue
+            ends=[point(self.part_matrix(joint[end]['part']),
+                        self.assembly.parts[joint[end]['part']].local_frame(joint[end])[0])
+                  for end in ('a','b')]
+            if np.linalg.norm(ends[0]-ends[1])>limit_mm: return True
+        return False
+
+    def _ensure_full_line_closure(self):
+        if self._chain_joints and self._full_line_gap_exceeds(5):
+            self._project_line_joints()
+
+    def _project_line_joints(self):
+        """Bounded geometric closure of lines and their articulated mounts.
+
+        Solve base poses and native joint coordinates together. A base-only
+        correction cannot close four ropes when ragdoll limbs extend. This
+        projection preserves anchors and joint limits; it does not estimate
+        material stress or add correction energy to physical velocities. Preview
+        uses it each step; Full invokes it only for visible constraint drift.
+        """
+        rows=[j for j in self._chain_joints if j['id'] not in self.broken]
+        if not rows: return
+        bodies=sorted({self.part_map[j[end]['part']][0] for j in rows for end in ('a','b')})
+        columns={};joints={};limits={};joint_weights={};joint_info={};base_weights={};size=0
+        for body in bodies:
+            if pb.getDynamicsInfo(body,-1,physicsClientId=self.client)[0]>0:
+                columns[body]=size;size+=6
+            indices=[];bounds=[]
+            joint_info[body]=[pb.getJointInfo(body,i,physicsClientId=self.client)
+                              for i in range(pb.getNumJoints(body,physicsClientId=self.client))]
+            for i,info in enumerate(joint_info[body]):
+                if info[3]>=0: indices.append(i);bounds.append((info[8],info[9]))
+            if indices:
+                joints[body]=(indices,size);limits[body]=bounds;size+=len(indices)
+                # Compute the diagonal generalized inertia from the subtrees.
+                # Bullet's inverse-dynamics helper rejects otherwise valid
+                # tensors for floating-point asymmetry as small as 4e-15.
+                states=[self._link_state(body,i) for i in range(len(joint_info[body]))]
+                dynamics=[pb.getDynamicsInfo(body,i,physicsClientId=self.client) for i in range(len(states))]
+                centers=np.array([state[0] for state in states])
+                rotations_=np.array([Rotation.from_quat(state[1]).as_matrix() for state in states])
+                masses=np.array([d[0] for d in dynamics])
+                tensors=np.array([(rotation*np.array(d[2]))@rotation.T for rotation,d in zip(rotations_,dynamics)])
+                descendants={i:[] for i in indices}
+                for child in range(len(states)):
+                    ancestor=child
+                    while ancestor>=0:
+                        if ancestor in descendants: descendants[ancestor].append(child)
+                        ancestor=joint_info[body][ancestor][16]
+                inertia=[]
+                for i in indices:
+                    children=descendants[i];info=joint_info[body][i]
+                    axis=rotations_[i]@info[13]
+                    arms=centers[children]-states[i][4]
+                    inertia.append(float(masses[children].sum()) if info[2]==pb.JOINT_PRISMATIC else
+                        float(np.sum(masses[children]*np.sum(np.cross(axis,arms)**2,axis=1))+
+                              np.einsum('i,nij,j->',axis,tensors[children],axis)))
+                joint_weights[body]=np.minimum(10.,1/np.sqrt(np.maximum(inertia,1e-9)))
+            if body in columns:
+                position,orientation=pb.getBasePositionAndOrientation(body,physicsClientId=self.client)
+                rotation=Rotation.from_quat(orientation).as_matrix()
+                mass,_,diagonal,*_=pb.getDynamicsInfo(body,-1,physicsClientId=self.client)
+                tensor=(rotation*np.array(diagonal))@rotation.T
+                if indices:
+                    mass+=float(masses.sum())
+                    for center,child_mass,child_tensor in zip(centers,masses,tensors):
+                        arm=center-position
+                        tensor+=child_tensor+child_mass*((arm@arm)*np.eye(3)-np.outer(arm,arm))
+                eigenvalues,eigenvectors=np.linalg.eigh((tensor+tensor.T)/2)
+                inverse_sqrt=(eigenvectors*np.minimum(100.,1/np.sqrt(np.maximum(eigenvalues,1e-12))))@eigenvectors.T
+                base_weights[body]=(1/math.sqrt(mass),rotation.T@inverse_sqrt@rotation)
+        if not size: return
+        def skew(v): return np.array([[0,-v[2],v[1]],[v[2],0,-v[0]],[-v[1],v[0],0]])
+        blocked=set()
+        for iteration in range(16):
+            self._kinematics_cache={}
+            poses={body:pb.getBasePositionAndOrientation(body,physicsClientId=self.client) for body in bodies}
+            rotations={body:Rotation.from_quat(pose[1]).as_matrix() for body,pose in poses.items()}
+            base_rotations={body:rotations[body]@weight[1]@rotations[body].T for body,weight in base_weights.items()}
+            coordinates={body:pb.getJointStates(body,indices,physicsClientId=self.client)
+                         for body,(indices,_) in joints.items()}
+            values=[];ri=[];ci=[];residual=np.zeros((len(rows),3))
+            def block(row,column,matrix):
+                r,c=np.nonzero(matrix)
+                keep=np.array([column+index not in blocked for index in c],dtype=bool)
+                r,c=r[keep],c[keep]
+                values.extend(matrix[r,c]);ri.extend(3*row+r);ci.extend(column+c)
+            for row,joint in enumerate(rows):
+                points=[]
+                for sign,end in zip((1,-1),('a','b')):
+                    pid=joint[end]['part'];body,link,_=self.part_map[pid]
+                    position=point(self.part_matrix(pid),self.assembly.parts[pid].local_frame(joint[end])[0])/1000
+                    points.append(position)
+                    if body in columns:
+                        arm=position-np.array(poses[body][0])
+                        block(row,columns[body],sign*np.column_stack((np.eye(3),-skew(arm))))
+                    if body in joints and link>=0:
+                        indices,column=joints[body];jacobian=np.zeros((3,len(indices)))
+                        ancestor=link
+                        while ancestor>=0:
+                            info=joint_info[body][ancestor]
+                            if info[3]>=0:
+                                state=self._link_state(body,ancestor)
+                                axis=Rotation.from_quat(state[1]).apply(info[13])
+                                jacobian[:,indices.index(ancestor)]=(axis if info[2]==pb.JOINT_PRISMATIC
+                                    else np.cross(axis,position-np.array(state[4])))
+                            ancestor=info[16]
+                        block(row,column,sign*jacobian*joint_weights[body])
+                residual[row]=points[1]-points[0]
+            jacobian=csr_matrix((values,(ri,ci)),shape=(3*len(rows),size))
+            if max(np.linalg.norm(residual,axis=1),default=0)<.0005: break
+            delta=lsmr(jacobian,residual.ravel(),atol=1e-7,btol=1e-7,maxiter=96)[0]
+            for body,column in columns.items():
+                velocity=pb.getBaseVelocity(body,physicsClientId=self.client)
+                translation=delta[column:column+3]
+                angle=delta[column+3:column+6]
+                translation*=min(1.,.25/max(np.linalg.norm(translation),1e-12))
+                angle*=min(1.,.3/max(np.linalg.norm(angle),1e-12))
+                position=np.array(poses[body][0])+translation
+                rotation=Rotation.from_rotvec(angle).as_matrix()@rotations[body]
+                pb.resetBasePositionAndOrientation(body,position,Rotation.from_matrix(rotation).as_quat(),physicsClientId=self.client)
+                pb.resetBaseVelocity(body,*velocity,physicsClientId=self.client)
+            for body,(indices,column) in joints.items():
+                for index,(i,saved,(lo,hi)) in enumerate(zip(indices,coordinates[body],limits[body])):
+                    q=saved[0]+float(np.clip(delta[column+index]*joint_weights[body][index],-.3,.3))
+                    if lo<hi:
+                        if q<lo or q>hi: blocked.add(column+index)
+                        q=float(np.clip(q,lo,hi))
+                    pb.resetJointState(body,i,q,saved[1],physicsClientId=self.client)
+        # Remove separating velocity along the same constraints. Preserving
+        # it would accumulate hidden kinetic energy behind the pose correction
+        # until the next contact launches the ragdoll or slides a socket out.
+        # Geometric closure balances translations to converge at a fixed budget;
+        # velocity correction uses physical mass/inertia to preserve momentum.
+        weighted=jacobian.tolil()
+        for body,column in columns.items():
+            weighted[:,column:column+3]=jacobian[:,column:column+3]*base_weights[body][0]
+            weighted[:,column+3:column+6]=jacobian[:,column+3:column+6]@csr_matrix(base_rotations[body])
+        jacobian=weighted.tocsr()
+        velocity=np.zeros(size)
+        for body,column in columns.items():
+            linear,angular=pb.getBaseVelocity(body,physicsClientId=self.client)
+            velocity[column:column+3]=np.array(linear)/base_weights[body][0]
+            velocity[column+3:column+6]=np.linalg.solve(base_rotations[body],angular)
+        for body,(indices,column) in joints.items():
+            samples=pb.getJointStates(body,indices,physicsClientId=self.client)
+            velocity[column:column+len(indices)]=np.array([sample[1] for sample in samples])/joint_weights[body]
+        velocity-=lsmr(jacobian,jacobian@velocity,atol=1e-7,btol=1e-7,maxiter=96)[0]
+        for body,column in columns.items():
+            pb.resetBaseVelocity(body,velocity[column:column+3]*base_weights[body][0],base_rotations[body]@velocity[column+3:column+6],physicsClientId=self.client)
+        for body,(indices,column) in joints.items():
+            samples=pb.getJointStates(body,indices,physicsClientId=self.client)
+            for index,(i,sample) in enumerate(zip(indices,samples)):
+                speed=velocity[column+index]*joint_weights[body][index];lo,hi=limits[body][index]
+                if lo<hi and ((sample[0]<=lo+1e-9 and speed<0) or (sample[0]>=hi-1e-9 and speed>0)): speed=0.
+                pb.resetJointState(body,i,sample[0],speed,physicsClientId=self.client)
+        self._kinematics_cache={}
+
+    def _preview_spring_force(self,a,pa,b,pb_,axis,extension,speed,stiffness,damping,*,tension_only=False):
+        # Implicit spring/damper response at the actual attachment points. The
+        # explicit material spring used by Full is unstable at preview rates.
+        inverse_mass=0.;accelerations=[]
+        gravity=np.array(self.assembly.doc.get('environment',{}).get('gravity_m_s2',[0,0,-9.81]))
+        for pid,pivot in ((a,pa),(b,pb_)):
+            body,link,_=self.part_map[pid]
+            mass,_,inertia,*_=pb.getDynamicsInfo(body,link,physicsClientId=self.client)
+            accelerations.append(gravity if mass>0 else np.zeros(3))
+            if mass<=0: continue
+            matrix=_matrix(*self.link_pose(body,link))
+            arm=np.cross(np.asarray(pivot)-matrix[:3,3]/1000,axis)
+            local=matrix[:3,:3].T@arm
+            inverse_mass+=1/mass+float(np.sum(local**2/np.maximum(inertia,1e-12)))
+        predicted_speed=speed+self.dt*float((accelerations[1]-accelerations[0])@axis)
+        force=(stiffness*(extension+self.dt*predicted_speed)+damping*predicted_speed)/(1+self.dt*(damping+self.dt*stiffness)*inverse_mass)
+        return max(0.,force) if tension_only else force
 
     def step(self):
         self._kinematics_cache={}
@@ -972,6 +1251,10 @@ class World:
             damping=beam['damping_nm_s_rad']
             if key is None:
                 self._beam_loop_effort(j,-stiffness*elastic,velocity,damping)
+            elif self.preview_iterations is not None:
+                offset=self.reference_coordinates.get(j['id'],{}).get('angle',0.)
+                pb.setJointMotorControl2(key[0],key[1],pb.POSITION_CONTROL,targetPosition=rest-offset,
+                    force=stiffness*abs(elastic),positionGain=.1,velocityGain=1,physicsClientId=self.client)
             else:
                 self._joint_effort(key,-stiffness*elastic)
                 pb.setJointMotorControl2(key[0],key[1],pb.VELOCITY_CONTROL,
@@ -1037,6 +1320,7 @@ class World:
             torques[self.joint_map[driver]['angle']]-=effort*ratio/drive.get('efficiency',1)
         for key,effort in torques.items():
             if effort: self._joint_effort(key,effort)
+        self._webbing_bend_efforts()
         for load in self.assembly.doc.get('loads',[]):
             if not load.get('start_s',0)<=self.elapsed<=load.get('end_s',math.inf): continue
             pid=load['part']; p=self.assembly.parts[pid]; matrix=self.part_matrix(pid)
@@ -1055,9 +1339,11 @@ class World:
             axis=delta/length; rest=j.get('rest_length_mm',0)/1000
             speed=np.dot(np.array(self.part_velocity(b)[0])-np.array(self.part_velocity(a)[0]),axis)
             force=20000*(length-rest)+j.get('damping',20)*speed
+            if self.preview_iterations is not None:
+                force=self._preview_spring_force(a,pa,b,pb_,axis,length-rest,speed,20000,j.get('damping',20),tension_only=j.get('tension_only',False))
             if j.get('tension_only',False): force=max(0,force)
             limit=j.get('break_force_n')
-            if limit and abs(force)>limit:
+            if self.preview_iterations is None and limit and abs(force)>limit:
                 self.broken.add(j['id']); self.events.append({'time_s':self.elapsed,'type':'joint_break','joint':j['id'],'force_n':float(abs(force))}); continue
             self._force(a,axis*force,pa); self._force(b,-axis*force,pb_)
         self._span_tensions={}
@@ -1069,49 +1355,27 @@ class World:
             axis=delta/length
             speed=np.dot(self._point_velocity(b,pb_)-self._point_velocity(a,pa),axis)
             force=max(0.,stiffness*(length-rest)+500*speed)
+            if self.preview_iterations is not None:
+                force=self._preview_spring_force(a,pa,b,pb_,axis,length-rest,speed,stiffness,500,tension_only=True)
             for jid in path_joints: self._span_tensions[jid]=max(self._span_tensions.get(jid,0.),force)
             self._force(a,axis*force,pa); self._force(b,-axis*force,pb_)
         self._socket_contact_forces()
         pb.stepSimulation(physicsClientId=self.client)
         self._kinematics_cache={}
+        if self.preview_iterations is not None:
+            self._project_line_joints()
+        else:
+            self._line_step_count+=1
+            if self._line_step_count%self._full_line_check_stride==0:
+                self._ensure_full_line_closure()
         self.elapsed+=self.dt
         self._break_events()
         self._fragile_events()
-        self.preview_gap_mm=0.
-        if self.preview_iterations is not None and self._chain_joints:
-            # Most preview motion is cheap; impacts can require more contact
-            # work. Tighten the solve while drift is still below a visible gap.
-            # Never disguise separating links by moving only their rendering.
-            matrices={}
-            worst=0.
-            for joint in self._chain_joints:
-                ends=[]
-                for end in ('a','b'):
-                    pid=joint[end]['part']
-                    if pid not in matrices: matrices[pid]=self.part_matrix(pid)
-                    ends.append(point(matrices[pid],self.assembly.parts[pid].local_frame(joint[end])[0]))
-                worst=max(worst,float(np.linalg.norm(ends[0]-ends[1])))
-            self._preview_quiet_steps=self._preview_quiet_steps+1 if worst<1 else 0
-            self.preview_gap_mm=worst
-            refine=worst>2 and (self.solver_iterations<1000 or self.substeps/self.dt<8000-1)
-            relax=self._preview_quiet_steps>=20 and (self.solver_iterations>self._preview_requested_iterations or self.substeps/self.dt>4000+1)
-            if refine:
-                self.solver_iterations=min(1000,self.solver_iterations*2)
-                self.substeps=min(math.ceil(self.dt*8000),self.substeps*2)
-                self.preview_refinements+=1
-            elif relax:
-                self.solver_iterations=max(self._preview_requested_iterations,self.solver_iterations//2)
-                self.substeps=max(math.ceil(self.dt*4000),self.substeps//2)
-                self._preview_quiet_steps=0
-            if refine or relax:
-                self.preview_iterations=self.solver_iterations
-                self._preview_contact_frequency=self.substeps/self.dt
-                pb.setPhysicsEngineParameter(numSolverIterations=self.solver_iterations,numSubSteps=self.substeps,
-                    erp=1-(1-self._preview_joint_erp)**(8000*self.dt/self.substeps),
-                    contactERP=1-(1-self._preview_contact_erp)**(4000*self.dt/self.substeps),physicsClientId=self.client)
         self._kinematics_cache=None
 
     def snapshot(self):
+        if self.preview_iterations is None:
+            self._ensure_full_line_closure()
         state={}
         reactions={}
         samples=self._joint_samples()
@@ -1155,23 +1419,25 @@ class World:
     def __exit__(self,*args): self.close()
 
 def validate_simulation_options(duration=3,fps=30,dt=1/240,chain_links_per_body=None,deflection_warning_mm=10,
-                                mode='full',preview_steps_per_second=1000,preview_solver_iterations=240,preview_beam_segment_mm=800):
+                                mode='full',preview_steps_per_second=60,preview_solver_iterations=60,preview_beam_segment_mm=800,preview_detail_parts=()):
     if not all(math.isfinite(v) for v in (duration,fps,dt)) or duration<=0 or duration>3600 or fps<=0 or fps>240 or dt<=0 or dt>1/60:
         raise ValueError('Require 0 < duration ≤ 3600 s, 0 < fps ≤ 240 and 0 < dt ≤ 1/60 s')
 
     if chain_links_per_body is not None and (isinstance(chain_links_per_body,bool) or not isinstance(chain_links_per_body,int) or not 1<=chain_links_per_body<=1000):
         raise ValueError('chain_links_per_body must be an integer from 1 to 1000')
     if mode not in ('full','preview'): raise ValueError('Choose full or preview simulation')
-    for name,value,low,high in [('preview_steps_per_second',preview_steps_per_second,240,4000),
-                               ('preview_solver_iterations',preview_solver_iterations,40,1000),
+    for name,value,low,high in [('preview_steps_per_second',preview_steps_per_second,30,240),
+                               ('preview_solver_iterations',preview_solver_iterations,10,120),
                                ('preview_beam_segment_mm',preview_beam_segment_mm,400,2000)]:
         if isinstance(value,bool) or not isinstance(value,int) or not low<=value<=high:
             raise ValueError(f'{name} must be an integer from {low} to {high}')
+    if not isinstance(preview_detail_parts,(list,tuple)) or any(not isinstance(pid,str) for pid in preview_detail_parts):
+        raise ValueError('preview_detail_parts must be a list of part IDs')
     if not math.isfinite(deflection_warning_mm) or not .01<=deflection_warning_mm<=100000:
         raise ValueError('deflection_warning_mm must be between 0.01 and 100000')
 
 
-def simplify_chains(assembly,links_per_body,*,target_groups=1):
+def simplify_chains(assembly,links_per_body,*,target_groups=1,full_detail_parts=(),straightness=.999):
     """Freeze runs of passive chain joints at the authored pose, without editing it.
 
     Attachments, anchors, motors and nonuniform strength boundaries stay flexible.
@@ -1201,7 +1467,8 @@ def simplify_chains(assembly,links_per_body,*,target_groups=1):
         group=lines.find(j['a']['part'])
         ratings.setdefault(group,set()).add(j.get('break_force_n'))
         remaining[group]=remaining.get(group,0)+1
-    maximum_group={line:min(links_per_body,max(1,math.ceil((count+1)/target_groups))) for line,count in remaining.items()}
+    detailed_lines={lines.find(pid) for pid in full_detail_parts if pid in assembly.parts}
+    maximum_group={line:(1 if line in detailed_lines else min(links_per_body,max(1,math.ceil((count+1)/target_groups)))) for line,count in remaining.items()}
     groups=UnionFind(assembly.parts); sizes={pid:1 for pid in assembly.parts}
     vectors={pid:part.matrix[:3,:3]@(part.local_frame({'port':'a'})[0]-part.local_frame({'port':'b'})[0])
              for pid,part in assembly.parts.items() if pid in degree}
@@ -1217,7 +1484,7 @@ def simplify_chains(assembly,links_per_body,*,target_groups=1):
         vector=vectors[ga]+vectors[gb];length=path_lengths[ga]+path_lengths[gb]
         # Retain bends in a slack/posed line. Freezing a corner would turn
         # available slack into a permanent kink and change payload travel.
-        if np.linalg.norm(vector)<.999*length: continue
+        if np.linalg.norm(vector)<straightness*length: continue
         size=sizes[ga]+sizes[gb];groups.union(a,b);root=groups.find(a)
         sizes[root]=size;vectors[root]=vector;path_lengths[root]=length
         j['type']='fixed';j.pop('limits',None)
@@ -1236,50 +1503,19 @@ def _beam_deflection_mm(reference, current):
                      for original,actual in zip(reference,current)))
 
 
-class _PreviewNeedsRefinement(Exception):
-    def __init__(self,time_s,gap_mm):
-        self.time_s=time_s
-        self.gap_mm=gap_mm
-
-
 def simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=None,deflection_warning_mm=10,progress=None,cancelled=None,
-             mode='full',preview_steps_per_second=1000,preview_solver_iterations=240,preview_beam_segment_mm=800):
-    """Use the requested resolution, refining an unconverged Preview automatically.
-
-    A coarse contact model can become incompatible during an impact even at a
-    smaller timestep. Discard that attempt and replay the original design with
-    Full physics instead of returning visibly separated, supposedly intact links.
-    """
-    common=dict(deflection_warning_mm=deflection_warning_mm,cancelled=cancelled)
-    requested=dict(chain_links_per_body=chain_links_per_body,preview_steps_per_second=preview_steps_per_second,
-                   preview_solver_iterations=preview_solver_iterations,preview_beam_segment_mm=preview_beam_segment_mm)
-    started=time.monotonic()
-    try:
-        return _simulate(assembly,duration,fps,dt,mode=mode,progress=progress,**common,**requested)
-    except _PreviewNeedsRefinement as refinement:
-        if mode!='preview':raise
-        def report(update):
-            if progress:progress({**update,'message':'Refining Preview with Full physics: '+update['message']})
-        result=_simulate(assembly,duration,fps,dt,mode='full',chain_links_per_body=1,progress=report,**common)
-        result['mode']='preview'
-        result['quality']['resolved_mode']='full'
-        result['quality']['requested']=requested
-        result['quality']['refinement']={'time_s':refinement.time_s,'joint_gap_mm':refinement.gap_mm}
-        result['wall_time_s']=time.monotonic()-started
-        result['limitations'].append('Preview was automatically refined to Full physics to preserve joint closure')
-        return result
-
-
-def _simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=None,deflection_warning_mm=10,progress=None,cancelled=None,
-             mode='full',preview_steps_per_second=1000,preview_solver_iterations=240,preview_beam_segment_mm=800):
+             mode='full',preview_steps_per_second=60,preview_solver_iterations=60,preview_beam_segment_mm=800,
+             preview_detail_parts=(),_wheel_profile=0):
     """Record dynamics; progress receives dictionaries, cancelled is a predicate.
 
     Use console_progress for flushed Python stdout. Cancellation raises
     SimulationCancelled and releases the Bullet client and temporary files.
     """
     validate_simulation_options(duration,fps,dt,chain_links_per_body,deflection_warning_mm,
-                                mode,preview_steps_per_second,preview_solver_iterations,preview_beam_segment_mm)
-    chain_links_per_body=chain_links_per_body if chain_links_per_body is not None else (8 if mode=='preview' else 1)
+                                mode,preview_steps_per_second,preview_solver_iterations,preview_beam_segment_mm,preview_detail_parts)
+    chain_links_per_body=chain_links_per_body if chain_links_per_body is not None else (1000 if mode=='preview' else 1)
+    preview_detail_parts=tuple(pid for pid in assembly.parts if pid in preview_detail_parts or any(
+        pid.startswith(oid+'/') for oid in preview_detail_parts if any(o['id']==oid for o in assembly.doc.get('objects',[]))))
     reporter=Progress(progress,cancelled)
     reporter.update('preparing','Preparing simulation',force=True)
     doc=copy.deepcopy(assembly.doc); initial=doc.pop('state',{}).get('joints',{})
@@ -1290,17 +1526,28 @@ def _simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=None,de
         and joint_kind(j)=='spherical' and not (j.get('motor') or j.get('break_torque_nm'))}
     if chain_initial: neutral.apply_coordinates(chain_initial)
     if chain_links_per_body>1:
-        simplified,frozen=simplify_chains(neutral,chain_links_per_body,target_groups=10 if mode=='preview' else 1)
+        simplified,frozen=simplify_chains(neutral,chain_links_per_body,target_groups=4 if mode=='preview' else 1,
+                                          full_detail_parts=preview_detail_parts if mode=='preview' else (),
+                                          straightness=.98 if mode=='preview' else .999)
         # Choose groups from the posed centerline, including saved coordinates.
         # The remaining flexible joints start at these same posed local frames.
         neutral=simplified
     from .beam_dynamics import prepare_beams
     neutral,beam_model,beam_analysis=prepare_beams(neutral,maximum_segment_mm=preview_beam_segment_mm if mode=='preview' else 400,
-                                                minimum_segments=2 if mode=='preview' else 3)
+                                                minimum_segments=2 if mode=='preview' else 3,
+                                                enabled_parts=set(preview_detail_parts) if mode=='preview' else None)
     flexible=any(j.get('metadata',{}).get('chain_link') for j in neutral.joints)
-    effective_dt=(min(dt,1/preview_steps_per_second) if mode=='preview' and (beam_model or flexible) else dt if mode=='preview' else
+    wheeled_ground=(mode=='preview' and doc.get('environment',{}).get('ground',True)
+                    and any(p.kind=='wheel' for p in neutral.parts.values()))
+    # A 30 Hz outer step applies articulated loads for too long before wheel
+    # contacts are revisited. Substeps alone cannot cure that instability.
+    # Keep at least a 60 Hz outer solve for a grounded wheeled Preview.
+    preview_rate=max(60,preview_steps_per_second) if wheeled_ground else preview_steps_per_second
+    effective_dt=(1/preview_rate if mode=='preview' else
                   min(dt,1/4000) if beam_model else min(dt,1/2000) if flexible else dt)
-    with World(neutral,effective_dt,progress=reporter,preview_iterations=preview_solver_iterations if mode=='preview' else None) as world:
+    if mode=='preview': fps=min(fps,preview_steps_per_second)
+    with World(neutral,effective_dt,progress=reporter,preview_iterations=preview_solver_iterations if mode=='preview' else None,
+               preview_wheel_profile=_wheel_profile) as world:
         world.set_coordinates(initial)
         def snapshot():
             reporter.check()
@@ -1340,10 +1587,7 @@ def _simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=None,de
             if world.elapsed+1e-9>=next_sample or step==steps-1:
                 frame=snapshot()
                 if not all(np.isfinite(p['position_mm']).all() for p in frame['parts'].values()):
-                    if mode=='preview':raise _PreviewNeedsRefinement(world.elapsed,None)
                     raise RuntimeError('Physics solver diverged; reduce timestep and inspect initial intersections')
-                if mode=='preview' and getattr(world,'preview_gap_mm',0)>8:
-                    raise _PreviewNeedsRefinement(world.elapsed,world.preview_gap_mm)
                 frames.append(frame); next_sample+=1/fps
             elapsed=time.monotonic()-started
             reporter.update('simulating','Integrating physics',simulated_s=min(world.elapsed,duration),duration_s=duration,
@@ -1365,13 +1609,19 @@ def _simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=None,de
         result['quality']={'chain_links_per_body':chain_links_per_body,'beam_segment_mm':preview_beam_segment_mm if mode=='preview' else 400,
                            'physics_steps_per_second':1/effective_dt,'solver_iterations':world.solver_iterations}
         if mode=='preview':
+            result['quality']['resolved_mode']='preview'
+            result['quality']['detail_parts']=list(preview_detail_parts)
+            result['quality']['rigid_beams']=not bool(beam_model)
+            result['quality']['strength_evaluation']=False
             result['quality']['starting_solver_iterations']=preview_solver_iterations
             result['quality']['requested_steps_per_second']=preview_steps_per_second
         result['wall_time_s']=time.monotonic()-started
         result['quality']['contact_refinements']=world.preview_refinements
-        if mode=='preview': result['limitations'].append('Preview approximates motion, contact, yielding and rupture; use Full for detailed simulation')
+        if mode=='preview': result['limitations'].append('Preview approximates motion with rigid beams unless selected for detail, coarse flexible lines and a fixed solver budget. Line inertia is conditioned for stability. Material and joint overload breakage is disabled; use Full physics to evaluate strength and rupture.')
         if world._chain_joints:
             result['limitations'].append('Flexible segments use ball constraints without angular stops; two-ended lines carry tension through an approximate end-to-end spring, and individual segment reactions are unavailable')
+        if world._webbing_joints:
+            result['limitations'].append('Wide webbing uses illustrative local-axis bending and twist stiffness; these coefficients are not measured material properties')
         if any(j.get('metadata',{}).get('human_activity') for j in world.assembly.joints):
             result['limitations'].append('Human activities use seeded bounded joint torques; strength, sustained effort and timing are engineering assumptions without fatigue or medical behavior modelling')
         if any(j.get('metadata',{}).get('fragile_torque_nm') for j in world.assembly.joints):
@@ -1379,8 +1629,24 @@ def _simulate(assembly,duration=3,fps=30,dt=1/240,*,chain_links_per_body=None,de
         if world._socket_joints:
             result['limitations'].append('Full socket span preserves neutral joint-cap overlap and uses damped contact resistance against deeper parent penetration; it is not an exact anatomical socket surface')
         if frozen: result['limitations'].append('Chain simplification freezes internal joints at the starting pose: bending, contact attribution and joint reactions are approximate; frozen joints have no reaction measurement')
-        reporter.update('complete','Simulation complete',force=True,simulated_s=duration,duration_s=duration,percent=100)
-        return result
+    if wheeled_ground and _wheel_profile<6:
+        wheels=[pid for pid,part in neutral.parts.items() if part.kind=='wheel']
+        first=frames[0]['parts']
+        runaway=maximum_speed>15 or any(
+            abs(frame['parts'][pid]['position_mm'][2]-first[pid]['position_mm'][2])>200
+            for frame in frames[1:] for pid in wheels)
+        if runaway:
+            reporter.update('refining','Stabilizing wheel contacts',force=True)
+            return simulate(assembly,duration,fps,dt,chain_links_per_body=chain_links_per_body,
+                            deflection_warning_mm=deflection_warning_mm,progress=progress,
+                            cancelled=cancelled,mode=mode,
+                            preview_steps_per_second=preview_steps_per_second,
+                            preview_solver_iterations=preview_solver_iterations,
+                            preview_beam_segment_mm=preview_beam_segment_mm,
+                            preview_detail_parts=preview_detail_parts,
+                            _wheel_profile=_wheel_profile+1)
+    reporter.update('complete','Simulation complete',force=True,simulated_s=duration,duration_s=duration,percent=100)
+    return result
 
 def rigid_load_trials(assembly,part,directions,maximum_force_n,steps=12,dwell_s=.5):
     """Independent increasing load cases detect tipping, translation and joint failure."""

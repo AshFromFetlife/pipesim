@@ -56,6 +56,21 @@ def mirror_run_conflict(layout, plane, mode):
             'message': message}
 
 
+def mirror_free_run_overlap(layout, plane):
+    """Flag the visible intersection of a free oblique run and its mirror."""
+    axis = AXES[plane['axis']]
+    start, end = layout['start'], layout['end']
+    first, last = start[axis]-plane['offset_mm'], end[axis]-plane['offset_mm']
+    span = end-start
+    # Socket seating can tilt a nominally perpendicular pipe by a fraction of
+    # a degree. Only a visibly oblique crossing needs the orange warning.
+    if (first*last >= 0 or abs(span[axis]) < .05 or
+            np.linalg.norm(np.delete(span, axis)) <= np.linalg.norm(span)*math.sin(math.radians(5))):
+        return None
+    return {'code': 'MIRROR_SELF_INTERSECTION',
+            'message': 'Pipe crosses the mirror plane obliquely; its reflected copy intersects it.'}
+
+
 def validate_mirrors(assembly, *, geometry=True):
     """Keep plane identities and run-on-plane constraints unambiguous."""
     from .drafting import _layout
@@ -266,6 +281,46 @@ def _source_parts(assembly, group):
     return selected
 
 
+def _mirror_chain_objects(assembly, doc, source_parts, mirror, axis, offset, suffix, used, part_map):
+    """Mirror an entire flexible line, or share one already crossing the plane."""
+    from .chain import generate
+
+    for instance in assembly.doc.get('objects', []):
+        if instance.get('template') != 'chain':
+            continue
+        prefix = instance['id'] + '/'
+        members = [name for name in assembly.parts if name.startswith(prefix + 'link-')
+                   and name[len(prefix + 'link-'):].isdigit()]
+        if not source_parts.intersection(members):
+            continue
+        source_parts.update(members)
+        coordinates = [assembly.parts[name].matrix[AXES[axis], 3] - offset for name in members]
+        if ((min(coordinates) < -.05 and max(coordinates) > .05) or
+                all(abs(value) <= .05 for value in coordinates)):
+            # One continuous line already occupies both sides. Reflecting its
+            # links creates an overlapping second physical line.
+            source_parts.difference_update(members)
+            continue
+        clone = copy.deepcopy(instance)
+        clone['id'] = _unique_id(f"{instance['id']}-mirror-{suffix}", used)
+        clone['label'] = f"Mirror of {instance.get('label', instance['id'])}"
+        clone.pop('pose_preset', None)
+        parent = mirror @ transform(instance.get('pose')) @ LOCAL_REFLECTION
+        clone['pose'] = pose_of(parent)
+        components = copy.deepcopy(instance.get('components') or generate(instance['parameters'], assembly.library))
+        components.setdefault('parameter_reference', copy.deepcopy(instance['parameters']))
+        inverse = np.linalg.inv(parent)
+        for spec in components['parts']:
+            old = prefix + spec['id']
+            new = clone['id'] + '/' + spec['id']
+            used.add(new)
+            part_map[old] = new
+            spec['pose'] = pose_of(inverse @ mirror @ assembly.parts[old].matrix @ LOCAL_REFLECTION)
+        clone['components'] = components
+        doc.setdefault('objects', []).append(clone)
+        source_parts.difference_update(members)
+
+
 def _reflected_socket_on_plane(part, port_name, axis, offset):
     """Find the other real socket of a fitting shared by two mirror copies.
 
@@ -291,15 +346,18 @@ def _reflected_socket_on_plane(part, port_name, axis, offset):
         if name in source.get('excludes', ()) or port_name in socket.get('excludes', ()):
             continue
         candidate_mouth, candidate_direction = part.frame({'port': name})
+        # Draft fitting poses are stored with finite precision. A few
+        # thousandths of a degree at the socket is still well inside the
+        # existing 0.1 mm mouth tolerance (and the physical fit tolerance).
         if (np.linalg.norm(candidate_mouth-reflected_mouth) <= .1 and
-                np.linalg.norm(candidate_direction-reflected_direction) <= 1e-5):
+                np.linalg.norm(candidate_direction-reflected_direction) <= 1e-3):
             matches.append(name)
     if len(matches) > 1:
         raise DocumentError(f'{part.id}/{port_name}: multiple sockets match its mirror reflection')
     return matches[0] if matches else None
 
 
-def materialize_mirror(assembly, group_id, plane_id):
+def materialize_mirror(assembly, group_id, plane_id, *, warnings=None):
     """Bake one draft plane. The returned document has no generated/virtual parts."""
     from .drafting import _layout
 
@@ -309,6 +367,8 @@ def materialize_mirror(assembly, group_id, plane_id):
     plane = next((item for item in source_group.get('mirrors', []) if item['id'] == plane_id), None)
     if plane is None:
         raise DocumentError('Choose an active mirror plane')
+    if warnings is None:
+        warnings = []
     for run in source_group['runs']:
         conflict = mirror_run_conflict(_layout(assembly, run), plane,
             plane.get('run_modes', {}).get(run['id'], 'free'))
@@ -320,6 +380,7 @@ def materialize_mirror(assembly, group_id, plane_id):
     target = next(group for group in doc['draft_subassemblies'] if group['id'] == group_id)
     used = set(assembly.parts) | {run['id'] for group in doc['draft_subassemblies'] for run in group['runs']}
     used.update(joint['id'] for joint in doc.get('joints', []))
+    used.update(obj['id'] for obj in doc.get('objects', []))
     suffix = re.sub(r'[^A-Za-z0-9_-]', '-', plane_id)
     part_map = {}
     scene_scope = plane.get('scope') == 'scene'
@@ -329,6 +390,7 @@ def materialize_mirror(assembly, group_id, plane_id):
     # has an explicit attachment to a hand or another body part.
     human_parts = {pid for pid, part in assembly.parts.items() if part.kind == 'human'}
     source_parts -= human_parts
+    _mirror_chain_objects(assembly, doc, source_parts, mirror, axis, offset, suffix, used, part_map)
     for instance in assembly.doc.get('objects', []):
         symmetry = instance.get('symmetry')
         if instance.get('template') != 'human' or not symmetry or symmetry['axis'] != axis or abs(symmetry['offset_mm'] - offset) > .05:
@@ -361,21 +423,26 @@ def materialize_mirror(assembly, group_id, plane_id):
         part_map[part_id] = mirrored_id
     source_joints = list(assembly.doc.get('joints', []))
     explicit_joint_ids = {joint['id'] for joint in source_joints}
-    # Compact chain and library objects generate their internal joints only
-    # while Assembly expands them. Their mirrored links become direct parts,
-    # so those generated joints must be baked alongside the explicit ones.
-    # Humans use articulated left/right counterparts within one object and
-    # must not get duplicate internal joints here.
+    # Mirrored chains retain their own generated internal joints. Only joints
+    # crossing from an object to another part belong in the top-level list.
+    chain_members = {pid for pid in part_map if any(
+        pid.startswith(obj['id'] + '/link-') and
+        pid[len(obj['id'] + '/link-'):].isdigit()
+        for obj in assembly.doc.get('objects', []) if obj.get('template') == 'chain')}
+    source_joints = [joint for joint in source_joints if not
+                     {joint['a']['part'], joint['b']['part']} <= chain_members]
     source_joints.extend(joint for joint in assembly.joints
                          if joint['id'] not in explicit_joint_ids and
                          joint['a']['part'] not in human_parts and
-                         joint['b']['part'] not in human_parts)
+                         joint['b']['part'] not in human_parts and
+                         not {joint['a']['part'], joint['b']['part']} <= chain_members)
     for joint in source_joints:
         a, b = joint['a']['part'], joint['b']['part']
         if a not in part_map or b not in part_map or part_map[a] == a and part_map[b] == b:
             continue
         reflected = copy.deepcopy(joint)
         reflected['id'] = _unique_id(f"{joint['id']}-mirror-{suffix}", used)
+        unavailable = False
         for end in ('a', 'b'):
             ref = reflected[end]
             if part_map[ref['part']] != ref['part']:
@@ -391,9 +458,14 @@ def materialize_mirror(assembly, group_id, plane_id):
             elif 'port' in ref and ref['part'] in assembly.parts:
                 other = _reflected_socket_on_plane(assembly.parts[ref['part']], ref['port'], axis, offset)
                 if other is None:
-                    raise DocumentError(f"{ref['part']}/{ref['port']}: on-plane fitting has no distinct reflected socket")
+                    warnings.append({'code': 'MIRROR_UNAVAILABLE', 'part': ref['part'],
+                        'joint': joint['id'], 'message':
+                        f"{joint['id']}: {ref['part']}/{ref['port']} has no second socket for a reflected joint. The original joint was kept."})
+                    unavailable = True
+                    break
                 ref['port'] = other
-        doc.setdefault('joints', []).append(reflected)
+        if not unavailable:
+            doc.setdefault('joints', []).append(reflected)
     for anchor in assembly.doc.get('anchors', []):
         if anchor['part'] in part_map and part_map[anchor['part']] != anchor['part']:
             mirrored = copy.deepcopy(anchor); mirrored['part'] = part_map[anchor['part']]
@@ -402,6 +474,7 @@ def materialize_mirror(assembly, group_id, plane_id):
     source_runs = ((group, run) for group in assembly.doc['draft_subassemblies'] for run in group['runs']) if scene_scope else ((source_group, run) for run in source_group['runs'])
     for owner, run in source_runs:
         owner_target = next(group for group in doc['draft_subassemblies'] if group['id'] == owner['id'])
+        mode = plane.get('run_modes', {}).get(run['id'], 'free')
         layout = _layout(assembly, run)
         start, end = layout['start'], layout['end']
         mirrored_start = np.array(reflected_point(start, axis, offset))
@@ -410,12 +483,30 @@ def materialize_mirror(assembly, group_id, plane_id):
         reversed_ = np.linalg.norm(mirrored_start-end) < .05 and np.linalg.norm(mirrored_end-start) < .05
         normal = AXES[axis]
         crosses_plane = (start[normal]-offset) * (end[normal]-offset) < 0
-        along_normal = np.linalg.norm(np.delete(end-start, normal)) < .05
+        lateral_mm = np.linalg.norm(np.delete(end-start, normal))
+        along_normal = lateral_mm < .05
         # A single pipe already spanning a mirror cannot acquire a second,
         # overlapping physical pipe just because its free end is a little short.
         spanning_normal = crosses_plane and along_normal
-        reversed_ = reversed_ or spanning_normal
+
+        # A quarter-frame pipe can end exactly at the mirror, with its only
+        # socket at the far corner. The reflected free end is the same cut
+        # face: bake both halves as one continuous pipe, rather than leaving
+        # two visually touching but mechanically disconnected members.
+        seam_end = ('start' if abs(start[normal]-offset) <= .05 else
+                    'end' if abs(end[normal]-offset) <= .05 else None)
+        seam_free = seam_end is not None and not any(
+            a.get('end') == seam_end for a in run.get('attachments', []))
+        joins_at_plane = (seam_free and lateral_mm <= 1. and
+                          abs(start[normal]-end[normal]) > 1 and
+                          run.get('locked_length_mm') is None)
+        # The centered constraint is stronger evidence of intended identity
+        # than exact point equality. A socket rotated by a tiny fraction of a
+        # degree can move the far endpoint 0.1 mm sideways over a long pipe,
+        # while the valid centered draft still represents one physical pipe.
+        reversed_ = reversed_ or spanning_normal or joins_at_plane or mode == 'centered'
         attachments = copy.deepcopy(run.get('attachments', []))
+        unavailable = False
         for attachment in attachments:
             original = attachment['connector']
             attachment['connector'] = part_map.get(original, original)
@@ -423,12 +514,33 @@ def materialize_mirror(assembly, group_id, plane_id):
                 part = assembly.parts.get(original)
                 other = _reflected_socket_on_plane(part, attachment['port'], axis, offset) if part else None
                 if other is None:
-                    raise DocumentError(f"{run['id']}: {original}/{attachment['port']} sits on the mirror plane without a distinct reflected socket")
+                    warnings.append({'code': 'MIRROR_UNAVAILABLE', 'part': original,
+                        'run': run['id'], 'message':
+                        f"{run['id']}: {original}/{attachment['port']} has no second socket for a reflected pipe. The original pipe was kept."})
+                    unavailable = True
+                    break
                 attachment['port'] = other
             if reversed_ and 'end' in attachment:
                 attachment['end'] = 'end' if attachment['end'] == 'start' else 'start'
+        if unavailable:
+            continue
         if same or reversed_:
             existing = next(item for item in owner_target['runs'] if item['id'] == run['id'])
+            occupied = {a['end'] for a in existing.get('attachments', []) if a.get('end')}
+            conflicting = None
+            for attachment in attachments:
+                if attachment in existing.get('attachments', []):
+                    continue
+                if attachment.get('end') in occupied:
+                    conflicting = attachment
+                    break
+                if attachment.get('end'):
+                    occupied.add(attachment['end'])
+            if conflicting:
+                warnings.append({'code': 'MIRROR_UNAVAILABLE',
+                    'part': conflicting['connector'], 'run': run['id'],
+                    'message': f"{run['id']}: a reflected connector would share an occupied pipe end. The original pipe was kept."})
+                continue
             if spanning_normal:
                 half_span = max(abs(start[normal]-offset), abs(end[normal]-offset))
                 symmetric_start, symmetric_end = start.copy(), end.copy()
@@ -436,11 +548,14 @@ def materialize_mirror(assembly, group_id, plane_id):
                 symmetric_end[normal] = offset + np.sign(end[normal]-offset)*half_span
                 existing['start_mm'] = symmetric_start.tolist()
                 existing['end_mm'] = symmetric_end.tolist()
+            elif joins_at_plane:
+                # Keep the source direction, so its original attachment end
+                # and all later mirror modes continue to refer to that end.
+                existing['start_mm'] = (mirrored_end if seam_end == 'start' else start).tolist()
+                existing['end_mm'] = (end if seam_end == 'start' else mirrored_start).tolist()
             for attachment in attachments:
                 if attachment in existing.get('attachments', []):
                     continue
-                if attachment.get('end') and any(a.get('end') == attachment['end'] for a in existing.get('attachments', [])):
-                    raise DocumentError(f"{run['id']}: mirrored connector would occupy an already connected pipe end")
                 existing.setdefault('attachments', []).append(attachment)
             continue
         clone = copy.deepcopy(run)
@@ -467,12 +582,12 @@ def materialize_mirror(assembly, group_id, plane_id):
     return doc
 
 
-def materialize_all(assembly, group_ids=None):
+def materialize_all(assembly, group_ids=None, *, warnings=None):
     doc = assembly.doc
     for group in list(doc.get('draft_subassemblies', [])):
         if group_ids is not None and group['id'] not in group_ids:
             continue
         for plane in list(group.get('mirrors', [])):
             doc = materialize_mirror(Assembly.from_doc(doc, assembly.base, assembly.library,
-                validate_mirror_geometry=False), group['id'], plane['id'])
+                validate_mirror_geometry=False), group['id'], plane['id'], warnings=warnings)
     return doc

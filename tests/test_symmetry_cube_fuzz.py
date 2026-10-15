@@ -14,14 +14,14 @@ import pytest
 from scipy.spatial.transform import Rotation
 
 from pipesim.document import Assembly
-from pipesim.drafting import finalize, remember_mirrored_draft, reopen, repair
+from pipesim.drafting import _layout, finalize, remember_mirrored_draft, reopen, repair
 from pipesim.math3d import pose_of, transform
 from pipesim.symmetry import materialize_all
 from pipesim.validation import validate
-from test_symmetry_cube_collisions import cube_corner
+from test_symmetry_cube_collisions import cube_corner, square_corner_with_seam_ends
 
 
-def _variant(base, seed):
+def _variant(base, seed, *, seam=False):
     rng = random.Random(seed)
     # Unequal spans exercise the three axes independently; a uniform cube can
     # conceal an axis mix-up because swapping two edges leaves it unchanged.
@@ -33,11 +33,24 @@ def _variant(base, seed):
     basis = np.rint(rotation.as_matrix()).astype(int)
     assert np.all(np.abs(basis).sum(axis=0) == 1)
     original_center = np.array([0., 0., 1000.])
-    doc = cube_corner(base, reach=reach)
+    doc = (square_corner_with_seam_ends(base, reach=reach) if seam else
+           cube_corner(base, reach=reach))
+    if seam:
+        # Draft snapping has a small tolerance. Both sides of the reflected
+        # seam must still become one pipe if the authored free end is nearby.
+        for run in doc['draft_subassemblies'][0]['runs']:
+            index = 'xyz'.index(run['id'][0])
+            run['end_mm'][index] += rng.uniform(-.015, .015)
     for part in doc['parts']:
         matrix = transform(part['pose'])
         matrix[:3, 3] = origin + rotation.apply(matrix[:3, 3]-original_center)
         matrix[:3, :3] = rotation.as_matrix() @ matrix[:3, :3]
+        # A real fitting's tiny socket rotation produces >0.05 mm of lateral
+        # drift over a long span. A centered run remains a shared pipe, and a
+        # near-perpendicular free seam is closed rather than copied apart.
+        tilt = Rotation.from_euler('xyz', [rng.choice((-1, 1)) *
+            rng.uniform(.02, .04) for _ in range(3)], degrees=True)
+        matrix[:3, :3] = matrix[:3, :3] @ tilt.as_matrix()
         part['pose'] = pose_of(matrix)
     group = doc['draft_subassemblies'][0]
     for run in group['runs']:
@@ -49,8 +62,10 @@ def _variant(base, seed):
         world_index = int(np.argmax(np.abs(basis[:, local_index])))
         run_for_plane['xyz'[world_index]] = f'{local_axis}-edge'
     for mirror in group['mirrors']:
+        local_index = 'xyz'.index(mirror['axis'])
+        mirror['axis'] = 'xyz'[int(np.argmax(np.abs(basis[:, local_index])))]
         mirror['offset_mm'] = float(origin['xyz'.index(mirror['axis'])])
-        mirror['run_modes'] = {run_for_plane[mirror['axis']]: 'centered'}
+        mirror['run_modes'] = {} if seam else {run_for_plane[mirror['axis']]: 'centered'}
     rng.shuffle(group['mirrors'])
     return doc
 
@@ -63,6 +78,14 @@ def _check_cube_case(base, case_seed, *, root_seed, index, repro_dir):
         doc = _variant(base, case_seed)
         stage = 'materialize'
         before = Assembly.from_doc(doc, base)
+        # Prove the generated case reaches the former strict-identity branch:
+        # at least one valid centered run is more than 0.05 mm off its axis.
+        assert any(np.linalg.norm(np.delete(
+            _layout(before, run)['end']-_layout(before, run)['start'],
+            'xyz'.index(plane['axis']))) > .05
+            for plane in doc['draft_subassemblies'][0]['mirrors']
+            for run in doc['draft_subassemblies'][0]['runs']
+            if plane.get('run_modes', {}).get(run['id']) == 'centered'), context
         baked_doc = materialize_all(before)
         baked = Assembly.from_doc(baked_doc, base)
         assert len(baked_doc['parts']) == 8, context
@@ -73,7 +96,9 @@ def _check_cube_case(base, case_seed, *, root_seed, index, repro_dir):
         assert len({(attachment['connector'], attachment['port'])
                     for attachment in attachments}) == 24, context
         stage = 'finalize'
-        result = finalize(baked)
+        selected = random.Random(case_seed).choice(tuple(run['id'] for run in
+            baked_doc['draft_subassemblies'][0]['runs'])) if case_seed & 1 else None
+        result = finalize(baked, run_id=selected)
         assert result['status'] == 'finalized', f'{context}: {result}'
         stage = 'validate'
         exact = Assembly.from_doc(result['document'], base)
@@ -111,6 +136,49 @@ def _check_cube_case(base, case_seed, *, root_seed, index, repro_dir):
                              f'PIPESIM_CUBE_FUZZ_CASE_SEED={case_seed}') from exc
 
 
+def _check_seam_case(base, case_seed, *, root_seed, index, repro_dir):
+    context = f'root_seed={root_seed} case_seed={case_seed} index={index}'
+    doc = baked_doc = result = None
+    stage = 'generate'
+    try:
+        doc = _variant(base, case_seed, seam=True)
+        stage = 'materialize'
+        before = Assembly.from_doc(doc, base)
+        seam_lateral = []
+        for plane in doc['draft_subassemblies'][0]['mirrors']:
+            axis = 'xyz'.index(plane['axis'])
+            for run in doc['draft_subassemblies'][0]['runs']:
+                layout = _layout(before, run)
+                if min(abs(layout[end][axis]-plane['offset_mm'])
+                       for end in ('start', 'end')) <= .05:
+                    seam_lateral.append(np.linalg.norm(np.delete(
+                        layout['end']-layout['start'], axis)))
+        assert any(.05 < value <= 1. for value in seam_lateral), context
+        baked_doc = materialize_all(before)
+        runs = baked_doc['draft_subassemblies'][0]['runs']
+        assert len(baked_doc['parts']) == 4, context
+        assert len(runs) == 4, context
+        assert all(len(run.get('attachments', [])) == 2 for run in runs), context
+        stage = 'finalize'
+        selected = random.Random(case_seed).choice(tuple(run['id'] for run in runs)) if case_seed & 1 else None
+        result = finalize(Assembly.from_doc(baked_doc, base), run_id=selected)
+        assert result['status'] == 'finalized', f'{context}: {result}'
+        stage = 'validate'
+        exact = Assembly.from_doc(result['document'], base)
+        assert len(exact.parts) == 8 and len(exact.joints) == 8, context
+        assert len(exact.rigid_groups()) == 1, context
+        assert validate(exact)['valid'], context
+    except Exception as exc:
+        path = repro_dir / f'seam-fuzz-{case_seed}.json'
+        path.write_text(json.dumps({'root_seed': root_seed, 'case_seed': case_seed,
+            'case_index': index, 'stage': stage, 'source_document': doc,
+            'materialized_document': baked_doc, 'finalize_result': result},
+            indent=2, default=str), encoding='utf-8')
+        raise AssertionError(f'Seam mirror fuzz {context} stage={stage} '
+                             f'repro={path}; replay with '
+                             f'PIPESIM_CUBE_FUZZ_CASE_SEED={case_seed}') from exc
+
+
 def test_randomized_orthogonal_mirror_cubes_finalize_without_collisions(tmp_path):
     root_seed = int(os.environ.get('PIPESIM_CUBE_FUZZ_SEED', secrets.randbits(64)))
     replay = os.environ.get('PIPESIM_CUBE_FUZZ_CASE_SEED')
@@ -123,12 +191,14 @@ def test_randomized_orthogonal_mirror_cubes_finalize_without_collisions(tmp_path
         case_seed = listed[index] if listed else int(replay) if replay else rng.getrandbits(64)
         _check_cube_case(tmp_path, case_seed, root_seed=root_seed,
                          index=index_base+index, repro_dir=tmp_path)
+        _check_seam_case(tmp_path, case_seed, root_seed=root_seed,
+                         index=index_base+index, repro_dir=tmp_path)
 
 
 def test_cube_long_randomized(tmp_path):
     root_seed = int(os.environ.get('PIPESIM_CUBE_FUZZ_SEED', secrets.randbits(64)))
     case_limit = int(os.environ.get('PIPESIM_CUBE_FUZZ_CASES', 1000000))
-    minutes, started, deadline = budget()
+    minutes, started, deadline = budget(default_minutes=30)
     rng = random.Random(root_seed)
     print(f'cube mirror long root_seed={root_seed} case_limit={case_limit}', flush=True)
     completed = 0
@@ -152,8 +222,8 @@ def test_cube_long_randomized(tmp_path):
                             f'batch_seeds={batch}, repro_dir={batch_dir}\n'
                             f'{child.stdout}\n{child.stderr}', pytrace=False)
             completed += len(batch)
-            print(f'cube mirror long completed_seeds={completed} workflow_cases={completed*4} '
+            print(f'cube mirror long completed_seeds={completed} workflow_cases={completed*5} '
                   f'elapsed_s={time.monotonic()-started:.0f} last_case_seed={batch[-1]}', flush=True)
     finally:
-        print(f'cube mirror long completed_seeds={completed} workflow_cases={completed*4}', flush=True)
+        print(f'cube mirror long completed_seeds={completed} workflow_cases={completed*5}', flush=True)
     assert completed > 0, 'Long cube fuzz budget did not permit one model'

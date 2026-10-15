@@ -98,6 +98,9 @@ def regroup_object(assembly, object_id, pose=None):
     parameters=instance.get('parameters',{})
     if instance['template']=='human': parameters=_human_parameters(neutral,members,parameters)
     if instance['template']=='chain':
+        # A manual segment edit replaces the geometric preset while retaining
+        # the grouped line and its component poses.
+        instance.pop('pose_preset',None)
         # Portable bundles rename catalogue entries. Keep the resolved link
         # definition available to the chain generator after regrouping.
         catalog=parts[0].get('catalog')
@@ -448,7 +451,10 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
                   any(j['a']['part'].startswith(object_id+'/')!=j['b']['part'].startswith(object_id+'/') for j in assembly.joints)):
         # Attaching the other end is an explicit request to shape the chain.
         doc=copy.deepcopy(assembly.doc);next(o for o in doc['objects'] if o['id']==object_id)['layout_mode']='posable'
-        assembly=Assembly.from_doc(doc,assembly.base,assembly.library)
+        # Layout mode changes how this edit is posed; it does not change any
+        # resolved geometry. Rebuilding a large mirrored design here only
+        # delays the preview before the user can press Connect.
+        assembly=copy.copy(assembly);assembly.doc=doc
         instance=next(o for o in doc['objects'] if o['id']==object_id)
     point,axis=assembly.parts[target['part']].frame(target)
     for _ in range(4):
@@ -456,17 +462,34 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
         if error<.05: break
         desired=part.matrix.copy();desired[:3,3]+=point-current
         moved=None
+        fast_chain_pose=False
         if chain and instance.get('layout_mode')=='posable':
             from .chain import pose_chain
             local,_=part.local_frame(source)
             port=next((name for name in ('a','b') if np.allclose(part.local_frame({'port':name})[0],local)),None)
-            if port: moved=pose_chain(assembly,instance,part_id,desired,endpoint=port)
+            if port:
+                moved=pose_chain(assembly,instance,part_id,desired,endpoint=port)
+                fast_chain_pose=moved is not None
         elif chain:
             parent=transform(instance.get('pose'));parent[:3,3]+=point-current
             moved=move_object(assembly,object_id,pose_of(parent))
         if moved is None: moved=transform_part(assembly,part_id,pose_of(desired))
         if not moved['moved']: break
-        assembly=Assembly.from_doc(moved['document'],assembly.base,assembly.library)
+        # The chain solver has already checked each joint. When its selected
+        # port reached the goal, use its solved matrices until the final
+        # document validation instead of resolving hundreds of unrelated parts
+        # just to measure the same port again.
+        solved=moved.get('poses',{}).get(part_id) if fast_chain_pose else None
+        if solved is not None and np.linalg.norm(point-(transform(solved)@np.r_[local,1])[:3])<.05:
+            updated=copy.copy(assembly)
+            updated.doc=moved['document']
+            updated.parts={pid:copy.copy(value) for pid,value in assembly.parts.items()}
+            for pid,pose in moved['poses'].items():
+                updated.parts[pid].matrix=transform(pose)
+            assembly=updated
+        else:
+            assembly=Assembly.from_doc(moved['document'],assembly.base,assembly.library)
+        instance=next(o for o in assembly.doc['objects'] if o['id']==object_id)
     part=assembly.parts[part_id];current,_=part.frame(source);error=float(np.linalg.norm(current-point))
     if chain and error>.5:
         # A constrained line may stop short even though the other object is

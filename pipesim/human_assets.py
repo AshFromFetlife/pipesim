@@ -17,7 +17,7 @@ import struct
 import urllib.parse
 from .document import DocumentError
 
-MAX_ASSET_BYTES = 20 * 1024 * 1024
+MAX_ASSET_BYTES = 200 * 1024 * 1024
 MAX_NODES = 4096
 SEGMENTS = {'pelvis', 'lumbar', 'thorax', 'neck', 'head'} | {
     side + '_' + name for side in ('left', 'right')
@@ -165,13 +165,13 @@ def _fail(message):
 
 def _decode(value):
     if not isinstance(value, str) or len(value) > (MAX_ASSET_BYTES + 2) // 3 * 4:
-        _fail('asset exceeds the 20 MiB import limit')
+        _fail(f'asset exceeds the {MAX_ASSET_BYTES // (1024 * 1024)} MiB import limit')
     try:
         result = base64.b64decode(value, validate=True)
     except (ValueError, TypeError) as exc:
         raise DocumentError('Human model: invalid base64 file content') from exc
     if len(result) > MAX_ASSET_BYTES:
-        _fail('asset exceeds the 20 MiB import limit')
+        _fail(f'asset exceeds the {MAX_ASSET_BYTES // (1024 * 1024)} MiB import limit')
     return result
 
 
@@ -277,7 +277,7 @@ def _embed(document, binary, siblings, filename):
                     if mime is None: _fail('textures must be PNG, JPEG or WebP')
                     item['uri'] = 'data:' + mime + ';base64,' + base64.b64encode(payload).decode('ascii')
             total += len(payload)
-            if total > MAX_ASSET_BYTES: _fail('embedded resources exceed the 20 MiB import limit')
+            if total > MAX_ASSET_BYTES: _fail(f'embedded resources exceed the {MAX_ASSET_BYTES // (1024 * 1024)} MiB import limit')
             if kind == 'buffers':
                 length = item.get('byteLength')
                 if type(length) is not int or length < 0 or length > len(payload): _fail('invalid buffer byteLength')
@@ -441,7 +441,7 @@ def prepare_import(filename, content_base64, files=None):
         if name in siblings: _fail('duplicate companion filename: ' + name)
         value = _decode(item['content_base64'])
         total += len(value)
-        if total > MAX_ASSET_BYTES: _fail('selected files exceed the 20 MiB import limit')
+        if total > MAX_ASSET_BYTES: _fail(f'selected files exceed the {MAX_ASSET_BYTES // (1024 * 1024)} MiB import limit')
         siblings[name] = value
     document, binary = _read_container(raw, suffix)
     buffers = _embed(document, binary, siblings, filename)
@@ -497,6 +497,11 @@ def validate_render_model(config):
         if (not isinstance(value, list) or len(value) != 3
                 or any(type(v) not in (int, float) or not math.isfinite(v) for v in value)):
             _fail('bone offset for ' + segment + ' needs three finite angles')
+    proportions = config.get('body_proportions', {})
+    if not isinstance(proportions, dict) or set(proportions) - {'torso', 'neck', 'shoulders', 'upper_arms', 'forearms', 'legs'}:
+        _fail('invalid human body proportions')
+    if any(type(value) not in (int, float) or not math.isfinite(value) or not .5 <= value <= 1.5 for value in proportions.values()):
+        _fail('human body proportions must be between 50% and 150%')
     extras = config.get('extra_bones', {})
     if not isinstance(extras, dict): _fail('extra_bones must be an object')
     for bone, settings in extras.items():

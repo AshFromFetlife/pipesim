@@ -15,6 +15,7 @@ import secrets
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from fuzz_runtime import batch_size, budget
 
@@ -22,17 +23,95 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from pipesim.drafting import finalize, preview, repair, runs
+from pipesim.drafting import _layout, finalize, preview, repair, runs
+from pipesim.document import Assembly, read
+from pipesim.fitting import fit_connection
 from pipesim.grouping import attach_part
+from pipesim.math3d import pose_of, transform
 from pipesim.snapping import connection_options
 from pipesim.snapping import move_document
 from pipesim.validation import validate
+from connection_intent_cases import repeat_connections, square_case
+from reopen_cases import check_loose_reopen
+from floor_cases import check_free_floor
 
 
 SEEDS = tuple(int(s) for s in os.environ.get(
     'PIPESIM_FUZZ_SEEDS',
     ','.join(map(str, range(16, 32))) + ',' + ','.join(str(secrets.randbits(64)) for _ in range(8))
 ).split(',') if s)
+
+
+@pytest.mark.parametrize('seed',SEEDS)
+def test_free_frame_drop_to_floor_seeded(seed,factory):
+    try:
+        check_free_floor(factory,seed,selected=('rail','foot-1','sleeve-2')[seed%3])
+    except Exception as exc:
+        raise AssertionError(f'Free floor placement seed={seed}: {exc}') from exc
+
+
+@pytest.mark.parametrize('seed',SEEDS)
+def test_reopen_body_with_external_loose_socket_seeded(seed,factory):
+    try:
+        check_loose_reopen(factory,seed,terminal=bool(seed%2))
+    except Exception as exc:
+        raise AssertionError(f'Loose socket reopen seed={seed}: {exc}') from exc
+
+
+@pytest.mark.parametrize('seed',SEEDS)
+def test_connection_preserves_square_design_seeded(seed,factory):
+    rng=random.Random(seed)
+    articulated=bool(seed%2)
+    source=square_case(offset=rng.uniform(.1,.45),tilt=0 if articulated else rng.uniform(.1,.8),
+                      travel=rng.choice((0,25,50,100)),articulated=articulated,
+                      orientation=rng.choice(((0,0,0),(90,0,0),(0,90,0),(0,0,90),(0,0,180))),
+                      origin=[rng.randrange(-20,20)*100 for _ in range(3)])
+    try:
+        _,after=repeat_connections(source,factory,force=bool(seed%3==0),
+            force_options={'unlock_connectors':seed%3,'resize_members':seed%2})
+        for part in after.parts.values():
+            assert np.allclose(part.matrix[:3,3],np.round(part.matrix[:3,3]),atol=1e-7,rtol=0)
+    except Exception as exc:
+        raise AssertionError(f'Design preservation seed={seed}: {exc}') from exc
+
+
+@pytest.mark.parametrize('seed', SEEDS)
+def test_detached_through_fitting_reconnects_in_place_seeded(seed, factory):
+    rng=random.Random(seed)
+    offset=rng.choice((-1,1))*rng.uniform(15,95)
+    jitter=rng.uniform(-.8,.8)
+    if seed % 2:
+        # A solid collision proxy occupies the nominal through bore. This
+        # contact is intentional only when the proposed socket is included.
+        doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','name':'Through reconnect fuzz',
+             'parts':[{'id':'pipe','catalog':'tubeclamp.tube-C','parameters':{'length_mm':1600},
+                       'pose':{'position_mm':[0,0,800]}},
+                      {'id':'fitting','body':{'kind':'connector','mass_kg':1,
+                       'geometry':[{'type':'box','size_mm':[50,50,50]}],
+                       'ports':{'bore':{'type':'socket','through':True,'profile':'round',
+                                       'diameter_mm':42.4,'engagement_mm':60,
+                                       'position_mm':[0,0,0],'axis':[0,0,1]}}},
+                       'pose':{'position_mm':[jitter,0,800+offset]}}],
+             'joints':[],'anchors':[],'environment':{'ground':False}}
+        member,connector,port='pipe','fitting','bore'
+    else:
+        doc=read(Path(__file__).parent.parent/'examples/tee-midpoint.pipe.yaml')
+        pipe=next(p for p in doc['parts'] if p['id']=='upper-crossbar')
+        pipe['parameters']['length_mm']=1600
+        pipe['pose']['position_mm']=[-offset,jitter,1133.04]
+        doc['joints']=[j for j in doc['joints'] if j['id']!='upper-midpoint']
+        member,connector,port='upper-crossbar','upper-tee','through'
+    world=transform({'position_mm':[rng.uniform(-2000,2000) for _ in range(3)],
+                     'rotation_deg':[rng.uniform(-170,170) for _ in range(3)]})
+    for part in doc['parts']:
+        part['pose']=pose_of(world@transform(part.get('pose')))
+    before=factory(doc)
+    joint={'id':'reconnect','type':'socket','a':{'part':connector,'port':port},
+           'b':{'part':member,'at_mm':800},'insertion_mm':0,'locked':True,'fit_tolerance_mm':10}
+    poses,fitted,motions,_,_=fit_connection(before,joint,before,True,tolerance_mm=10)
+    assert fitted['b']['at_mm']==pytest.approx(800+offset,abs=.001),seed
+    assert poses=={} and motions==[],seed
+
 CASE_SEEDS = tuple(int(s) for s in os.environ.get(
     'PIPESIM_FUZZ_CASE_SEEDS',
     ','.join(map(str, range(96))) + ',' + ','.join(str(secrets.randbits(64)) for _ in range(16))
@@ -337,7 +416,7 @@ def test_draft_repair_long_randomized(factory, tmp_path):
     """
     root_seed = int(os.environ.get('PIPESIM_FUZZ_ROOT_SEED', secrets.randbits(64)))
     case_limit = int(os.environ.get('PIPESIM_FUZZ_CASES', '1000000'))
-    minutes, started, deadline = budget()
+    minutes, started, deadline = budget(default_minutes=30)
     rng = random.Random(root_seed)
     print(f'Draft fuzz root_seed={root_seed}, case_limit={case_limit}', flush=True)
     completed = 0
@@ -347,9 +426,11 @@ def test_draft_repair_long_randomized(factory, tmp_path):
         batch_dir = tmp_path / f'batch-{completed:06d}'
         child_env = os.environ.copy()
         child_env['PIPESIM_FUZZ_CASE_SEEDS'] = ','.join(map(str, batch))
+        child_env['PIPESIM_FUZZ_SEEDS'] = ','.join(map(str, batch))
         child = subprocess.run(
             [sys.executable, '-m', 'pytest', '-q', '-s', f'--basetemp={batch_dir}',
-             'tests/test_solver_fuzz.py', '-k', 'draft_repair_varied_geometry'],
+             'tests/test_solver_fuzz.py', '-k',
+             'draft_repair_varied_geometry or centered_crossbar_repair_preserves_through_leg_fuzz or detached_through_fitting_reconnects_in_place_seeded or connection_preserves_square_design_seeded or reopen_body_with_external_loose_socket_seeded or free_frame_drop_to_floor_seeded'],
             env=child_env, capture_output=True, text=True, check=False)
         if child.returncode:
             pytest.fail(f'Draft fuzz root_seed={root_seed}, completed={completed}, '
@@ -422,6 +503,39 @@ def _draft_case(seed, *, mirrors, companion, anchored):
             'parameters': {'length_mm': 80},
             'pose': {'position_mm': [-2500, -2500, 1200]}}]
     return doc
+
+
+@pytest.mark.parametrize('seed', SEEDS[:8])
+def test_centered_crossbar_repair_preserves_through_leg_fuzz(seed, factory):
+    rng = random.Random(seed)
+    half = rng.uniform(350, 700)
+    height = rng.uniform(400, 1400)
+    y = rng.uniform(-500, 500)
+    leg_x = half+rng.uniform(1.5, 4)
+    # Side outlet yaw ranges from reversed to oblique, with small pose noise.
+    # A local solve from zero can tip the upright instead of turning the fitting.
+    doc = {'format': 'pipesim/1', 'units': 'mm-kg-s-N-deg',
+           'name': f'Centered scaffold repair fuzz {seed}', 'parts': [
+               {'id': 'corner', 'catalog': 'tubeclamp.TC116C',
+                'pose': {'position_mm': [half, y, height],
+                         'rotation_deg': [0, 0, (seed % 4)*45+rng.uniform(-.5, .5)]}}],
+           'joints': [], 'draft_subassemblies': [{'id': 'scaffold', 'runs': [
+               {'id': 'leg', 'catalog': 'tubeclamp.tube-C',
+                'start_mm': [leg_x, y, 0], 'end_mm': [leg_x, y, height+600],
+                'attachments': [{'connector': 'corner', 'port': 'through'}]},
+               {'id': 'crossbar', 'catalog': 'tubeclamp.tube-C',
+                'start_mm': [-half, y, height], 'end_mm': [half, y, height],
+                'attachments': [{'connector': 'corner', 'port': 'x',
+                                 'end': 'end', 'insertion_mm': 30}]}],
+               'mirrors': [{'id': 'left-right', 'axis': 'x', 'offset_mm': 0,
+                            'scope': 'scene', 'run_modes': {'crossbar': 'centered'}}]}]}
+    result = repair(Assembly.from_doc(doc, validate_mirror_geometry=False), run_id='crossbar')
+    assert result['status'] == 'repaired', (seed, result)
+    restored = factory(result['document'])
+    layouts = {run['id']: _layout(restored, run)
+               for run in result['document']['draft_subassemblies'][0]['runs']}
+    assert np.linalg.norm(np.cross(layouts['leg']['end']-layouts['leg']['start'], [0, 0, 1])) < 1e-3, seed
+    assert not preview(restored)[0]['conflicts'], seed
 
 
 @pytest.mark.parametrize('seed', SEEDS)

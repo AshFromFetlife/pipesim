@@ -10,7 +10,7 @@ import pytest
 from pipesim.beam_dynamics import prepare_beams
 from pipesim.document import Assembly
 from pipesim.math3d import point,transform
-from pipesim.physics import World, _matrix
+from pipesim.physics import World, _matrix, simulate
 
 
 FIXTURE=Path(__file__).parent/'fixtures'/'four-way-swing'/'simulation.json'
@@ -100,6 +100,16 @@ def test_large_swing_retains_bending_and_detects_arm_yield(library):
             if step%40==39: assert_connected_lines(world,1 if world.elapsed<.25 else 8)
         assert any(e['type']=='beam_yield' and e['part']=='tube-c-4' for e in world.events)
         assert all(j['id'] in world.snapshot()['joints'] for j in closed)
+
+
+def test_full_swing_impact_keeps_unbroken_line_joints_closed(library):
+    # The beam-yield impact briefly opened chain-3/join-1 by 19 mm in Full
+    # without a break event. A short prefix misses the late impact.
+    assembly=swing(library)
+    recording=simulate(assembly,1.55,30,mode='full',chain_links_per_body=1)
+    assert recording['substeps']==2, 'late-impact stability must not double Full simulation time'
+    assert not any(frame['broken_joints'] for frame in recording['frames'])
+    assert_recorded_line_continuity(assembly,recording)
 
 
 def test_topology_rebuild_keeps_local_rope_pivots(factory,blank):

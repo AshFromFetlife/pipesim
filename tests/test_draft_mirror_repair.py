@@ -7,7 +7,8 @@ import numpy as np
 import pytest
 
 from pipesim.document import Assembly
-from pipesim.drafting import preview, repair
+from pipesim.drafting import _layout, preview, repair
+from pipesim.symmetry import materialize_mirror
 from test_server import editor, request
 
 
@@ -102,3 +103,36 @@ def test_irreconcilable_mirror_alignment_returns_conflict_not_http_error(editor)
         assert status == 200
         assert result['status'] == 'conflict', result
         assert any(item['code'] == 'MIRROR_ALIGNMENT' for item in result['conflicts'])
+
+
+def test_centered_scaffold_crossbar_repair_keeps_through_leg_upright():
+    """A reversed side socket must turn about its vertical bore, not tip the leg."""
+    doc = {'format': 'pipesim/1', 'units': 'mm-kg-s-N-deg',
+           'name': 'Scaffold crossbar mirror repair', 'parts': [
+               {'id': 'corner', 'catalog': 'tubeclamp.TC116C',
+                'pose': {'position_mm': [466, 500, 672]}}], 'joints': [],
+           'draft_subassemblies': [{'id': 'scaffold', 'runs': [
+               {'id': 'leg', 'catalog': 'tubeclamp.tube-C',
+                'start_mm': [468, 500, 0], 'end_mm': [468, 500, 1300],
+                'attachments': [{'connector': 'corner', 'port': 'through'}]},
+               {'id': 'crossbar', 'catalog': 'tubeclamp.tube-C',
+                'start_mm': [-465, 500, 672], 'end_mm': [465, 500, 672],
+                'attachments': [{'connector': 'corner', 'port': 'x',
+                                 'end': 'end', 'insertion_mm': 30}]}],
+               'mirrors': [{'id': 'left-right', 'axis': 'x', 'offset_mm': 0,
+                            'scope': 'scene', 'run_modes': {'crossbar': 'centered'}}]}]}
+    assembly = Assembly.from_doc(doc, validate_mirror_geometry=False)
+    result = repair(assembly, run_id='crossbar')
+    assert result['status'] == 'repaired', result
+    corrected = Assembly.from_doc(result['document'])
+    layouts = {run['id']: _layout(corrected, run)
+               for run in result['document']['draft_subassemblies'][0]['runs']}
+    leg = layouts['leg']
+    assert np.linalg.norm(np.cross(leg['end']-leg['start'], [0, 0, 1])) < 1e-3
+    assert abs((layouts['crossbar']['start'][0]+layouts['crossbar']['end'][0])/2) < .05
+    assert np.linalg.norm(layouts['crossbar']['end']-layouts['crossbar']['start']) > 800
+    baked = materialize_mirror(corrected, 'scaffold', 'left-right')
+    crossbar = next(run for run in baked['draft_subassemblies'][0]['runs']
+                    if run['id'] == 'crossbar')
+    assert {item['end'] for item in crossbar['attachments']} == {'start', 'end'}
+    assert len({item['connector'] for item in crossbar['attachments']}) == 2

@@ -45,7 +45,7 @@ def shape_mesh(s,base=Path("."),sections=32):
         inner=r-s["wall_mm"]
         if inner<=0: raise ValueError("Tube wall must be smaller than its radius")
         mesh=trimesh.creation.annulus(r_min=inner,r_max=r,height=length,sections=sections)
-    elif kind=="cylinder": mesh=trimesh.creation.cylinder(radius=r,height=length,sections=sections)
+    elif kind=="cylinder": mesh=trimesh.creation.cylinder(radius=r,height=length,sections=s.get("segments",sections))
     elif kind=="sphere": mesh=trimesh.creation.icosphere(subdivisions=2,radius=r)
     elif kind=="capsule": mesh=trimesh.creation.capsule(height=length,radius=r,count=[16,24])
     elif kind=="mesh":

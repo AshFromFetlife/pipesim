@@ -40,10 +40,18 @@ def dimensions(parameters, library):
     if rigidity is not None and (isinstance(rigidity, bool) or not isinstance(rigidity, (int, float))
                                  or not math.isfinite(rigidity) or rigidity <= 0):
         raise DocumentError('Flexible segment axial rigidity must be a positive finite number')
+    for key in ('bend_stiffness_nm_rad', 'bend_damping_nm_s_rad'):
+        values = definition.get(key)
+        if values is not None and (not isinstance(values, (list, tuple)) or len(values) != 3 or
+                                   any(isinstance(value, bool) or not isinstance(value, (int, float)) or
+                                       not math.isfinite(value) or value < 0 for value in values)):
+            raise DocumentError(f'{key} must contain three finite nonnegative local-axis values')
     return {'count': count, 'pitch_mm': pitch, 'length_mm': count*pitch,
             'requested_length_mm': length, 'link_catalog': catalog, 'a': a, 'b': b,
             'profile': definition.get('flexible_profile', 'chain'), 'break_force_n': strength,
             'axial_rigidity_n': rigidity,
+            'bend_stiffness_nm_rad': definition.get('bend_stiffness_nm_rad'),
+            'bend_damping_nm_s_rad': definition.get('bend_damping_nm_s_rad'),
             'break_strain': strength/rigidity if strength is not None and rigidity is not None else None}
 
 
@@ -273,6 +281,7 @@ def resize(assembly, object_id, parameters):
     members = {object_id+'/'+p['id'] for p in generated['parts']}
     removed = {p for p in assembly.parts if p.startswith(object_id+'/')}-members
     instance['parameters'] = copy.deepcopy(parameters)
+    instance.pop('pose_preset', None)
     if 'components' in instance:
         instance['components'] = generated
     changed_profile = old_info['link_catalog'] != new_info['link_catalog']
@@ -447,7 +456,12 @@ def pose_chain(assembly, instance, selected, desired, mode='translate', endpoint
     from .math3d import align_axis
     from .posing import commit_transform
     from .snapping import _movement_coordinates
-    names = [p for p in assembly.parts if p.startswith(instance['id']+'/')]
+    # Mirror-generated links share the object prefix but are not members of
+    # this line's authored link sequence. Keep them out of the FABRIK span.
+    names = [p for p in assembly.parts if p.startswith(instance['id']+'/link-')
+             and p[len(instance['id']+'/link-'):].isdigit()]
+    if selected not in names:
+        return None
     expected = [instance['id']+f'/link-{i}' for i in range(1, len(names)+1)]
     if set(names) != set(expected): return None
     names = expected; members = set(names)
@@ -545,5 +559,56 @@ def pose_chain(assembly, instance, selected, desired, mode='translate', endpoint
     response={'poses':poses,'moved':list(poses),'seed':[],
             'position_error_mm':position_error,'angle_error_deg':angle_error,'limited':limited,
             'message':('Chain stopped at its available reach or joint limits' if limited else 'Chain links follow the movement') if poses or not blocked else blocked}
-    if not preview: response['document']=commit_transform(assembly,poses)
+    if not preview:
+        response['document']=_commit_link_poses(assembly,instance,poses) or commit_transform(assembly,poses)
     return response
+
+
+def _commit_link_poses(assembly, instance, poses):
+    """Save a standard grouped chain without expanding and regrouping the scene.
+
+    Chain link motion changes only component poses and spherical joint zeros.
+    The general commit path remains responsible for animation, drives, draft
+    followers and unusual edited mechanisms.
+    """
+    if not poses or 'components' not in instance or assembly.doc.get('state',{}).get('joints'):
+        return None
+    if assembly.doc.get('animation') or assembly.doc.get('drives'):
+        return None
+    prefix=instance['id']+'/'
+    components=instance['components']
+    component_parts={prefix+part['id'] for part in components.get('parts',[])}
+    if not set(poses)<=component_parts:
+        return None
+    from .document import joint_kind
+    from .snapping import rigid_draft_follow, _movement_coordinates
+    followed,run_transforms=rigid_draft_follow(assembly,poses)
+    if run_transforms or set(followed)!=set(poses):
+        return None
+    posed=copy.copy(assembly)
+    posed.parts={pid:copy.copy(part) for pid,part in assembly.parts.items()}
+    for name,pose in poses.items():
+        posed.parts[name].matrix=transform(pose)
+    coordinates=_movement_coordinates(assembly,posed)
+    if any(joint_kind(j)!='spherical' or j.get('motor') for j in assembly.joints if j['id'] in coordinates):
+        return None
+    doc=copy.deepcopy(assembly.doc)
+    saved=next(obj for obj in doc['objects'] if obj['id']==instance['id'])
+    saved.pop('pose_preset',None)
+    inverse=np.linalg.inv(transform(saved.get('pose')))
+    for part in saved['components']['parts']:
+        name=prefix+part['id']
+        if name in poses:
+            part['pose']=pose_of(inverse@posed.parts[name].matrix)
+    joints={j['id']:j for j in doc.get('joints',[])}
+    joints.update({prefix+j['id']:j for j in saved['components'].get('joints',[])})
+    for name,values in coordinates.items():
+        joint=joints.get(name)
+        if joint is None: return None
+        angles=values.get('rotation_deg',[0,0,0])
+        for key,limits in joint.get('limits',{}).items():
+            if key!='rotation_deg': return None
+            joint['limits'][key]=[[lo-angle,hi-angle] for (lo,hi),angle in zip(limits,angles)]
+        joint.setdefault('metadata',{})['snapshot_reference_coordinates']=values
+    doc.pop('results',None);doc.pop('build_plan',None)
+    return doc

@@ -28,9 +28,10 @@ def run_case(seed,library):
     if replay:
         doc=json.loads((Path(replay)/'design.json').read_text())
     elif fragment:
+        material='generic.strap-seatbelt-65' if seed%8==6 else 'generic.rope-jute-6'
         doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','parts':[],'joints':[],
              'anchors':[],'objects':[{'id':'line','template':'chain',
-              'parameters':{'length_mm':400,'link_catalog':'generic.rope-jute-6'},
+              'parameters':{'length_mm':400,'link_catalog':material},
               'pose':{'position_mm':[0,0,700],'rotation_deg':[0,25,rng.uniform(-180,180)]}}]}
     else:
         doc=json.loads(FIXTURE.read_text())
@@ -67,14 +68,14 @@ def run_case(seed,library):
                     last_progress[0]=elapsed
                     print(f'Dynamics full swing: {elapsed:.2f}/3.00 simulated seconds',flush=True)
             preview=seed!=1
-            duration=3 if seed in (1,3) else .95 if seed==7 else .35
+            duration=3 if seed in (1,3) else .95 if seed==7 else .75
             case_options={'mode':'preview' if preview else 'full',
                           'chain_links_per_body':8 if seed==3 else rng.choice([1,2,4,8,12]) if preview else 1}
             if seed==7:
-                case_options.update(chain_links_per_body=8,preview_steps_per_second=4000)
+                case_options.update(chain_links_per_body=8,preview_steps_per_second=30)
             elif preview and seed!=3:
-                case_options.update(preview_steps_per_second=rng.choice([1000,2000,4000]),
-                                    preview_solver_iterations=rng.choice([240,480]),
+                case_options.update(preview_steps_per_second=rng.choice([30,60,120,240]),
+                                    preview_solver_iterations=rng.choice([40,60,100]),
                                     preview_beam_segment_mm=rng.choice([400,800,1000]))
             if replay: case_options=json.loads((Path(replay)/'failure.json').read_text()).get('options') or case_options
             if preview and case_options['chain_links_per_body']>1:
@@ -84,16 +85,31 @@ def run_case(seed,library):
             directory=Path(os.environ.get('PIPESIM_DYNAMICS_FUZZ_REPRO_DIR','fuzz-runs/dynamics'))
             directory.mkdir(parents=True,exist_ok=True)
             (directory/('last-preview-recording.json' if preview else 'last-swing-recording.json')).write_text(json.dumps(recording))
-            assert 'tube-c-4' in recording['beam_model'], 'moving arm silently became rigid'
+            if not preview: assert 'tube-c-4' in recording['beam_model'], 'Full moving arm silently became rigid'
+            else: assert not recording['beam_model'], 'Preview unexpectedly segmented beams'
             if seed in (1,3,7):
-                assert any(e['type']=='beam_yield' and e['part']=='tube-c-4' for e in recording['events'])
+                if not preview: assert any(e['type']=='beam_yield' and e['part']=='tube-c-4' for e in recording['events'])
                 assert not any(e['type']=='joint_break' for e in recording['events']), 'saved nylon swing developed a spurious rupture'
-                assert not any(frame['broken_joints'] for frame in recording['frames']), 'saved nylon swing lost a connection'
+                if not preview:
+                    assert not any(frame['broken_joints'] for frame in recording['frames']), 'saved nylon swing lost a connection'
+                else:
+                    # Rigid Preview beams follow a different trajectory from
+                    # yielding Full beams. A loose socket may genuinely slide
+                    # off; every lost connection must have that geometric proof.
+                    released={e['joint']:e for e in recording['events'] if e['type']=='socket_disengaged'}
+                    for frame in recording['frames']:
+                        assert set(frame['broken_joints'])<=released.keys()
+                    for jid,event in released.items():
+                        joint=next(j for j in assembly.joints if j['id']==jid)
+                        assert joint['type']=='socket' and not joint.get('locked',False)
+                        ends=event['member_end_stations_mm'];lo,hi=event['socket_interval_mm']
+                        assert min(ends)>hi+1 or max(ends)<lo-1
             if preview:
                 refined=recording.get('quality',{}).get('resolved_mode')=='full'
                 assert refined or case_options['chain_links_per_body']==1 or recording['chain_simplification']['frozen_joints'], 'preview silently skipped line grouping'
                 assert recording['mode']=='preview'
-                if seed==3:assert not refined, 'default Preview lost its coarse-model performance'
+                assert not refined, 'Preview silently switched to Full'
+                assert recording['solver_iterations']<=120 and recording['substeps']==4
                 if refined:print(f'Dynamics Preview refined to Full: {recording["quality"]["refinement"]}',flush=True)
             maximum=assert_recorded_line_continuity(assembly,recording)
             print(f'Dynamics full swing recording: maximum rope joint gap {maximum:.3f} mm',flush=True)
@@ -135,6 +151,9 @@ def run_case(seed,library):
         raise AssertionError(f'Dynamics seed={seed}; reproduction: {directory}') from error
 
 
+RETAINED_DYNAMICS_SEEDS = (0, 3, 7, 1, 2, 6, 11, 23, 3032479272, 3198599736, 3919911892)
+
+
 def test_dynamics_long_randomized(library):
     minutes=float(os.environ.get('PIPESIM_DYNAMICS_FUZZ_MINUTES',os.environ.get('PIPESIM_FUZZ_MINUTES','45')))
     count=int(os.environ.get('PIPESIM_DYNAMICS_FUZZ_CASES','1000000'))
@@ -148,7 +167,7 @@ def test_dynamics_long_randomized(library):
     rng=random.Random(root);started=time.monotonic();completed=[]
     # Exercise the cheaper coarse model before the long Full reference, so a
     # broken preview cannot spend most of a campaign waiting to be exercised.
-    retained=[0,3,7,1,2,3032479272,3198599736]
+    retained=RETAINED_DYNAMICS_SEEDS
     minimum_cases=len(retained)+4
     print(f'Dynamics root_seed={root} budget_minutes={minutes}',flush=True)
     while len(completed)<count and (len(completed)<minimum_cases or time.monotonic()-started<minutes*60):
@@ -178,8 +197,52 @@ def test_chain_material_keeps_embedded_hand_attachment_stable(library):
     run_case(3032479272,library)
 
 
+def test_heavy_webbing_keeps_joint_closed_on_first_step(library,monkeypatch):
+    # A 2000 kg payload on wide webbing exposed 11.9 mm of transient drift
+    # at 1/240 s even though the authored joints started precisely aligned.
+    # Recreate the old weak Bullet correction so the bounded Full projection
+    # has to close the gap rather than relying on the stronger webbing ERP.
+    original_build=World._build
+    def weak_correction(world,assembly):
+        original_build(world,assembly)
+        pb.setPhysicsEngineParameter(erp=1-(1-.02)**.5,physicsClientId=world.client)
+    monkeypatch.setattr(World,'_build',weak_correction)
+    projected=[];original_project=World._project_line_joints
+    def track_projection(world):
+        projected.append(world.elapsed)
+        return original_project(world)
+    monkeypatch.setattr(World,'_project_line_joints',track_projection)
+    run_case(3919911892,library)
+    assert projected and min(projected)<.01
+
+
 def test_high_step_preview_keeps_swing_ropes_connected(library):
     run_case(7,library)
+
+
+def test_soft_bending_webbing_fragment_falls_without_joint_gaps(library):
+    run_case(6,library)
+
+
+@pytest.mark.parametrize('seed', [11,23])
+def test_wide_webbing_preview_carries_the_saved_swing(seed,library):
+    run_case(seed,library)
+
+
+def test_preview_randomized_swing_motion(library):
+    # Run fresh Preview cases independently of the expensive Full reference.
+    # Its retained failure must not prevent low-rate ragdoll coverage.
+    root=int(os.environ.get('PIPESIM_PREVIEW_SWING_SEED',str(random.SystemRandom().randrange(2**32))))
+    rng=random.Random(root)
+    print(f'Preview swing root_seed={root}',flush=True)
+    for seed in [3,7,2669926215]+[(rng.randrange(2**32)&~3)|3 for _ in range(16)]:
+        print(f'Preview swing case_seed={seed}',flush=True)
+        run_case(seed,library)
+
+
+def test_preview_rotated_inertia_roundoff_does_not_reject_valid_scene(library):
+    # Native inverse dynamics rejected this valid tensor for 7e-15 asymmetry.
+    run_case(2669926215,library)
 
 
 def test_saved_swing_oracle_rejects_false_breaks(library,monkeypatch,tmp_path):
@@ -215,7 +278,7 @@ def test_slow_retained_replay_cannot_skip_fresh_families(monkeypatch,root):
     monkeypatch.setenv('PIPESIM_DYNAMICS_FUZZ_CASES','100')
     monkeypatch.setenv('PIPESIM_DYNAMICS_FUZZ_SEED',str(root))
     test_dynamics_long_randomized(None)
-    assert completed[:7]==[0,3,7,1,2,3032479272,3198599736]
-    assert len(completed)==11
-    assert len(set(completed))==11
-    assert [seed%4 for seed in completed[7:]]==[0,1,2,3]
+    assert completed[:len(RETAINED_DYNAMICS_SEEDS)]==list(RETAINED_DYNAMICS_SEEDS)
+    assert len(completed)==len(RETAINED_DYNAMICS_SEEDS)+4
+    assert len(set(completed))==len(completed)
+    assert [seed%4 for seed in completed[len(RETAINED_DYNAMICS_SEEDS):]]==[0,1,2,3]

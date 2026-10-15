@@ -25,6 +25,15 @@ export function projectedStation(start, end, point, camera, width, height) {
   return camera.isPerspectiveCamera?t*wa/((1-t)*wb+t*wa):t;
 }
 
+export function mountedThroughStation(start, tubeAxis, length, mouth, mouthAxis, socket) {
+  const station=mouth.clone().sub(start).dot(tubeAxis);
+  const half=(socket.engagement_mm||0)/2;
+  const closest=start.clone().addScaledVector(tubeAxis,station);
+  return station>=half&&station<=length-half&&
+    mouth.distanceTo(closest)<=Math.max(2,(socket.diameter_mm||0)/2)&&
+    Math.abs(mouthAxis.dot(tubeAxis))>=.999?station:null;
+}
+
 export function connectionCandidates(scene, matrices, movingIds, camera, width, height, settings={}) {
   // Accept the earlier boolean argument for callers using the default grid.
   if(typeof settings==='boolean')settings={gridEnabled:settings};
@@ -53,10 +62,12 @@ export function connectionCandidates(scene, matrices, movingIds, camera, width, 
       if(socket.through) {
         const half=(socket.engagement_mm||0)/2; if(length<half*2)continue;
         let station=projectedStation(start,end,mouth,camera,width,height)*length;
+        const physicalStation=mountedThroughStation(start,tubeAxis,length,mouth,axis,socket);
         // The tube midpoint is a useful construction feature, separate from
-        // the grid. Snap to it within a small visual tolerance.
+        // the grid. An already-mounted fitting instead keeps its real station.
         const center=start.clone().lerp(end,.5);
-        if(pixelDistance(project(center),project(mouth))<8)station=length/2;
+        if(physicalStation!==null)station=physicalStation;
+        else if(pixelDistance(project(center),project(mouth))<8)station=length/2;
         else if(settings.gridEnabled)station=Math.round(station/step)*step;
         station=THREE.MathUtils.clamp(station,half,length-half);
         endpoints.push({at_mm:station,point:start.clone().lerp(end,station/length),direction:tubeAxis});
@@ -74,7 +85,7 @@ export function connectionCandidates(scene, matrices, movingIds, camera, width, 
           ...(socket.through?{at_mm:endpoint.at_mm}:{end:endpoint.end}),
           insertion_mm:socket.through?0:Math.min(30,socket.engagement_mm*.8),
           distance,angle,score:distance+angle*.18,mouth:mouth.toArray(),point:endpoint.point.toArray(),
-          label:`${fitting.id} / ${socket.label||name} → ${member.id} · ${socket.through?endpoint.at_mm.toFixed(1)+' mm from start':endpoint.end+' end'}`});
+          label:`${fitting.label||fitting.id} / ${socket.label||name} → ${member.label||member.id} · ${socket.through?endpoint.at_mm.toFixed(1)+' mm from start':endpoint.end+' end'}`});
       }
     }
   }
@@ -90,29 +101,38 @@ export function hingeCandidates(scene, matrices, movingIds, camera, width, heigh
   for(const part of scene.parts){
     if(!moving.has(part.id)||!matrices.has(part.id))continue;
     for(const [portName,port] of Object.entries(part.ports||{})){
-      if(!['eye','clevis'].includes(port.type)||port.assembly!=='bolt'||socketOccupied(scene,part.id,portName))continue;
+      if(!['eye','clevis','bolt'].includes(port.type)||socketOccupied(scene,part.id,portName))continue;
       const source=new THREE.Vector3(...port.position_mm).applyMatrix4(matrices.get(part.id));
       const sourceAxis=new THREE.Vector3(...port.axis).transformDirection(matrices.get(part.id));
       for(const other of scene.parts){
         if(moving.has(other.id)||(groups.has(part.id)&&groups.get(other.id)===groups.get(part.id))||!matrices.has(other.id))continue;
         for(const [otherName,otherPort] of Object.entries(other.ports||{})){
-          if(otherPort.type===(port.type)||!['eye','clevis'].includes(otherPort.type)||otherPort.assembly!=='bolt'||socketOccupied(scene,other.id,otherName)||
-            Math.abs((port.diameter_mm||0)-(otherPort.diameter_mm||0))>1)continue;
+          const pin=[port,otherPort].find(p=>p.type==='clevis'&&p.snap_role==='shackle');
+          const hole=pin===(port)?otherPort:port;
+          const pinHole=!!pin&&['eye','bolt'].includes(hole.type)&&pin.assembly==='bolt'&&hole.assembly==='bolt'&&
+            (pin.diameter_mm||0)>0&&(hole.diameter_mm||0)>=pin.diameter_mm&&hole.diameter_mm<=pin.diameter_mm+3;
+          const hinge=pinHole||(!pin&&port.assembly==='bolt'&&otherPort.assembly==='bolt'&&
+            new Set([port.type,otherPort.type]).size===2&&['eye','clevis'].includes(port.type)&&['eye','clevis'].includes(otherPort.type)&&
+            Math.abs((port.diameter_mm||0)-(otherPort.diameter_mm||0))<=1);
+          const hook=port.type==='eye'&&otherPort.type==='eye'&&
+            port.assembly==='hook'&&otherPort.assembly==='hook'&&
+            (port.snap_role==='shackle'||otherPort.snap_role==='shackle');
+          if(!(hinge||hook)||socketOccupied(scene,other.id,otherName))continue;
           const target=new THREE.Vector3(...otherPort.position_mm).applyMatrix4(matrices.get(other.id));
           const gap=source.distanceTo(target);
           if(gap>100)continue;
           const axis=new THREE.Vector3(...otherPort.axis).transformDirection(matrices.get(other.id));
           const angle=THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(Math.abs(sourceAxis.dot(axis)),-1,1)));
-          if(angle>35)continue;
+          if(angle>35&&port.snap_role!=='shackle'&&otherPort.snap_role!=='shackle')continue;
           const a=source.clone().project(camera),b=target.clone().project(camera);
           if(Math.abs(a.z)>1||Math.abs(b.z)>1)continue;
           const distance=Math.hypot((a.x-b.x)*width/2,(a.y-b.y)*height/2);
           if(distance>capture)continue;
-          const male=port.type==='eye'?{part:part.id,port:portName}:{part:other.id,port:otherName};
-          const female=port.type==='clevis'?{part:part.id,port:portName}:{part:other.id,port:otherName};
-          candidates.push({kind:'hinge',male,female,moving:part.id,
+          const male=hook?{part:part.id,port:portName}:port.type==='eye'||port.type==='bolt'?{part:part.id,port:portName}:{part:other.id,port:otherName};
+          const female=hook?{part:other.id,port:otherName}:port.type==='clevis'?{part:part.id,port:portName}:{part:other.id,port:otherName};
+          candidates.push({kind:hook?'hook':'hinge',male,female,moving:part.id,
             distance,angle,gap_mm:gap,score:distance+gap*.1+angle*.15,
-            point:target.toArray(),label:`${male.part} / ${male.port} ↔ ${female.part} / ${female.port} · hinge bolt`});
+            point:target.toArray(),label:`${scene.parts.find(p=>p.id===male.part)?.label||male.part} / ${male.port} ↔ ${scene.parts.find(p=>p.id===female.part)?.label||female.part} / ${female.port} · ${hook?'shackle hook':'hinge bolt'}`});
         }
       }
     }
@@ -152,7 +172,7 @@ export function rotationAlignment(scene, matrices, movingIds, selected, toleranc
   for(const other of scene.parts){
     if(moving.has(other.id)||!matrices.has(other.id))continue;
     const roundOther=other.kind==='member'&&['tube','round','circle'].includes(other.section?.type);
-    for(const i of roundOther?[2]:[0,1,2])targets.push({axis:axes[i].clone().transformDirection(matrices.get(other.id)),label:other.id+' / '+names[i]});
+    for(const i of roundOther?[2]:[0,1,2])targets.push({axis:axes[i].clone().transformDirection(matrices.get(other.id)),label:(other.label||other.id)+' / '+names[i]});
   }
   const pivot=rotationAxis?.lengthSq()>1e-12?rotationAxis.clone().normalize():null;let best=null;
   for(const source of sources)for(const target of targets)for(const sign of [1,-1]){

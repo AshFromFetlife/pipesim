@@ -4,16 +4,24 @@ import {TransformControls} from 'three/addons/controls/TransformControls.js';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {STLLoader} from 'three/addons/loaders/STLLoader.js';
 import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
-import {connectionCandidates,hingeCandidates,clearConnectionIntent,alignmentDelta,socketOccupied,rotationAlignment} from './snapping.js';
+import {connectionCandidates,hingeCandidates,clearConnectionIntent,alignmentDelta,socketOccupied,rotationAlignment,mountedThroughStation} from './snapping.js';
 import {DEFAULT_SNAP_SETTINGS,loadSnapDefaults,saveSnapDefaults,validateSnapSettings} from './snap-settings.js';
 import {DEFAULT_PREFERENCES,loadPreferences,savePreferences,validatePreferences,displayValue,storedValue} from './preferences.js';
 import {nextFlexibleShortcutLength} from './resize-shortcuts.js';
-import {draftRuns,draftRun,draftPreview} from './drafting.js';
+import {draftRuns,draftRun,draftPreview,mirrorModeForSpan} from './drafting.js';
 import {HUMAN_POSES} from './human-poses.js';
-import {HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg} from './human-model.js';
+import {HumanModelLayer,HUMAN_BONE_SEGMENTS,HUMAN_FIT_CONTROLS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg} from './human-model.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const clone=x=>structuredClone(x), esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const FLEXIBLE_LINE_POSES=[
+  ['straight-down','Straight down'],['straight-across','Straight across'],
+  ['circle-touch','Circle · ends touching'],['circle-overlap','Circle · overlap one segment'],
+  ['square','Rounded square'],['u-deep','Deep U'],['u-wide','Wide U'],
+  ['teardrop','Teardrop loop'],['hanging-arc','Hanging arc'],['s-curve','S curve'],
+  ['spiral-two','Flat spiral · two turns'],['spiral-four','Flat spiral · four turns'],
+  ['helix','Helix · three turns'],
+];
 let snapDefaults={...DEFAULT_SNAP_SETTINGS};try{snapDefaults=loadSnapDefaults(window.localStorage);}catch{}
 let preferences={...DEFAULT_PREFERENCES};try{preferences=loadPreferences(window.localStorage);}catch{}
 const LIBRARY_HOTKEYS_KEY='pipesim.library-hotkeys.v1';
@@ -23,7 +31,10 @@ try{const saved=JSON.parse(window.localStorage.getItem(LIBRARY_HOTKEYS_KEY)||'{}
     if(typeof catalog==='string'&&typeof hotkey==='string'&&/^(?:Shift\+)?[0-9]$|^Alt\+Shift\+[A-CE-Z]$/.test(hotkey)&&
        !Object.values(libraryHotkeys).includes(hotkey))libraryHotkeys[catalog]=hotkey;
 }catch{}
-const state={doc:null,path:'',library:{},scene:null,selected:null,connectionSource:null,mode:'design',tool:'select',undo:[],redo:[],dirty:false,revision:0,recording:null,playing:false,frame:0,checks:null,analysis:null,plan:null,step:0,busy:false,simulation:null,simulationError:null,mirrorPoseError:null,simulationOptions:null,ports:preferences.portsVisible,snap:snapDefaults.gridEnabled,connectionSnap:snapDefaults.connectionsEnabled,snapSettings:snapDefaults,placementPending:false,moveBody:true};
+const state={doc:null,path:'',library:{},scene:null,selected:null,connectionSource:null,mode:'design',tool:'select',undo:[],redo:[],dirty:false,revision:0,recording:null,playing:false,frame:0,checks:null,analysis:null,plan:null,step:0,busy:false,simulation:null,simulationError:null,pendingSimulationResult:null,mirrorPoseError:null,simulationOptions:null,ports:preferences.portsVisible,snap:snapDefaults.gridEnabled,connectionSnap:snapDefaults.connectionsEnabled,snapSettings:snapDefaults,placementPending:false,moveBody:true};
+// Resolve display names from the current scene so rename, Undo and Redo agree.
+// IDs remain the values used by selections, connections and API requests.
+function partName(id){return state.scene?.parts.find(p=>p.id===id)?.label||state.doc?.objects?.find(o=>o.id===id)?.label||id;}
 let token='',toastTimer,renderer,orbit,gizmo,sceneGeneration=0,dragStart=null,pointerDrag=null,resizeDrag=null,localRotationHeld=false;
 const viewport=$('#viewport'), scene=new THREE.Scene(), objects=new THREE.Group(), ports=new THREE.Group(), overlays=new THREE.Group();
 const snapGhost=new THREE.Group(),mirrorGhost=new THREE.Group(),resizeHandles=new THREE.Group(),resizePreview=new THREE.Group();let reviewCleanup=null,reviewVersion=0;
@@ -54,6 +65,7 @@ const partObjects=new Map();
 const beamObjects=new Map();
 const humanModels=new HumanModelLayer({scene:objects,onError:message=>toast(message,true)});
 let humanModelsReady=Promise.resolve();
+const humanModelErrors=new Map();
 let hoveredDraftConnection=null;
 const mirrorCopies=new Map(),mirrorPlanes=new Map();
 const rotationHandle=new THREE.Object3D(),wholeObjectHandle=new THREE.Object3D();scene.add(rotationHandle,wholeObjectHandle);
@@ -105,7 +117,37 @@ function setPose(object,pose={}){object.position.fromArray(pose.position_mm||[0,
 function getPose(object){const e=new THREE.Euler().setFromQuaternion(object.quaternion,'ZYX');return {position_mm:object.position.toArray().map(v=>+v.toFixed(5)),rotation_deg:[e.x,e.y,e.z].map(v=>+THREE.MathUtils.radToDeg(v).toFixed(5))};}
 function status(text){$('#status-text').textContent=text;}
 function toast(text,error=false){clearTimeout(toastTimer);const el=$('#toast');el.textContent=text;el.className=error?'error':'';toastTimer=setTimeout(()=>el.classList.add('hidden'),error?9000:4500);}
-const EDITOR_API_VERSION=26;
+async function offerSimilarConnections(message,ports){
+  if(!ports?.length)return;
+  const revision=state.revision,sourceDoc=state.doc;
+  // A rapid sequence of draft edits replaces each toast. Check only the last one.
+  await new Promise(resolve=>setTimeout(resolve,150));
+  if(state.revision!==revision||state.doc!==sourceDoc||$('#toast')?.textContent!==message)return;
+  for(const [connector,port] of ports){
+    let preview;
+    try{preview=await api('quick-connections',{operation:'similar-preview',connector,port});}
+    catch{return;}
+    if(state.revision!==revision||state.doc!==sourceDoc||$('#toast')?.textContent!==message)return;
+    if(!preview.count)continue;
+    const el=$('#toast'),button=document.createElement('button');
+    button.className='toast-action';button.type='button';
+    button.textContent=`Attach all ${preview.count} similar ${preview.count===1?'connection':'connections'}.`;
+    button.addEventListener('click',async()=>{
+      if(state.busy||state.placementPending)return;
+      button.disabled=true;
+      const result=await objectEdit('quick-connections',{operation:'attach-similar',connector,port});
+      if(!result){button.disabled=false;return;}
+      const count=result.count||0;
+      const summary=count?`Attached ${count} similar ${count===1?'connection':'connections'}.`:'No similar open connections remain nearby.';
+      toast(summary);status(summary);
+    });
+    el.append(' ',button);el.classList.remove('hidden');
+    clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.add('hidden'),12000);
+    return;
+  }
+}
+const EDITOR_API_VERSION=30;
+let humanImportMaxBytes=200*1024*1024;
 let serverApiVersion=null;
 const SERVER_UPDATE_MESSAGE=`The PipeSim server at ${window.location.host} is older than this editor. Save your work, stop the process using that address, start the server again, then reload this tab.`;
 const EDITOR_UPDATE_MESSAGE='This PipeSim tab is older than the running server. Save any unsaved work, then reload this tab.';
@@ -115,10 +157,18 @@ function compatibilityMessage(version){
   return (Number.isInteger(version)&&version>EDITOR_API_VERSION?EDITOR_UPDATE_MESSAGE:SERVER_UPDATE_MESSAGE)+detail;
 }
 async function api(route,extra={}){
-  const body=JSON.stringify({document:state.doc,path:state.path,...extra});
+  // Importing an appearance only needs the destination path and selected files.
+  // A document can include a large recording that is unrelated to this upload.
+  const body=JSON.stringify({...(route==='import-human-model'?{}:{document:state.doc}),path:state.path,...extra});
   for(let attempt=0;attempt<2;attempt++){
-    const response=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-PipeSim-Token':token},body});
-    const data=await response.json();
+    let response,data;
+    try{
+      response=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-PipeSim-Token':token},body});
+      data=await response.json();
+    }catch(error){
+      if(route==='import-human-model')throw new Error(`The upload to the local PipeSim server at ${window.location.host} did not return a usable response${response?` (HTTP ${response.status})`:''}. ${compatibilityMessage(serverApiVersion)||'Check the PipeSim server console for details, then retry the import.'} Browser detail: ${error.message}`);
+      throw error;
+    }
     if(response.ok)return data;
     if(response.status===403&&data.error==='Invalid editor session token'&&attempt===0){
       // Restarting the local server changes its token. Refresh only the session,
@@ -139,7 +189,6 @@ function autoMirrorModes(scene=state.scene,{placed=true}={}){
   const documentParts=new Map((state.doc?.parts||[]).map(part=>[part.id,part]));
   let added=0;
   for(const group of state.doc?.draft_subassemblies||[])for(const plane of group.mirrors||[]){
-    const axis={x:0,y:1,z:2}[plane.axis];
     for(const run of group.runs){
       if(Object.hasOwn(plane.run_modes||{},run.id))continue;
       let start=new THREE.Vector3(...run.start_mm),end=new THREE.Vector3(...run.end_mm);
@@ -156,12 +205,8 @@ function autoMirrorModes(scene=state.scene,{placed=true}={}){
         start=new THREE.Vector3(0,0,-preview.length_mm/2).applyMatrix4(object.matrix);
         end=new THREE.Vector3(0,0,preview.length_mm/2).applyMatrix4(object.matrix);
       }
-      const length=start.distanceTo(end),tolerance=(attached||!placed)?0.05:2;
-      if(length<=1e-6)continue;
-      const first=start.getComponent(axis)-plane.offset_mm,last=end.getComponent(axis)-plane.offset_mm;
-      const mode=Math.abs((first+last)/2)<=tolerance&&Math.abs(Math.abs(last-first)-length)<=tolerance?'centered':
-        Math.abs(first)<=tolerance&&Math.abs(last)<=tolerance?'in_plane':null;
-      if(mode){plane.run_modes||={};plane.run_modes[run.id]=mode;added++;}
+      const mode=mirrorModeForSpan(start,end,plane,(attached||!placed)?0.05:2);
+      if(mode!=='free'){plane.run_modes||={};plane.run_modes[run.id]=mode;added++;}
     }
   }
   return added;
@@ -247,10 +292,12 @@ function changed({inferMirrors=true}={}){
 function refreshDraft(id,{structure=false}={}){
   const run=draftRun(state.doc,id),previous=partObjects.get(id);
   if(previous){objects.remove(previous);dispose(previous);partObjects.delete(id);state.scene.parts=state.scene.parts.filter(p=>p.id!==id);state.scene.groups=state.scene.groups.filter(g=>!g.includes(id));}
-  if(run){const part=draftPreview(run,state.scene,state.library),group=new THREE.Group();group.name=id;group.userData.part=id;
+  if(run){const owner=(state.doc.draft_subassemblies||[]).find(group=>group.runs.includes(run));
+    const part=draftPreview(run,state.scene,state.library,owner?.mirrors||[]),group=new THREE.Group();group.name=id;group.userData.part=id;
     for(const shape of part.geometry)group.add(meshShape(shape,part.color,part.kind));setPose(group,part.pose);objects.add(group);partObjects.set(id,group);
     state.scene.parts.push(part);state.scene.groups.push([id]);}
   state.scene.draft_attachments=draftRuns(state.doc).flatMap(r=>(r.attachments||[]).map(a=>({...a,run:r.id})));
+  updatePorts();
   if(structure){renderOutline();updateHeader();}
   if(structure||state.selected===id)highlightSelection();
   if(structure||state.selected===id){renderInspector();attachGizmo();updateResizeHandles();}
@@ -301,12 +348,28 @@ function syncMirrorPreviews(){
       const original=a?[pointKey(a),pointKey(b)].sort().join('|'):pointKey(new THREE.Vector3().setFromMatrixPosition(source.matrix));
       seen.set(id,new Set([original]));
     }
+    const chainOf=new Map(),crossingChains=new Set();
+    for(const instance of state.doc.objects||[]){
+      if(instance.template!=='chain')continue;
+      const prefix=instance.id+'/link-',members=[];
+      for(const [id,{source}] of sources)if(id.startsWith(prefix)&&/^\d+$/.test(id.slice(prefix.length))){
+        chainOf.set(id,instance.id);members.push(source.matrix.elements);
+      }
+      if(!members.length)continue;
+      planes.forEach((plane,bit)=>{
+        const axis={x:0,y:1,z:2}[plane.axis];let lowest=Infinity,highest=-Infinity;
+        for(const matrix of members){const value=matrix[12+axis]-plane.offset_mm;lowest=Math.min(lowest,value);highest=Math.max(highest,value);}
+        if((lowest<-.05&&highest>.05)||(lowest>=-.05&&highest<=.05))crossingChains.add(bit+'/'+instance.id);
+      });
+    }
     for(let mask=1;mask<1<<planes.length;mask++){
       const sceneMask=planes.some((plane,bit)=>(mask&(1<<bit))&&plane.scope==='scene');
       const transform=new THREE.Matrix4().identity();
       for(let bit=0;bit<planes.length;bit++)if(mask&(1<<bit))transform.premultiply(mirrorMatrix(planes[bit].axis,planes[bit].offset_mm));
       for(const [id,{source,part,signature,a,b}] of sources){
         if(!sceneMask&&!groupIds.has(id))continue;
+        const chain=chainOf.get(id);
+        if(chain&&planes.some((_,bit)=>(mask&(1<<bit))&&crossingChains.has(bit+'/'+chain)))continue;
         const reflected=part.draft?[pointKey(a.clone().applyMatrix4(transform)),pointKey(b.clone().applyMatrix4(transform))].sort().join('|'):
           pointKey(new THREE.Vector3().setFromMatrixPosition(source.matrix).applyMatrix4(transform));
         if(seen.get(id).has(reflected))continue;
@@ -329,6 +392,27 @@ function syncMirrorPreviews(){
   for(const [key,record] of mirrorCopies)if(!wantedCopies.has(key)){removeMirrorCopy(record);mirrorCopies.delete(key);}
   for(const [key,mesh] of mirrorPlanes)if(!wantedPlanes.has(key)){mirrorGhost.remove(mesh);mesh.geometry.dispose();mesh.material.dispose();mirrorPlanes.delete(key);}
 }
+function showDraftFindings(title,intro,findings){
+  const target=entry=>[entry.part,entry.connector,...(entry.parts||[]),entry.run]
+    .find(id=>id&&partObjects.has(id));
+  const rows=findings.map((entry,index)=>{
+    const id=target(entry),label=entry.run||entry.part||entry.connector||entry.parts?.join(' / ')||entry.code;
+    const body=`<strong>${esc(label)}</strong><p>${esc(entry.message)}${entry.residual_mm!=null?' · '+esc(entry.residual_mm)+' mm':''}${entry.residual_deg!=null?' · '+esc(entry.residual_deg)+'°':''}</p>`;
+    return id?`<button class="issue draft-finding" data-draft-finding="${index}" title="Select and frame ${esc(partName(id))}">${body}<small>Select and frame ${esc(partName(id))} ↗</small></button>`:
+      `<div class="joint-card">${body}</div>`;
+  }).join('');
+  modal(title,`<p>${esc(intro)}</p>${rows}`,[{label:'Close',action:closeModal}]);
+  $$('#modal-content [data-draft-finding]').forEach(button=>button.onclick=()=>{
+    const id=target(findings[Number(button.dataset.draftFinding)]),object=partObjects.get(id);
+    closeModal();if(!object)return;
+    setMode('design');setTool('select');select(id);
+    const bounds=new THREE.Box3().setFromObject(object),sphere=bounds.getBoundingSphere(new THREE.Sphere());
+    const center=sphere.center,angle=Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*Math.min(1,camera.aspect));
+    const distance=Math.max(300,sphere.radius/Math.sin(angle)*1.4);
+    const direction=camera.position.clone().sub(orbit.target).normalize();
+    orbit.target.copy(center);camera.position.copy(center).addScaledVector(direction,distance);orbit.update();
+  });
+}
 async function finalizeDrafts(subassembly=null,run_id=null){
   if(state.placementPending)return;
   if(!draftRuns(state.doc).length){toast('There are no draft pipes to finalize.');return;}
@@ -343,14 +427,15 @@ async function finalizeDrafts(subassembly=null,run_id=null){
     if(cancelRequested||revision!==state.revision)return;
     closeModal();
     if(result.status==='conflict'){
-      const rows=result.conflicts.map(c=>`<div class="joint-card"><strong>${esc(c.run||c.parts?.join(' / ')||c.code)}</strong><p>${esc(c.message)}${c.residual_mm!=null?' · '+esc(c.residual_mm)+' mm':''}${c.residual_deg!=null?' · '+esc(c.residual_deg)+'°':''}</p></div>`).join('');
-      modal('Draft needs adjustment',`<p>The draft is still editable. Resolve these connections or move the fittings, then finalize again.</p>${rows}`,[{label:'Close',action:closeModal}]);status('Draft has unresolved connections');return;
+      showDraftFindings('Draft needs adjustment','The draft is still editable. Select a finding to inspect its part, then finalize again.',result.conflicts);
+      status('Draft has unresolved connections');return;
     }
     await acceptPlacement(result,revision);
     const recovered=result.inferred_through_connections||0;
     toast((run_id?'Selected draft structure finalized. Other draft structures remain editable.':'Draft finalized with exact cut lengths.')+
       (recovered?` Connected ${recovered} aligned through ${recovered===1?'socket':'sockets'} found along the draft pipes.`:''));
     status(run_id?'Selected draft structure finalized':'Draft finalized');
+    if(result.warnings?.length)showDraftFindings('Mirror warnings','The draft was finalized. These reflected connections could not be made; their originals were kept.',result.warnings);
   }catch(e){if(!cancelRequested){toast(e.message,true);status('Finalization failed');}else status('Draft finalization cancelled');}
   finally{if($('#modal').open&&$('#modal-title').textContent==='Finalizing draft')closeModal();state.placementPending=false;attachGizmo();}
 }
@@ -367,8 +452,7 @@ async function repairDrafts(subassembly=null,run_id=null){
     if(cancelRequested||revision!==state.revision)return;
     closeModal();
     if(result.status==='conflict'){
-      const rows=result.conflicts.map(c=>`<div class="joint-card"><strong>${esc(c.run||c.code)}</strong><p>${esc(c.message)}${c.residual_mm!=null?' · '+esc(c.residual_mm)+' mm':''}</p></div>`).join('');
-      modal('Draft still needs adjustment',`<p>The draft is unchanged. Move an anchored fitting or detach a conflicting connection, then try again.</p>${rows}`,[{label:'Close',action:closeModal}]);
+      showDraftFindings('Draft still needs adjustment','The draft is unchanged. Select a finding to inspect its part, then try again.',result.conflicts);
       status('Draft repair could not close every fit');return;
     }
     if(result.status==='aligned'){status('Draft connections are already aligned');toast('Draft connections are already aligned.');return;}
@@ -403,7 +487,7 @@ function solid(shape){
   const type=shape.type,radius=shape.radius_mm??shape.diameter_mm/2,length=shape.length_mm;
   if(type==='box')return new THREE.BoxGeometry(...shape.size_mm);
   if(type==='sphere')return new THREE.SphereGeometry(radius,24,16);
-  if(type==='cylinder')return new THREE.CylinderGeometry(radius,radius,length,32).rotateX(Math.PI/2);
+  if(type==='cylinder')return new THREE.CylinderGeometry(radius,radius,length,shape.segments||32).rotateX(Math.PI/2);
   if(type==='capsule')return new THREE.CapsuleGeometry(radius,length,8,20).rotateX(Math.PI/2);
   if(type==='tube'){
     const profile=new THREE.Shape();profile.absarc(0,0,radius,0,Math.PI*2,false);const hole=new THREE.Path();hole.absarc(0,0,radius-shape.wall_mm,0,Math.PI*2,true);profile.holes.push(hole);
@@ -489,16 +573,61 @@ function buildScene(data){
     if(chain)state.selected=chain.end_part;
   }
   for(const part of data.parts){const group=new THREE.Group();group.name=part.id;group.userData.part=part.id;for(const shape of part.geometry)group.add(meshShape(shape,part.color,part.kind));setPose(group,part.pose);objects.add(group);partObjects.set(part.id,group);}
-  humanModelsReady=humanModels.rebuild(data.humans||[],partObjects).then(()=>humanModels.update(state.recording?.frames[state.frame]?.time_s||0));
+  humanModelErrors.clear();
+  humanModelsReady=humanModels.rebuild(data.humans||[],partObjects).then(result=>{
+    if(state.scene!==data)return;
+    for(const {id,error} of result.errors)humanModelErrors.set(id,error);
+    updateHumanModelStatus();
+    humanModels.update(state.recording?.frames[state.frame]?.time_s||0);
+  });
   for(const drive of state.doc.drives||[]){if(!drive.route_mm?.length)continue;const points=drive.route_mm.map(p=>new THREE.Vector3(...p));const curve=new THREE.CatmullRomCurve3(points,false,'catmullrom',0);const belt=new THREE.Mesh(new THREE.TubeGeometry(curve,80,2,6,false),new THREE.MeshStandardMaterial({color:'#374b52',roughness:.8}));overlays.add(belt);}
   for(const anchor of data.anchors){const part=partObjects.get(anchor.part);if(!part)continue;const loc=part.position.clone();const marker=new THREE.Mesh(new THREE.RingGeometry(70,73,48),new THREE.MeshBasicMaterial({color:'#74a28c',transparent:true,opacity:.55,side:THREE.DoubleSide}));marker.position.copy(loc);marker.position.z+=1;marker.quaternion.copy(part.quaternion);overlays.add(marker);}
   updatePorts();updateConnectionHint();highlightSelection();updateHeader();updateResizeHandles();if(state.tool==='translate'||state.tool==='rotate')attachGizmo();
 }
-function updatePorts(){dispose(ports);if(!state.scene)return;const show=state.ports||state.tool==='connect';for(const p of state.scene.parts){if(!show&&p.id!==state.selected&&p.id!==hoveredDraftConnection?.connector)continue;for(const [name,port] of Object.entries(p.ports)){const focused=p.id===hoveredDraftConnection?.connector&&name===hoveredDraftConnection?.port;if(!show&&p.id===hoveredDraftConnection?.connector&&!focused)continue;const chain=state.scene.chains?.find(c=>p.id.startsWith(c.id+'/'));if(chain&&!((p.id===chain.start_part&&name===chain.start_port)||(p.id===chain.end_part&&name===chain.end_port)||(chain.layout_mode==='posable'&&p.id===state.selected)))continue;if(port.type!=='socket'&&!show)continue;const radius=focused?12:port.type==='socket'?7:4;const sphere=new THREE.Mesh(new THREE.SphereGeometry(radius,12,8),new THREE.MeshBasicMaterial({color:focused?'#f3ba62':port.type==='socket'?'#3c9c85':'#779eba',depthTest:false,transparent:true,opacity:focused?1:.8}));const local=new THREE.Vector3(...(port.position_mm||[0,0,0]));const obj=partObjects.get(p.id);sphere.position.copy(local.applyMatrix4(obj.matrix));sphere.renderOrder=100;sphere.userData={port:name,part:p.id,portType:port.type};ports.add(sphere);const axis=new THREE.Vector3(...(port.axis||[0,0,1])).transformDirection(obj.matrix);const arrow=new THREE.ArrowHelper(axis,sphere.position,38,focused?'#f3ba62':'#64a294',8,4);arrow.visible=show||focused;ports.add(arrow);}}}
+function portConnectionStates(data){
+  const states=new Map(),key=(part,port)=>part+'\0'+port;
+  const mark=(part,port,movable)=>{
+    if(!part||!port)return;
+    const id=key(part,port);
+    if(movable||!states.has(id))states.set(id,movable?'movable':'locked');
+  };
+  for(const joint of data.joints||[]){
+    const movable=joint.type!=='fixed'&&!joint.locked;
+    for(const end of [joint.a,joint.b])mark(end?.part,end?.port,movable);
+  }
+  for(const attachment of data.draft_attachments||[])
+    mark(attachment.connector,attachment.port,attachment.joint?.locked===false);
+  return states;
+}
+function updatePorts(){
+  dispose(ports);if(!state.scene)return;
+  const show=state.ports||state.tool==='connect',connections=portConnectionStates(state.scene);
+  const colors={free:'#ed514b',locked:'#3c9c85',movable:'#71ce51'};
+  for(const p of state.scene.parts){
+    if(!show&&p.id!==state.selected&&p.id!==hoveredDraftConnection?.connector)continue;
+    for(const [name,port] of Object.entries(p.ports)){
+      const focused=p.id===hoveredDraftConnection?.connector&&name===hoveredDraftConnection?.port;
+      if(!show&&p.id===hoveredDraftConnection?.connector&&!focused)continue;
+      const chain=state.scene.chains?.find(c=>p.id.startsWith(c.id+'/'));
+      if(chain&&!((p.id===chain.start_part&&name===chain.start_port)||(p.id===chain.end_part&&name===chain.end_port)||(chain.layout_mode==='posable'&&p.id===state.selected)))continue;
+      if(port.type!=='socket'&&!show)continue;
+      const connection=connections.get(p.id+'\0'+name)||'free',color=focused?'#f3ba62':colors[connection];
+      const radius=focused?12:port.type==='socket'?7:4;
+      const sphere=new THREE.Mesh(new THREE.SphereGeometry(radius,12,8),new THREE.MeshBasicMaterial({color,depthTest:false,transparent:true,opacity:focused?1:.9}));
+      const local=new THREE.Vector3(...(port.position_mm||[0,0,0])),obj=partObjects.get(p.id);
+      if(!obj)continue;
+      sphere.position.copy(local.applyMatrix4(obj.matrix));sphere.renderOrder=100;
+      sphere.userData={port:name,part:p.id,portType:port.type,connection};ports.add(sphere);
+      const axis=new THREE.Vector3(...(port.axis||[0,0,1])).transformDirection(obj.matrix);
+      const arrow=new THREE.ArrowHelper(axis,sphere.position,38,color,8,4);
+      arrow.visible=show||focused;ports.add(arrow);
+    }
+  }
+}
 function highlightSelection(){
   const object=wholeObject();
   for(const [id,group] of partObjects){const active=object?id.startsWith(object.id+'/'):id===state.selected,hovered=id===hoveredDraftConnection?.connector;group.traverse(o=>{if(o.isMesh&&o.material?.emissive){o.material.emissive.set(hovered?'#f3ba62':active?'#438f79':'#000000');o.material.emissiveIntensity=hovered?.45:active?.12:0;}});}
-  const part=state.scene?.parts.find(p=>p.id===state.selected);$('#selection-summary').textContent=part?part.id+' · '+part.kind:'Nothing selected';$('#selection-label').textContent=part?.id||'';$('#selection-label').classList.toggle('hidden',!part);
+  const part=state.scene?.parts.find(p=>p.id===state.selected);$('#selection-summary').textContent=part?partName(part.id)+' · '+part.kind:'Nothing selected';$('#selection-label').textContent=part?partName(part.id):'';$('#selection-label').classList.toggle('hidden',!part);
 }
 function select(id){
   if(state.tool==='connect'){
@@ -635,6 +764,7 @@ function openLibraryMenu(button,catalog){
 document.addEventListener('pointerdown',e=>{if(!e.target.closest('#library-actions-menu, [data-library-actions]'))closeLibraryMenu();});
 document.addEventListener('focusin',e=>{if(!e.target.closest('#library-actions-menu, [data-library-actions]'))closeLibraryMenu();});
 function renderLibrary(){closeLibraryMenu();const query=$('#part-search').value.toLowerCase(),category=$('#category').value,size=$('#size-filter').value;const entries=Object.entries(state.library).filter(([id,p])=>{
+  if(id==='generic.d-link')return false;
   if(!(id+' '+p.name).toLowerCase().includes(query))return false;
   if(category==='motion'){if(['member','panel','load'].includes(p.kind))return false;if(id.startsWith('tubeclamp.')&&!/173|138|140|148|179/.test(id))return false;}else if(category!=='all'&&p.kind!==category)return false;
   if(size!=='all'&&id.startsWith('tubeclamp.')&&!id.endsWith(size))return false;return true;
@@ -708,7 +838,7 @@ async function reopenTreeTarget(target){
     await acceptPlacement(result,revision);
     toast(result.restored_mirrors?
       `Mirrored draft restored with ${result.restored_mirrors} live mirror ${result.restored_mirrors===1?'plane':'planes'}. Undo restores the exact assembly.`:
-      `${result.converted_parts.length} ${result.converted_parts.length===1?'pipe':'pipes'} returned to draft. Undo restores the exact assembly.`);
+      `${result.converted_parts.length} ${result.converted_parts.length===1?'pipe':'pipes'} returned to draft. ${result.preserved_loose_connections?`${result.preserved_loose_connections} loose socket ${result.preserved_loose_connections===1?'connection':'connections'} preserved. `:''}Undo restores the exact assembly.`);
     status('Subassembly is editable in draft mode');
   }catch(error){toast(error.message,true);status('Return to draft failed · design unchanged');}
   finally{state.placementPending=false;attachGizmo();}
@@ -716,7 +846,7 @@ async function reopenTreeTarget(target){
 function renderOutline(){
   closeTreeMenu();if(!state.scene)return;
   const targets=[];const actions=target=>{targets.push(target);return treeActionsButton(targets.length-1,target.label);};
-  const instances=state.doc.objects||[],direct=new Set(state.doc.parts.map(p=>p.id)),owned=new Set(),reopenable=id=>{const part=state.doc.parts.find(p=>p.id===id),definition=part&&state.library[part.catalog];return !!(part&&definition?.kind==='member'&&JSON.stringify(definition.geometry||[]).includes('$length_mm'));},partButton=id=>{const label=state.scene.parts.find(p=>p.id===id)?.label||id;return `<div class="outline-heading"><button class="outline-part ${state.selected===id?'active':''}" data-select="${esc(id)}" title="${esc(id)}"><span>◇</span>${esc(label)}</button>${actions({label,part:id,members:[id],duplicate:true,reopen:reopenable(id)})}</div>`;};
+  const instances=state.doc.objects||[],direct=new Set(state.doc.parts.map(p=>p.id)),owned=new Set(),reopenable=id=>{const part=state.doc.parts.find(p=>p.id===id),definition=part&&state.library[part.catalog];return !!(part&&definition?.kind==='member'&&JSON.stringify(definition.geometry||[]).includes('$length_mm'));},partButton=id=>{const label=partName(id);return `<div class="outline-heading"><button class="outline-part ${state.selected===id?'active':''}" data-select="${esc(id)}" title="${esc(id)}"><span>◇</span>${esc(label)}</button>${actions({label,part:id,members:[id],duplicate:true,reopen:reopenable(id)})}</div>`;};
   const grouped=instances.map(instance=>{
     const members=state.scene.parts.filter(p=>!direct.has(p.id)&&p.id.startsWith(instance.id+'/')).map(p=>p.id);members.forEach(id=>owned.add(id));
     if(instance.template==='chain'){
@@ -758,7 +888,11 @@ async function addPart(catalog,position=null,{origin=false,quiet=false}={}){cons
       mirrored[0].mirror_parts=[...new Set((mirrored[0].mirror_parts||[]).filter(part=>existing.has(part)))];
       if(!mirrored[0].mirror_parts.includes(id))mirrored[0].mirror_parts.push(id);
     }
-    state.selected=id;});setMode('design');setTool('translate');if(!quiet)toast('Added '+id+'. Drag it onto a pipe or socket to connect.');return id;}
+    state.selected=id;});setMode('design');setTool('translate');
+  if(!quiet)toast(definition.ports?.eye?.snap_role==='shackle'
+    ?'Added '+id+'. Drag its bow or pin near a chain link or bolt eye to connect.'
+    :'Added '+id+'. Drag it onto a pipe or socket to connect.');
+  return id;}
 
 async function deleteDraft(id){
   if(state.busy||state.placementPending||!draftRun(state.doc,id))return;
@@ -801,7 +935,8 @@ function removeDraftMirrorDialog(group,plane){
       if(state.placementPending)return;const revision=state.revision;state.placementPending=true;gizmo?.detach();
       closeModal();status('Keeping mirrored draft geometry…');
       try{const result=await api('draft-mirror-bake',{group:group.id,plane:plane.id});if(revision!==state.revision)return;
-        await acceptPlacement(result,revision);syncMirrorPreviews();toast('Mirror copies are now independent draft geometry.');}
+        await acceptPlacement(result,revision);syncMirrorPreviews();toast('Mirror copies are now independent draft geometry.');
+        if(result.warnings?.length)showDraftFindings('Mirror warnings','Some reflected connections could not be made; their originals were kept.',result.warnings);}
       catch(error){toast(error.message,true);}finally{state.placementPending=false;attachGizmo();}
     }}]);
 }
@@ -952,13 +1087,27 @@ function draftConnect(match,recordUndo=true){
     run.start_mm=frames.start.point.toArray();run.end_mm=frames.end.point.toArray();
   }
   const additional=attachAlignedThroughSockets(run);changed();refreshDraft(run.id);updatePorts();repairNewDraftConnection(run.id);
-  toast(`${additional+1} draft ${additional?'connections':'connection'} added. Finalize when the subassembly is ready.`);status('Draft graph updated');
+  const message=`${additional+1} draft ${additional?'connections':'connection'} added. Finalize when the subassembly is ready.`;
+  toast(message);offerSimilarConnections(message,[[match.connector,match.port]]);status('Draft graph updated');
 }
 
+function syncRotatedDraftMirrorModes(run,startBefore,endBefore){
+  const oldDirection=endBefore.clone().sub(startBefore).normalize();
+  const start=new THREE.Vector3(...run.start_mm),end=new THREE.Vector3(...run.end_mm);
+  const direction=end.clone().sub(start).normalize(),length=start.distanceTo(end);
+  if(length<=1e-6||Math.abs(oldDirection.dot(direction))>1-1e-10)return;
+  const owner=(state.doc.draft_subassemblies||[]).find(group=>group.runs.includes(run));
+  for(const plane of owner?.mirrors||[]){
+    const mode=mirrorModeForSpan(start,end,plane);
+    plane.run_modes||={};plane.run_modes[run.id]=mode;
+  }
+}
 function positionDraftRun(run,matrix){
+  const startBefore=new THREE.Vector3(...run.start_mm),endBefore=new THREE.Vector3(...run.end_mm);
   const length=state.scene.parts.find(p=>p.id===run.id).length_mm;
   run.start_mm=new THREE.Vector3(0,0,-length/2).applyMatrix4(matrix).toArray();
   run.end_mm=new THREE.Vector3(0,0,length/2).applyMatrix4(matrix).toArray();
+  syncRotatedDraftMirrorModes(run,startBefore,endBefore);
   const direction=new THREE.Vector3().subVectors(new THREE.Vector3(...run.end_mm),new THREE.Vector3(...run.start_mm)).normalize();
   const reference=Math.abs(direction.y)<.95?new THREE.Vector3(0,1,0):new THREE.Vector3(1,0,0);
   const x=reference.clone().cross(direction).normalize(),y=direction.clone().cross(x);
@@ -1101,6 +1250,7 @@ function snapSettingsDialog(){
     <section><h3>KEYBOARD NUDGES</h3><div class="fields"><div class="field"><label for="settings-keyboard-move">KEYBOARD NUDGE DISTANCE · mm</label><input id="settings-keyboard-move" type="number" min="0.1" max="10000" step="any"></div>
       <div class="field"><label for="settings-keyboard-rotate">KEYBOARD ROTATION STEP · °</label><input id="settings-keyboard-rotate" type="number" min="0.1" max="180" step="any"></div></div>
       <p>W/A/S/D move in the XY plane; F/V move up/down. Z/X/C rotate around world X/Y/Z. Shift uses one tenth of the keyboard step; Alt reverses rotation. With the R rotation gizmo, hold Shift to use the part’s local axes instead of world axes. Alt+Shift+D duplicates the selected part; Alt+D also works when the browser does not reserve it. G/R keep the move and rotate gizmos. Home frames the design. Keyboard steps are separate from snap increments.</p></section>
+    <section><h3>CONNECTION SHORTCUTS</h3><p>Ctrl+Alt+J detaches all external connections from the selected connector, length or flexible line. Ctrl+Alt+Shift+J attaches compatible nearby free ports. Each action is one Undo step.</p></section>
     <section><h3>NEW ITEMS</h3><div class="fields"><div class="field"><label>DUPLICATE COPIES</label><input id="pref-duplicate-count" type="number" min="1" max="100" step="1" value="${preferences.defaultDuplicateCount}"></div>
       <div class="field"><label>HUMAN HEIGHT · mm</label><input id="pref-human-height" type="number" min="500" max="2500" step="1" value="${preferences.defaultHumanHeightMm}"></div>
       <div class="field"><label>HUMAN MASS · kg</label><input id="pref-human-mass" type="number" min="10" max="250" step="any" value="${preferences.defaultHumanMassKg}"></div></div>
@@ -1125,13 +1275,13 @@ function snapSettingsDialog(){
       <div class="field"><label>BACKGROUND</label><select id="pref-background">${options([['#edf1f3','Soft grey'],['#ffffff','White'],['transparent','Transparent']],preferences.renderBackground)}</select></div></div>
       </section><section><h3>SIMULATION</h3><div class="fields"><div class="field"><label for="pref-sim-seconds">DEFAULT DURATION · SECONDS</label><input id="pref-sim-seconds" type="number" min="0.1" max="30" step="any" value="${preferences.simulationSeconds}"></div>
       <div class="field"><label for="pref-sim-mode">DEFAULT MODE</label><select id="pref-sim-mode">${options([['preview','Preview'],['full','Full physics']],preferences.simulationMode)}</select></div></div>
-      <p>Preview approximates motion more quickly. Full physics uses individual links and finer beam and solver settings. Recordings remember which mode produced them.</p>
+      <p>Preview defaults to 60 Hz, rigid beams and coarse flexible lines. Full physics uses individual links and flexible beams. Preview never switches to Full automatically.</p>
       <h4>PREVIEW QUALITY</h4><div class="fields"><div class="field"><label for="pref-chain-links">MAX LINKS PER RIGID BODY</label><input id="pref-chain-links" type="number" min="1" max="1000" step="1" value="${preferences.simulationChainLinks}"></div>
-      <div class="field"><label for="pref-preview-beam">BEAM SEGMENT LENGTH · mm</label><input id="pref-preview-beam" type="number" min="400" max="2000" step="1" value="${preferences.previewBeamSegmentMm}"></div></div>
-      <p>Larger groups and longer beam segments reduce detail. Groups stay smaller where needed to preserve flexibility and bends. Members shorter than two beam segments stay rigid in Preview; longer members can bend. Attachments, mass, and rope length remain represented; rupture locations are approximate.</p>
-      <div class="fields"><div class="field"><label for="pref-preview-steps">PHYSICS STEPS PER SECOND</label><input id="pref-preview-steps" type="number" min="240" max="4000" step="1" value="${preferences.previewStepsPerSecond}"></div>
-      <div class="field"><label for="pref-preview-iterations">STARTING SOLVER ITERATIONS</label><input id="pref-preview-iterations" type="number" min="40" max="1000" step="1" value="${preferences.previewSolverIterations}"></div></div>
-      <p>Higher values spend more time resolving motion and contacts. Preview increases contact effort if joints drift, and retries difficult cases with Full physics when needed. These four settings apply only to Preview.</p>
+      <div class="field"><label for="pref-preview-beam">SELECTED BEAM SEGMENT LENGTH · mm</label><input id="pref-preview-beam" type="number" min="400" max="2000" step="1" value="${preferences.previewBeamSegmentMm}"></div></div>
+      <p>Preview aims for four groups per flexible line, retaining extra groups at bends and attachments. Select individual lines or beams for extra detail in the simulation panel. Beam segment length applies only to selected beams. Line inertia and contact are approximated for stability; use Full physics for detailed load and damage results.</p>
+      <div class="fields"><div class="field"><label for="pref-preview-steps">PHYSICS STEPS PER SECOND</label><input id="pref-preview-steps" type="number" min="30" max="240" step="1" value="${preferences.previewStepsPerSecond}"></div>
+      <div class="field"><label for="pref-preview-iterations">SOLVER ITERATION BUDGET</label><input id="pref-preview-iterations" type="number" min="10" max="120" step="1" value="${preferences.previewSolverIterations}"></div></div>
+      <p>Higher values spend more time resolving motion and contacts. Preview uses four internal substeps per step and a fixed iteration budget, with no automatic escalation or replay. These settings apply only to Preview.</p>
       <div class="single-field"><label>YELLOW DEFLECTION WARNING · mm</label><input id="pref-deflection-warning" type="number" min="0.01" max="100000" step="any" value="${preferences.deflectionWarningMm}"></div>
       <p>In validation and playback, red marks predicted yielding or possible fracture. Yellow marks displacement above this threshold.</p></section>
   </div>`);
@@ -1199,10 +1349,10 @@ function showDragSnap(){
   if(!dragStart||performance.now()-lastSnapTime<65)return;lastSnapTime=performance.now();
   const matches=dragStart.matches?.length?dragStart.matches:dragCandidates(dragStart.group);clearSnapPreview();if(!matches.length){if(dragStart.alignment){$('#snap-hint').textContent=dragStart.alignment;$('#snap-hint').classList.remove('hidden');}return;}
   const best=matches[0];
-  if(best.kind==='hinge'){
+  if(best.kind==='hinge'||best.kind==='hook'){
     const marker=new THREE.Mesh(new THREE.SphereGeometry(10,12,8),new THREE.MeshBasicMaterial({color:'#48c6a0',depthTest:false}));
     marker.position.fromArray(best.point);marker.renderOrder=150;snapGhost.add(marker);
-    $('#snap-hint').textContent=best.label+' · Release to join the bolt holes';$('#snap-hint').classList.remove('hidden');
+    $('#snap-hint').textContent=best.label+(best.kind==='hook'?' · Release to attach':' · Release to join the bolt holes');$('#snap-hint').classList.remove('hidden');
     return;
   }
   const side=dragStart.group.includes(best.connector)?'connector':'member';
@@ -1230,7 +1380,10 @@ function beginPlacement(kind){
   return true;
 }
 function drawMovement(drag){
-  for(const part of state.scene.parts){const object=partObjects.get(part.id);if(object)setPose(object,drag.result?.poses[part.id]||part.pose);}
+  const poses=drag.result?.poses||{},affected=new Set([...drag.group,...(drag.rendered||[]),...Object.keys(poses)]);
+  const originals=new Map(state.scene.parts.filter(part=>affected.has(part.id)).map(part=>[part.id,part.pose]));
+  for(const id of affected){const object=partObjects.get(id);if(object)setPose(object,poses[id]||originals.get(id));}
+  drag.rendered=Object.keys(poses);
   updatePorts();showDragSnap();
 }
 function previewMovement(){
@@ -1334,13 +1487,14 @@ async function searchConnection(options){
   }
 }
 async function offerConnection(matches,poses={},revision=state.revision,recordUndo=true,movingId=null){
-  if(matches[0]?.kind==='hinge'){
-    state.placementPending=true;gizmo?.detach();status('Aligning hinge bolt holes…');
+  if(matches[0]?.kind==='hinge'||matches[0]?.kind==='hook'){
+    const hook=matches[0].kind==='hook';
+    state.placementPending=true;gizmo?.detach();status(hook?'Aligning shackle with the hook eye…':'Aligning hinge bolt holes…');
     try{
       const match=matches[0],move=match.moving===match.male.part?'a':'b';
-      const result=await api('connect-ports',{a:match.male,b:match.female,type:'revolute',move,poses});
+      const result=await api('connect-ports',{a:match.male,b:match.female,type:hook?'spherical':'revolute',move,poses});
       await acceptPlacement(result,revision,recordUndo);
-      toast('Hinge joined at its bolt holes.');status('Hinge joint created');
+      toast(hook?'Shackle attached to the hook eye.':'Hinge joined at its bolt holes.');status(hook?'Shackle connection created':'Hinge joint created');
     }catch(e){restorePlacement();toast(e.message,true);}
     return;
   }
@@ -1381,7 +1535,7 @@ async function offerConnection(matches,poses={},revision=state.revision,recordUn
 function connectionReview(matches,poses={},revision=state.revision,initial=null,replaceJoint=null,recordUndo=true){
   state.placementPending=true;gizmo?.detach();let result=initial,chosen=null,requestVersion=0,previewRenderer=null,previewControls=null,previewObjects=null;
   const session=++reviewVersion;
-  modal(replaceJoint?'Edit socket connection':'Align and connect',`<div class="single-field"><label for="snap-target">CONNECTION</label><select id="snap-target">${matches.map((m,i)=>`<option value="${i}">${esc(m.label||m.connector+' / '+m.port)}</option>`).join('')}</select></div><div id="snap-settings"></div><div class="single-field"><label for="snap-move">PARTS TO MOVE</label><select id="snap-move" disabled></select></div><label class="check-label"><input id="snap-lock" type="checkbox" ${preferences.connectionLocked?'checked':''}>Secure the screw</label><div id="snap-preview-view" aria-label="Connection alignment preview"></div><p id="snap-review-status" role="status">Checking available movement…</p>`,[
+  modal(replaceJoint?'Edit socket connection':'Align and connect',`<div class="single-field"><label for="snap-target">CONNECTION</label><select id="snap-target">${matches.map((m,i)=>`<option value="${i}">${esc(m.label||partName(m.connector)+' / '+m.port)}</option>`).join('')}</select></div><div id="snap-settings"></div><div class="single-field"><label for="snap-move">PARTS TO MOVE</label><select id="snap-move" disabled></select></div><label class="check-label"><input id="snap-lock" type="checkbox" ${preferences.connectionLocked?'checked':''}>Secure the screw</label><div id="snap-preview-view" aria-label="Connection alignment preview"></div><p id="snap-review-status" role="status">Checking available movement…</p>`,[
     {label:'Cancel',action:()=>{closeModal();restorePlacement();}},
     ...(Object.keys(poses).length?[{label:'Place only',action:async()=>{closeModal();await placeWithoutConnection(poses,revision,recordUndo);}}]:[]),
     {label:'Force',action:()=>refresh(true)},
@@ -1426,7 +1580,7 @@ function connectionReview(matches,poses={},revision=state.revision,initial=null,
     chosen=result?.options.find(o=>o.move===$('#snap-move').value&&o.available);
     $('#modal-actions .primary').disabled=!chosen;
     const changes=chosen?.adjustments;
-    $('#snap-adjustments').innerHTML=changes&&(changes.unlocked.length||changes.resized.length)?`<h3>PROPOSED ASSEMBLY CHANGES</h3><ul>${changes.unlocked.map(c=>`<li>Loosen, fit and retighten <strong>${esc(c.connector)}</strong> / ${esc(c.port||c.joint)}</li>`).join('')}${changes.resized.map(c=>`<li><strong>${esc(c.part)}</strong>: ${c.before_mm.toFixed(2)} → ${c.after_mm.toFixed(2)} mm (${c.change_mm>0?'+':''}${c.change_mm.toFixed(2)} mm)</li>`).join('')}</ul>`:'';
+    $('#snap-adjustments').innerHTML=changes&&(changes.unlocked.length||changes.resized.length)?`<h3>PROPOSED ASSEMBLY CHANGES</h3><ul>${changes.unlocked.map(c=>`<li>Loosen, fit and retighten <strong>${esc(partName(c.connector))}</strong> / ${esc(c.port||c.joint)}</li>`).join('')}${changes.resized.map(c=>`<li><strong>${esc(partName(c.part))}</strong>: ${c.before_mm.toFixed(2)} → ${c.after_mm.toFixed(2)} mm (${c.change_mm>0?'+':''}${c.change_mm.toFixed(2)} mm)</li>`).join('')}</ul>`:'';
     if(chosen?.joint){
       if($('#snap-station'))$('#snap-station').value=Number(chosen.joint.b.at_mm.toFixed(4));
       if($('#snap-insertion'))$('#snap-insertion').value=Number(chosen.joint.insertion_mm.toFixed(4));
@@ -1545,8 +1699,19 @@ function queueKeyboardNudge(event){
 }
 async function objectEdit(route,extra){
   if(state.busy||state.placementPending)return;const revision=state.revision;state.placementPending=true;gizmo?.detach();
-  try{const result=await api(route,extra);await acceptPlacement(result,revision);}
+  try{const result=await api(route,extra);if(result.changed===false){restorePlacement();renderInspector();return result;}await acceptPlacement(result,revision);return result;}
   catch(error){restorePlacement();renderInspector();toast(error.message,true);}
+}
+async function quickConnections(operation){
+  if(!state.selected||state.mode!=='design'||state.busy||state.placementPending||dragStart)return;
+  const result=await objectEdit('quick-connections',{selected:state.selected,operation});
+  if(!result)return;
+  const count=result.count||0;
+  const message=operation==='detach'
+    ?count?`Detached ${count} ${count===1?'connection':'connections'} from the selection.`:'No external connections to detach.'
+    :count?`Attached ${count} nearby ${count===1?'connection':'connections'}.`:'No compatible free ports are close enough to attach.';
+  toast(message);status(message);
+  if(operation==='attach'&&count)offerSimilarConnections(message,result.attached_ports);
 }
 async function regroupObject(id){
   objectModes.set(id,'whole');await objectEdit('regroup',{object:id});
@@ -1712,7 +1877,7 @@ async function resizePipe(member,length,releases=[]){
       modal('Length change blocked',`<p>${esc(result.reason)}</p><p>${esc(member)} remains at its current length. Open a connection or adjust the frame before retrying.</p>
         ${(result.suggestions||[]).map((s,i)=>`<div class="joint-card"><p>${esc(s.message)}</p><p>${s.joints.map(esc).join('<br>')}</p><button class="inspect-action" data-resize-release="${i}">${s.action==='loosen'?'Loosen and resize':'Disconnect and resize'}</button></div>`).join('')}
         ${result.blockers?.length?`<details ${result.suggestions?.length?'':'open'}><summary>View ${result.blockers.length} blocking constraints</summary>
-        ${result.blockers.map((b,i)=>`<div class="joint-card"><div class="joint-card-top">${esc(b.joint||'World anchor: '+b.anchor)}</div><p>${esc(b.parts.join(' ↔ '))}${b.port?' · socket '+esc(b.port):''}</p><button class="inspect-action secondary" data-resize-show="${i}">${b.anchor?'Show anchored part':'Show connection'}</button></div>`).join('')}</details>`:''}`,
+        ${result.blockers.map((b,i)=>`<div class="joint-card"><div class="joint-card-top">${esc(b.joint||'World anchor: '+b.anchor)}</div><p>${esc(b.parts.map(partName).join(' ↔ '))}${b.port?' · socket '+esc(b.port):''}</p><button class="inspect-action secondary" data-resize-show="${i}">${b.anchor?'Show anchored part':'Show connection'}</button></div>`).join('')}</details>`:''}`,
         [{label:'Keep current length',action:closeModal}]);
       $$('[data-resize-show]').forEach(button=>button.onclick=()=>{
         const blocker=result.blockers[+button.dataset.resizeShow];closeModal();setTool('select');select(blocker.connector||blocker.anchor);
@@ -1814,8 +1979,8 @@ function renderInspectorContents(){
       <div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<p>${run.attachments?.length?'Position moves the connected draft structure together.':'Move the tube by dragging it, using the gizmo, or entering its centre position.'}</p></div>
       <div class="inspect-section"><h3>WORKING SPAN</h3><div class="single-field"><label>Preview length · mm</label><input id="draft-length" type="number" min="1" step="any" value="${p.length_mm.toFixed(2)}" ${fixed?'disabled':''}></div><label class="check-label"><input id="draft-lock" type="checkbox" ${run.locked_length_mm!=null?'checked':''}>Lock cut length at ${p.length_mm.toFixed(1)} mm</label><p>${fixed?'Both ends are connected; move a fitting to change the span.':centeredAttachment?'Changing the span moves the connected fitting equally away from or toward the mirror plane.':'Drag the run or enter a rough working length. Exact cut length is calculated when you finalize.'}</p><button class="inspect-action" id="draft-connect">Connect to a socket</button></div>
       ${mirrorPanel}
-      <div class="inspect-section"><h3>CONNECTIONS · ${(run.attachments||[]).length}</h3>${(run.attachments||[]).map((a,i)=>`<div class="joint-card"><strong>${esc(a.connector)} / ${esc(a.port)}</strong><p>${esc(a.end||'through station')}</p><button class="subtle" data-draft-detach="${i}">Detach</button></div>`).join('')||'<p>No sockets yet. Choose Connect, then a connector.</p>'}
-      ${p.conflicts.map(c=>`<div class="joint-card"><strong>${esc(c.code)}</strong><p>${esc(c.message)}</p></div>`).join('')}<button class="inspect-action secondary" id="draft-repair-selected">Repair alignment · stay in draft</button><button class="inspect-action" id="draft-finalize-selected">Finalize subassembly</button><p>Only draft pipes connected to this run will be finalized; separate structures stay in draft.</p><button class="inspect-action secondary" id="draft-delete">Delete draft run</button></div>`;
+      <div class="inspect-section"><h3>CONNECTIONS · ${(run.attachments||[]).length}</h3>${(run.attachments||[]).map((a,i)=>`<div class="joint-card"><strong>${esc(partName(a.connector))} / ${esc(a.port)}</strong><p>${esc(a.end||'through station')}</p><button class="subtle" data-draft-detach="${i}">Detach</button></div>`).join('')||'<p>No sockets yet. Choose Connect, then a connector.</p>'}
+      ${[...p.conflicts,...(p.warnings||[])].map(c=>`<div class="joint-card"><strong>${esc(c.code)}</strong><p>${esc(c.message)}</p></div>`).join('')}<button class="inspect-action secondary" id="draft-repair-selected">Repair alignment · stay in draft</button><button class="inspect-action" id="draft-finalize-selected">Finalize subassembly</button><p>Only draft pipes connected to this run will be finalized; separate structures stay in draft.</p><button class="inspect-action secondary" id="draft-delete">Delete draft run</button></div>`;
     $('#inspector [data-drop-floor]').remove();
     $('#draft-mirror-add').onclick=()=>addDraftMirrorDialog(mirrorAddOwner,run);
     $$('[data-mirror-remove]').forEach(button=>button.onclick=()=>{const entry=mirrorEntries[Number(button.dataset.mirrorRemove)];removeDraftMirrorDialog(entry.group,entry.plane);});
@@ -1835,7 +2000,7 @@ function renderInspectorContents(){
     $$('[data-draft-detach]').forEach(button=>{
       const attachment=run.attachments[+button.dataset.draftDetach],card=button.parentElement;
       card.classList.add('draft-connection-card');card.tabIndex=0;
-      card.setAttribute('aria-label',`Highlight ${attachment.connector} ${attachment.port}`);
+      card.setAttribute('aria-label',`Highlight ${partName(attachment.connector)} ${attachment.port}`);
       const show=()=>showDraftConnection(attachment.connector,attachment.port),clear=()=>showDraftConnection(null);
       card.addEventListener('mouseenter',show);card.addEventListener('mouseleave',clear);
       card.addEventListener('focusin',show);
@@ -1852,7 +2017,7 @@ function renderInspectorContents(){
   const spec=state.doc.parts.find(x=>x.id===p.id),definition=state.doc.definitions?.[p.catalog]||state.library[p.catalog]||spec?.body||{};
   const params={...definition.parameters,...spec?.parameters};const connections=state.scene.joints.filter(j=>[j.a.part,j.b.part].includes(p.id));const group=state.scene.groups.find(g=>g.includes(p.id))||[];const anchor=(state.doc.anchors||[]).find(a=>a.part===p.id);
   const draftConnections=draftRuns(state.doc).flatMap(run=>(run.attachments||[]).map((attachment,index)=>({run,attachment,index}))).filter(({attachment})=>attachment.connector===p.id);
-  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog||p.id)}</div><h2>${esc((p.label!==p.id&&p.label)||spec?.label||definition.name||p.id)}</h2><span class="chip">${esc(p.kind.toUpperCase())}</span><span class="chip gray">${p.mass_kg.toFixed(2)} kg</span></div><div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<div style="height:17px"></div>${propertyFields('ROTATION',p.pose.rotation_deg,'rotation_deg')}<label class="check-label"><input type="checkbox" id="move-body" ${state.moveBody?'checked':''}>Move the connected rigid body (${group.length})</label>${!spec?'<button class="inspect-action" id="expand-selected">Expand object to edit its parts</button>':''}</div><div class="inspect-section"><h3>DIMENSIONS & MATERIAL</h3>${Object.entries(params).filter(([,v])=>typeof v==='number').map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-param="${esc(k)}" value="${v}" step="1" min="0.01"></div>`).join('')}<div class="property-row"><span>Material</span><strong>${esc(definition.material||'Custom body')}</strong></div><div class="property-row"><span>Mass</span><strong>${p.mass_kg.toFixed(3)} kg</strong></div>${p.kind==='member'?'<button class="inspect-action" id="connect-selected">Connect to a socket ⌘</button>':''}</div><div class="inspect-section">${p.kind==='panel'?'<button class="inspect-action" id="fasten-panel">Fasten board at bolt holes</button>':''}${p.kind==='wheel'&&spec&&!connections.some(j=>j.a.part===p.id&&j.a.port==='axle'||j.b.part===p.id&&j.b.port==='axle')?'<button class="inspect-action" id="mount-wheel">Mount wheel axle</button>':''}<button class="inspect-action secondary" id="new-joint">Add joint or attachment</button><h3>CONNECTIONS <span style="float:right">${connections.length}</span></h3>${connections.map(j=>`<div class="joint-card"><div class="joint-card-top"><span>${esc(j.a.part===p.id?j.b.part:j.a.part)}</span><label><input type="checkbox" data-lock="${esc(j.id)}" ${j.locked||j.type==='fixed'?'checked':''}>Locked</label></div><p>${esc(j.a.port||j.type)} → ${esc(j.b.at_mm!=null?Number(j.b.at_mm).toFixed(1)+' mm from pipe start':j.b.end||j.b.port||j.type)} ${j.insertion_mm?' · '+Number(j.insertion_mm).toFixed(1)+' mm insertion':''}</p><button class="subtle" data-joint-edit="${esc(j.id)}" style="padding:3px 9px 3px 0">Edit joint</button><button class="subtle" data-detach="${esc(j.id)}" style="padding:3px 0">Detach</button></div>`).join('')||'<p>No connections. This part moves independently.</p>'}<label class="check-label"><input id="anchor-check" type="checkbox" ${anchor?'checked':''}>Fixed to the world</label>${anchor?`<div class="single-field"><label>MOUNTING SURFACE</label><select id="anchor-surface">${['floor','wall','ceiling','fixture'].map(s=>`<option ${anchor.surface===s?'selected':''}>${s}</option>`).join('')}</select></div>`:''}</div><div class="inspect-section"><h3>PART REFERENCE</h3><p>${esc(p.source?.geometry_status||'User defined geometry')}</p>${p.source?.assumptions?'<p>'+esc(p.source.assumptions.join('. '))+'</p>':''}${/^https?:\/\//.test(p.source?.url||'')?`<a class="results-link" target="_blank" rel="noreferrer" href="${esc(p.source.url)}">Supplier specifications ↗</a>`:''}<button class="inspect-action secondary" id="edit-part-definition">Edit part definition</button></div>`;
+  $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog||p.id)}</div><h2>${esc((p.label!==p.id&&p.label)||spec?.label||definition.name||p.id)}</h2><span class="chip">${esc(p.kind.toUpperCase())}</span><span class="chip gray">${p.mass_kg.toFixed(2)} kg</span></div><div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<div style="height:17px"></div>${propertyFields('ROTATION',p.pose.rotation_deg,'rotation_deg')}<label class="check-label"><input type="checkbox" id="move-body" ${state.moveBody?'checked':''}>Move the connected rigid body (${group.length})</label>${!spec?'<button class="inspect-action" id="expand-selected">Expand object to edit its parts</button>':''}</div><div class="inspect-section"><h3>DIMENSIONS & MATERIAL</h3>${Object.entries(params).filter(([,v])=>typeof v==='number').map(([k,v])=>`<div class="single-field"><label>${esc(k==='joint_damping_nms_rad'?'PASSIVE JOINT DAMPING · N·m·s/rad':k.replaceAll('_',' ').toUpperCase())}</label><input type="number" data-param="${esc(k)}" value="${v}" step="1" min="0.01"></div>`).join('')}<div class="property-row"><span>Material</span><strong>${esc(definition.material||'Custom body')}</strong></div><div class="property-row"><span>Mass</span><strong>${p.mass_kg.toFixed(3)} kg</strong></div>${p.kind==='member'?'<button class="inspect-action" id="connect-selected">Connect to a socket ⌘</button>':''}</div><div class="inspect-section">${p.kind==='panel'?'<button class="inspect-action" id="fasten-panel">Fasten board at bolt holes</button>':''}${p.kind==='wheel'&&spec&&!connections.some(j=>j.a.part===p.id&&j.a.port==='axle'||j.b.part===p.id&&j.b.port==='axle')?'<button class="inspect-action" id="mount-wheel">Mount wheel axle</button>':''}<button class="inspect-action secondary" id="new-joint">Add joint or attachment</button><h3>CONNECTIONS <span style="float:right">${connections.length}</span></h3>${connections.map(j=>`<div class="joint-card"><div class="joint-card-top"><span>${esc(partName(j.a.part===p.id?j.b.part:j.a.part))}</span><label><input type="checkbox" data-lock="${esc(j.id)}" ${j.locked||j.type==='fixed'?'checked':''}>Locked</label></div><p>${esc(j.a.port||j.type)} → ${esc(j.b.at_mm!=null?Number(j.b.at_mm).toFixed(1)+' mm from pipe start':j.b.end||j.b.port||j.type)} ${j.insertion_mm?' · '+Number(j.insertion_mm).toFixed(1)+' mm insertion':''}</p><button class="subtle" data-joint-edit="${esc(j.id)}" style="padding:3px 9px 3px 0">Edit joint</button><button class="subtle" data-detach="${esc(j.id)}" style="padding:3px 0">Detach</button></div>`).join('')||'<p>No connections. This part moves independently.</p>'}<label class="check-label"><input id="anchor-check" type="checkbox" ${anchor?'checked':''}>Fixed to the world</label>${anchor?`<div class="single-field"><label>MOUNTING SURFACE</label><select id="anchor-surface">${['floor','wall','ceiling','fixture'].map(s=>`<option ${anchor.surface===s?'selected':''}>${s}</option>`).join('')}</select></div>`:''}</div><div class="inspect-section"><h3>PART REFERENCE</h3><p>${esc(p.source?.geometry_status||'User defined geometry')}</p>${p.source?.assumptions?'<p>'+esc(p.source.assumptions.join('. '))+'</p>':''}${/^https?:\/\//.test(p.source?.url||'')?`<a class="results-link" target="_blank" rel="noreferrer" href="${esc(p.source.url)}">Supplier specifications ↗</a>`:''}<button class="inspect-action secondary" id="edit-part-definition">Edit part definition</button></div>`;
   if(draftConnections.length){
     const section=$('#anchor-check').closest('.inspect-section');
     section.querySelector('h3 span').textContent=connections.length+draftConnections.length;
@@ -1920,9 +2085,9 @@ function setHumanPosture(parameters,mode,joints=[]){
   else parameters.hold_joints=mode==='custom'?joints:[mode];
 }
 function postureOptions(mode){return HUMAN_POSTURES.map(([id,label])=>`<option value="${id}" ${mode===id?'selected':''}>${label}</option>`).join('');}
-function humanImportFields(prefix){return `<div class="single-field"><label for="${prefix}-model-file">IMPORTED APPEARANCE · OPTIONAL</label><input id="${prefix}-model-file" type="file" multiple accept=".glb,.gltf,.vrm,.bin,.png,.jpg,.jpeg,.webp"><p>Choose a rigged GLB or VRM, or a glTF together with its textures and buffers. Bones, skin weights, UVs and materials are retained. The 19 segments still provide collisions.</p><p id="${prefix}-model-status" class="human-model-status" role="status"></p></div>`;}
+function humanImportFields(prefix){return `<div class="single-field"><label for="${prefix}-model-file">IMPORTED APPEARANCE · OPTIONAL</label><input id="${prefix}-model-file" type="file" multiple accept=".glb,.gltf,.vrm,.bin,.png,.jpg,.jpeg,.webp"><p>Choose a rigged GLB or VRM, or a glTF together with its textures and buffers, up to ${humanImportMaxBytes/(1024*1024)} MiB total. Bones, skin weights, UVs and materials are retained. The 19 segments still provide collisions.</p><p id="${prefix}-model-status" class="human-model-status" role="status"></p></div>`;}
 async function encodeHumanFile(file){
-  if(file.size>200*1024*1024)throw new Error('Each imported file must be smaller than 200 MiB.');
+  if(file.size>humanImportMaxBytes)throw new Error(`Each imported file must be at most ${humanImportMaxBytes/(1024*1024)} MiB.`);
   const bytes=new Uint8Array(await file.arrayBuffer());let binary='';
   for(let offset=0;offset<bytes.length;offset+=32768)binary+=String.fromCharCode(...bytes.subarray(offset,offset+32768));
   return {name:file.webkitRelativePath||file.name,content_base64:btoa(binary)};
@@ -1935,13 +2100,14 @@ function bindHumanImport(prefix,onImported){
     input.disabled=true;const addButton=prefix==='human'?$('#modal-actions .primary'):null;if(addButton)addButton.disabled=true;
     try{
       if(models.length!==1)throw new Error('Choose exactly one GLB, glTF or VRM model, plus any textures and buffers it needs.');
-      if(files.reduce((total,file)=>total+file.size,0)>200*1024*1024)throw new Error('The model and textures together must be smaller than 200 MiB.');
+      const total=files.reduce((total,file)=>total+file.size,0);
+      if(total>humanImportMaxBytes)throw new Error(`The selected files total ${(total/(1024*1024)).toFixed(1)} MiB; the model and textures together can be at most ${humanImportMaxBytes/(1024*1024)} MiB.`);
       message.textContent='Importing skeleton, materials and textures…';
       const main=await encodeHumanFile(models[0]),siblings=await Promise.all(files.filter(f=>f!==models[0]).map(encodeHumanFile));
       const result=await api('import-human-model',{filename:main.name,content_base64:main.content_base64,files:siblings});
       await onImported(result.render_model);
       message.textContent=`${result.render_model.name||models[0].name} imported. Bone mapping and extra-bone motion can be adjusted in properties.`;
-    }catch(error){message.textContent=error.message;toast(error.message,true);}
+    }catch(error){const detail=`Could not import ${models[0]?.name||'human appearance'}: ${error.message}`;message.textContent=detail;toast(detail,true);}
     finally{input.disabled=false;if(addButton)addButton.disabled=false;}
   };
 }
@@ -1957,6 +2123,10 @@ function renderHumanModelControls(instance){
   const modeOptions=selected=>modes.map(([id,label])=>`<option value="${esc(id)}" ${selected===id?'selected':''}>${esc(label)}</option>`).join('');
   section.innerHTML=`<h3>HUMAN APPEARANCE</h3>${model?`<p class="human-model-status">${esc(model.name||model.file)}</p><label class="check-row"><input id="object-model-enabled" type="checkbox" ${model.enabled!==false?'checked':''}> Use imported model</label><p>Turn off to use the simple 19-segment model in editing, simulation playback and image renders. All import settings are kept.</p><button id="object-model-configure" class="inspect-action secondary">Bone mapping and extra bones</button>`:''}${humanImportFields('object')}`;
   $('#inspector').appendChild(section);
+  if(model){
+    const issue=document.createElement('p');issue.id='object-model-load-status';issue.className='human-model-status';issue.dataset.human=instance.id;issue.setAttribute('role','status');
+    $('#object-model-configure').before(issue);updateHumanModelStatus();
+  }
   const editModel=edit=>changeHumanAppearance(instance.id,object=>edit(object.render_model));
   bindHumanImport('object',imported=>changeHumanAppearance(instance.id,object=>{object.render_model=imported;}));
   if(!model)return;
@@ -1966,28 +2136,83 @@ function renderHumanModelControls(instance){
     const choices=(inventory.length?inventory:loaded).map(b=>typeof b==='string'?{name:b}:b).filter(b=>b.name);
     const segments=Array.isArray(HUMAN_BONE_SEGMENTS)?HUMAN_BONE_SEGMENTS.map(item=>Array.isArray(item)?item:[item.id||item,item.label||String(item).replaceAll('_',' ')]):Object.entries(HUMAN_BONE_SEGMENTS);
     const stored=state.doc.objects.find(object=>object.id===instance.id)?.render_model||model;
-    const draft=clone(stored);draft.bone_map=suggestBoneMappings(choices,draft.bone_map||{});draft.bone_offsets||={};draft.extra_bones||={};
+    // The saved object has settings; only the resolved scene human has the asset URL and neutral skeleton.
+    const currentPreviewHuman=()=>state.scene.humans?.find(human=>human.id===instance.id);
+    const draft=clone(stored);draft.bone_map=suggestBoneMappings(choices,draft.bone_map||{});draft.bone_offsets||={};draft.extra_bones||={};draft.body_proportions||={};
     const matched=Object.keys(draft.bone_map).length;
     const offsetSegments=[...segments].sort(([a],[b])=>Number(b in draft.bone_offsets)-Number(a in draft.bone_offsets));
     const initialOffset=offsetSegments.find(([segment])=>segment in draft.bone_offsets)?.[0]||'left_clavicle';
     const extraKey=bone=>bone.index!=null&&String(bone.index) in draft.extra_bones?String(bone.index):bone.name in draft.extra_bones?bone.name:null;
     const initialExtra=choices.find(bone=>extraKey(bone));
     const extraValue=bone=>bone.index==null?'name:'+bone.name:'node:'+bone.index;
-    modal('Human bone mapping',`<p>${matched?`${matched} body bones were matched automatically from VRM roles or authored names. `:''}Changes preview in the viewport immediately. Use mapped-bone offsets for shoulders and other main body joints.</p><p id="bone-preview-status" class="human-model-status" role="status"></p><div class="bone-diagram-wrap"><div class="bone-diagram-heading"><strong>Imported skeleton</strong><span>Focus a body field, then click a labeled joint to assign it.</span></div><div id="bone-diagram">${boneDiagramSvg(choices,draft.bone_map)}</div></div><details class="human-model-options" open><summary>Main body bones</summary><div class="bone-controls">${segments.map(([segment,label])=>`<div class="single-field"><label for="bone-map-${esc(segment)}">${esc(label)}</label><select id="bone-map-${esc(segment)}" data-human-bone="${esc(segment)}"><option value="">No match</option>${choices.map(bone=>`<option value="${bone.index==null?esc(bone.name):'node:'+bone.index}" ${draft.bone_map[segment]===bone.name||draft.bone_map[segment]===bone.index?'selected':''}>${esc(bone.name)}${bone.index==null?'':' · #'+bone.index}</option>`).join('')}</select></div>`).join('')}</div></details><details class="human-model-options" open><summary>Mapped bone rotation offsets · ${Object.keys(draft.bone_offsets).length} adjusted</summary><p>Rotate a mapped bone after automatic retargeting. These local XYZ angles are useful for clavicles, shoulders and exporter-specific bone axes.</p><div class="single-field"><label for="bone-offset-segment">BODY BONE</label><select id="bone-offset-segment">${offsetSegments.map(([segment,label])=>`<option value="${esc(segment)}" ${segment===initialOffset?'selected':''}>${esc(label)}${segment in draft.bone_offsets?' · adjusted':''}</option>`).join('')}</select></div><div id="bone-offset-settings"></div></details><details class="human-model-options" open><summary>Extra bone motion · ${Object.keys(draft.extra_bones).length} overridden</summary><div class="single-field"><label for="extra-default">DEFAULT MODE</label><select id="extra-default">${modeOptions(draft.default_extra_mode||'fixed_to_parent')}</select></div><p>Only unmapped bones receive extra motion. Existing overrides remain marked and reopen automatically.</p><div class="single-field"><label for="extra-bone">BONE OVERRIDE</label><select id="extra-bone"><option value="">Choose a bone</option>${choices.map(bone=>`<option value="${esc(extraValue(bone))}" ${bone===initialExtra?'selected':''}>${esc(bone.name)}${bone.index==null?'':' · #'+bone.index}${extraKey(bone)?' · overridden':''}</option>`).join('')}</select></div><div id="extra-bone-settings"></div></details>`,[{label:'Cancel',action:closeModal},{label:'Apply settings',primary:true,action:async()=>{
-      await changeHumanAppearance(instance.id,object=>{object.render_model=clone(draft);});accepted=true;closeModal();
-    }}]);
-    let accepted=false,previewTimer=null;
-    const preview=()=>{
-      if(!active||!model.url)return;
-      clearTimeout(previewTimer);$('#bone-preview-status').textContent='Updating preview…';
-      previewTimer=setTimeout(async()=>{try{await humanModels.preview(instance,{...draft,url:model.url},partObjects);humanModels.update(state.recording?.frames[state.frame]?.time_s||0);if($('#bone-preview-status'))$('#bone-preview-status').textContent='Preview updated.';}catch(error){if($('#bone-preview-status'))$('#bone-preview-status').textContent=error.message;}},120);
+    modal('Human bone mapping',`<p>${matched?`${matched} body bones were matched automatically from VRM roles or authored names. `:''}The character preview updates as you edit. Move or zoom the camera before opening this panel to inspect a particular joint.</p><p id="bone-preview-status" class="human-model-status" role="status"></p><details class="human-model-options" open><summary>Body proportions · fitted from imported skeleton</summary><p>100% keeps each imported bone length. Adjust the fit for this character while the preview is visible; collision geometry is unchanged.</p><div class="human-fit-controls">${HUMAN_FIT_CONTROLS.map(([key,label])=>`<label for="bone-fit-${key}">${esc(label)} <output id="bone-fit-value-${key}">${Math.round(100*(draft.body_proportions[key]??1))}%</output><input id="bone-fit-${key}" data-bone-fit="${key}" type="range" min="50" max="150" step="1" value="${Math.round(100*(draft.body_proportions[key]??1))}"></label>`).join('')}</div><button type="button" id="bone-fit-reset" class="button">Reset proportions</button></details><div class="bone-diagram-wrap"><div class="bone-diagram-heading"><strong>Imported skeleton</strong><span>Select a joint or search the list, then assign it to a body bone.</span></div><div class="bone-picker-target single-field"><label for="bone-map-target">Assign to body bone</label><select id="bone-map-target">${segments.map(([segment,label])=>`<option value="${esc(segment)}">${esc(label)}</option>`).join('')}</select><p id="bone-current-mapping"></p></div><div class="bone-picker-layout"><div id="bone-diagram">${boneDiagramSvg(choices,draft.bone_map)}</div><div class="bone-browser"><div class="single-field"><label for="bone-search">Find an imported bone</label><input id="bone-search" type="search" placeholder="Name, body bone or #node number" autocomplete="off"></div><p id="bone-search-count" role="status"></p><div id="bone-search-results" role="group" aria-label="Imported bones"></div></div></div><div class="bone-picker-selection"><div id="bone-selection-detail" role="status"></div><button id="bone-assign" class="button primary" disabled>Assign selected bone</button></div></div><details class="human-model-options" open><summary>Main body bones</summary><div class="bone-controls">${segments.map(([segment,label])=>`<div class="single-field"><label for="bone-map-${esc(segment)}">${esc(label)}</label><select id="bone-map-${esc(segment)}" data-human-bone="${esc(segment)}"><option value="">No match</option>${choices.map(bone=>`<option value="${bone.index==null?esc(bone.name):'node:'+bone.index}" ${draft.bone_map[segment]===bone.name||draft.bone_map[segment]===bone.index?'selected':''}>${esc(bone.name)}${bone.index==null?'':' · #'+bone.index}</option>`).join('')}</select></div>`).join('')}</div></details><details class="human-model-options" open><summary>Mapped bone rotation offsets · ${Object.keys(draft.bone_offsets).length} adjusted</summary><p>Rotate a mapped bone after automatic retargeting. These local XYZ angles are useful for clavicles, shoulders and exporter-specific bone axes.</p><div class="single-field"><label for="bone-offset-segment">BODY BONE</label><select id="bone-offset-segment">${offsetSegments.map(([segment,label])=>`<option value="${esc(segment)}" ${segment===initialOffset?'selected':''}>${esc(label)}${segment in draft.bone_offsets?' · adjusted':''}</option>`).join('')}</select></div><div id="bone-offset-settings"></div></details><details class="human-model-options" open><summary>Extra bone motion · ${Object.keys(draft.extra_bones).length} overridden</summary><div class="single-field"><label for="extra-default">DEFAULT MODE</label><select id="extra-default">${modeOptions(draft.default_extra_mode||'fixed_to_parent')}</select></div><p>Only unmapped bones receive extra motion. Existing overrides remain marked and reopen automatically.</p><div class="single-field"><label for="extra-bone">BONE OVERRIDE</label><select id="extra-bone"><option value="">Choose a bone</option>${choices.map(bone=>`<option value="${esc(extraValue(bone))}" ${bone===initialExtra?'selected':''}>${esc(bone.name)}${bone.index==null?'':' · #'+bone.index}${extraKey(bone)?' · overridden':''}</option>`).join('')}</select></div><div id="extra-bone-settings"></div></details>`,[{label:'Cancel',action:closeModal},{label:'Apply settings',action:async()=>{await applySettings();}},{label:'Done',primary:true,action:async()=>{await applySettings();closeModal();}}]);
+    let previewTimer=null,lastApplied=JSON.stringify(stored);
+    const applySettings=async()=>{
+      clearTimeout(previewTimer);previewTimer=null;
+      const next=JSON.stringify(draft);
+      if(next!==lastApplied){await changeHumanAppearance(instance.id,object=>{object.render_model=clone(draft);});lastApplied=next;}
+      setPreviewStatus('Settings applied. Continue editing or press Done.');
     };
-    reviewCleanup=()=>{clearTimeout(previewTimer);if(!accepted&&active&&model.url)humanModels.preview(instance,model,partObjects).then(()=>humanModels.update(state.recording?.frames[state.frame]?.time_s||0)).catch(error=>toast(error.message,true));};
-    let focusedBoneSelect=$('[data-human-bone]');
+    $('#modal').classList.add('human-bone-modal');
+    const footerStatus=document.createElement('span');footerStatus.id='bone-preview-footer-status';footerStatus.setAttribute('role','status');$('#modal-actions').prepend(footerStatus);
+    const setPreviewStatus=(message,failed=false)=>{for(const id of ['bone-preview-status','bone-preview-footer-status']){const node=$(`#${id}`);if(node){node.textContent=message;node.classList.toggle('error',failed);}}};
+    const preview=()=>{
+      const previewHuman=currentPreviewHuman(),previewUrl=previewHuman?.render_model?.url||model.url;
+      if(!previewHuman||!previewUrl){setPreviewStatus('The imported model file is unavailable for preview. Restore or reimport the asset to see these edits.',true);return;}
+      clearTimeout(previewTimer);setPreviewStatus('Updating preview…');
+      previewTimer=setTimeout(async()=>{previewTimer=null;try{const settings={...draft,url:previewUrl},time=state.recording?.frames[state.frame]?.time_s||0;if(!humanModels.previewSettings(instance.id,settings,time)){await humanModels.preview(previewHuman,settings,partObjects);humanModels.previewSettings(instance.id,{...draft,url:previewUrl},time);}humanModels.update(time);if($('#bone-preview-status'))setPreviewStatus('Preview updated.');}catch(error){if($('#bone-preview-status'))setPreviewStatus(error.message,true);}},120);
+    };
+    reviewCleanup=()=>{clearTimeout(previewTimer);$('#modal').classList.remove('human-bone-modal');humanModels.removePreview(instance.id);};
+    const previewFit=()=>{if(previewTimer||!humanModels.previewFit(instance.id,draft.body_proportions,state.recording?.frames[state.frame]?.time_s||0))preview();else setPreviewStatus('Preview updated.');};
+    $$('[data-bone-fit]').forEach(input=>input.oninput=()=>{const key=input.dataset.boneFit,value=Number(input.value);$(`#bone-fit-value-${key}`).textContent=`${value}%`;if(value===100)delete draft.body_proportions[key];else draft.body_proportions[key]=value/100;previewFit();});
+    $('#bone-fit-reset').onclick=()=>{$$('[data-bone-fit]').forEach(input=>{input.value='100';$(`#bone-fit-value-${input.dataset.boneFit}`).textContent='100%';});draft.body_proportions={};previewFit();};
+    let focusedBoneSelect=$('[data-human-bone]'),selectedBone=null;
+    const boneValue=bone=>bone.index==null?bone.name:'node:'+bone.index;
+    const boneLabel=bone=>bone.named===false||!bone.name?`Bone ${bone.index}`:bone.name;
     const readBoneMap=()=>Object.fromEntries($$('[data-human-bone]').filter(input=>input.value).map(input=>[input.dataset.humanBone,input.value.startsWith('node:')?Number(input.value.slice(5)):input.value]));
-    const bindDiagram=()=>$$('#bone-diagram [data-bone-index]').forEach(node=>node.onclick=()=>{if(!focusedBoneSelect)return;focusedBoneSelect.value='node:'+node.dataset.boneIndex;focusedBoneSelect.dispatchEvent(new window.Event('change',{bubbles:true}));});
-    const refreshBoneDiagram=()=>{$('#bone-diagram').innerHTML=boneDiagramSvg(choices,readBoneMap());bindDiagram();};
-    $$('[data-human-bone]').forEach(input=>{input.onfocus=()=>{focusedBoneSelect=input;};input.onchange=()=>{draft.bone_map=readBoneMap();refreshBoneDiagram();preview();};});bindDiagram();
+    const mappedLabels=(bone,mapping=readBoneMap())=>segments.filter(([segment])=>{const value=mapping[segment];return value!==undefined&&(value===bone.index||value===bone.name);}).map(([,label])=>label);
+    const updateBoneSelection=()=>{
+      const label=segments.find(([segment])=>segment===focusedBoneSelect.dataset.humanBone)[1];
+      const current=choices.find(bone=>boneValue(bone)===focusedBoneSelect.value);
+      $('#bone-current-mapping').textContent=`Currently assigned: ${current?boneLabel(current)+(current.index==null?'':' · #'+current.index):'No match'}`;
+      $('#bone-assign').textContent=`Assign to ${label}`;$('#bone-assign').disabled=!selectedBone;
+      const parent=selectedBone&&choices.find(bone=>bone.index!=null&&bone.index===(selectedBone.parent_bone??selectedBone.parent_index??selectedBone.parent));
+      $('#bone-selection-detail').innerHTML=selectedBone?`<strong>${esc(boneLabel(selectedBone))}</strong><small>${selectedBone.index==null?'Named bone':'Node #'+selectedBone.index}${parent?' · Parent: '+esc(boneLabel(parent)):''}${mappedLabels(selectedBone).length?' · Assigned: '+esc(mappedLabels(selectedBone).join(', ')):''}</small>`:'Select an imported bone to inspect it. Names and node numbers are shown in the list.';
+      $$('#bone-search-results [data-bone-choice]').forEach(row=>row.setAttribute('aria-pressed',String(choices[Number(row.dataset.boneChoice)]===selectedBone)));
+      $$('#bone-diagram [data-bone-index]').forEach(node=>node.classList.toggle('selected',selectedBone?.index===Number(node.dataset.boneIndex)));
+      // Paint the selected joint last so coincident control bones cannot hide it.
+      const highlighted=$('#bone-diagram .selected');if(highlighted)highlighted.parentNode.append(highlighted);
+    };
+    const selectBone=(bone,scroll=false)=>{
+      selectedBone=bone;updateBoneSelection();
+      if(scroll){const row=$(`#bone-search-results [data-bone-choice="${choices.indexOf(bone)}"]`);row?.scrollIntoView?.({block:'nearest'});}
+    };
+    const renderBoneList=()=>{
+      const query=$('#bone-search').value.trim().toLowerCase(),terms=query.split(/\s+/).filter(Boolean),mapping=readBoneMap();
+      const matches=choices.map((bone,index)=>({bone,index,labels:mappedLabels(bone,mapping)})).filter(({bone,labels})=>terms.every(term=>`${boneLabel(bone)} ${bone.index==null?'':'#'+bone.index} ${labels.join(' ')}`.toLowerCase().includes(term)));
+      $('#bone-search-count').textContent=`${matches.length} of ${choices.length} bones`;
+      $('#bone-search-results').innerHTML=matches.length?matches.map(({bone,index,labels})=>`<button type="button" class="bone-result" data-bone-choice="${index}" aria-pressed="${bone===selectedBone}"><span>${esc(boneLabel(bone))}</span><small>${bone.index==null?'Named bone':'#'+bone.index}${labels.length?' · '+esc(labels.join(', ')):''}</small></button>`).join(''):'<p>No matching bones. Try a shorter name or a node number.</p>';
+      $$('#bone-search-results [data-bone-choice]').forEach(row=>row.onclick=()=>selectBone(choices[Number(row.dataset.boneChoice)]));
+    };
+    const bindDiagram=()=>$$('#bone-diagram [data-bone-index]').forEach(node=>node.onclick=()=>{
+      // Clear a filter that would otherwise hide the joint just selected on the diagram.
+      $('#bone-search').value='';renderBoneList();selectBone(choices.find(bone=>bone.index===Number(node.dataset.boneIndex)),true);
+    });
+    const refreshBoneDiagram=()=>{$('#bone-diagram').innerHTML=boneDiagramSvg(choices,readBoneMap());bindDiagram();renderBoneList();updateBoneSelection();};
+    const focusBodyBone=input=>{focusedBoneSelect=input;$('#bone-map-target').value=input.dataset.humanBone;selectBone(choices.find(bone=>boneValue(bone)===input.value)||null);};
+    $$('[data-human-bone]').forEach(input=>{input.onfocus=()=>focusBodyBone(input);input.onchange=()=>{
+      // A joint can drive only one body segment. Swapping its previous owner
+      // lets users try a different assignment without creating a broken rig.
+      const previous=draft.bone_map[input.dataset.humanBone],priorBone=choices.find(bone=>bone.index===previous||bone.name===previous),priorValue=priorBone?boneValue(priorBone):'';
+      const owner=$$('[data-human-bone]').find(other=>other!==input&&input.value&&other.value===input.value);
+      if(owner)owner.value=priorValue&&Array.from(owner.options).some(option=>option.value===priorValue)?priorValue:'';
+      draft.bone_map=readBoneMap();refreshBoneDiagram();preview();
+    };});
+    $('#bone-map-target').onchange=()=>focusBodyBone($(`#bone-map-${$('#bone-map-target').value}`));
+    $('#bone-search').oninput=renderBoneList;
+    $('#bone-search').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();$('#bone-search-results button')?.focus();}};
+    $('#bone-assign').onclick=()=>{if(!selectedBone)return;focusedBoneSelect.value=boneValue(selectedBone);focusedBoneSelect.dispatchEvent(new window.Event('change',{bubbles:true}));};
+    bindDiagram();renderBoneList();focusBodyBone(focusedBoneSelect);
     const renderBoneOffset=()=>{
       const segment=$('#bone-offset-segment').value,values=draft.bone_offsets[segment]||[0,0,0],target=$('#bone-offset-settings');
       target.innerHTML=`<label>POST-RETARGET LOCAL ROTATION · degrees</label><div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label for="bone-offset-${i}">${axis}</label><input id="bone-offset-${i}" type="number" step="1" data-bone-offset="${i}" value="${values[i]||0}"></div>`).join('')}</div>`;
@@ -2008,7 +2233,14 @@ function renderHumanModelControls(instance){
       };
     };
     if(initialExtra)$('#extra-bone').dispatchEvent(new window.Event('change',{bubbles:true}));
+    preview();
   };
+}
+function updateHumanModelStatus(){
+  const message=$('#object-model-load-status');if(!message)return;
+  const error=humanModelErrors.get(message.dataset.human);
+  message.hidden=!error;
+  message.textContent=error?`Showing the simple mannequin. ${error}`:'';
 }
 function renderObjectAttachments(instance,selectedPart){
   const chain=instance.template==='chain';
@@ -2019,8 +2251,8 @@ function renderObjectAttachments(instance,selectedPart){
   const anchors=state.scene.anchors.filter(a=>inside(a.part));
   const section=document.createElement('div');section.className='inspect-section';
   section.innerHTML=`<h3>CONNECTIONS TO STRUCTURE</h3><p>Attachments stay connected while posing. Detach grips or mounts to reposition the whole ${chain?'chain':'person'}.</p>
-    ${connections.map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.a.part)} ↔ ${esc(j.b.part)} · ${esc(j.type)}</p><button class="subtle" data-attachment-edit="${esc(j.id)}">Edit connection</button> <button class="subtle" data-attachment-detach="${esc(j.id)}">Detach</button></div>`).join('')}
-    ${anchors.map(a=>`<div class="joint-card"><p>${esc(a.part)} · fixed to ${esc(a.surface||'world')}</p><button class="subtle" data-object-unanchor="${esc(a.part)}">Release world anchor</button></div>`).join('')}
+    ${connections.map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(partName(j.a.part))} ↔ ${esc(partName(j.b.part))} · ${esc(j.type)}</p><button class="subtle" data-attachment-edit="${esc(j.id)}">Edit connection</button> <button class="subtle" data-attachment-detach="${esc(j.id)}">Detach</button></div>`).join('')}
+    ${anchors.map(a=>`<div class="joint-card"><p>${esc(partName(a.part))} · fixed to ${esc(a.surface||'world')}</p><button class="subtle" data-object-unanchor="${esc(a.part)}">Release world anchor</button></div>`).join('')}
     ${!connections.length&&!anchors.length?`<p>No external attachments. The whole ${chain?'chain':'person'} can move freely.</p>`:''}
     ${detached.map(r=>`<div class="joint-card"><p>${esc(r.joint.id)} · detached</p><button class="inspect-action secondary" data-attachment-reconnect="${esc(r.joint.id)}">Preview reconnect</button></div>`).join('')}
     <button class="inspect-action secondary" id="object-attach-part">${chain?'Attach flexible link to a part':'Attach body part to structure'}</button>
@@ -2068,15 +2300,15 @@ function attachmentDialog(instance,selectedPart,reconnect=null,preferredTarget=n
   const inside=p=>p.id.startsWith(instance.id+'/'),limbs=state.scene.parts.filter(inside),targets=state.scene.parts.filter(p=>!inside(p));
   const lineInfo=chain?state.scene.chains?.find(line=>line.id===instance.id):null;
   const lineEnds=lineInfo?[lineInfo.start_part,lineInfo.end_part]:[];
-  const limbOptions=chain&&lineInfo?`${[...new Set(lineEnds)].map((id,index)=>`<option value="${esc(id)}" ${id===selectedPart.id?'selected':''}>${index===0?'Start':'End'} of line</option>`).join('')}<optgroup label="Other segments">${limbs.filter(p=>!lineEnds.includes(p.id)).map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(p.id)}</option>`).join('')}</optgroup>`:
-    limbs.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(p.id)}</option>`).join('');
+  const limbOptions=chain&&lineInfo?`${[...new Set(lineEnds)].map((id,index)=>`<option value="${esc(id)}" ${id===selectedPart.id?'selected':''}>${index===0?'Start':'End'} of line</option>`).join('')}<optgroup label="Other segments">${limbs.filter(p=>!lineEnds.includes(p.id)).map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(partName(p.id))}</option>`).join('')}</optgroup>`:
+    limbs.map(p=>`<option value="${esc(p.id)}" ${p.id===selectedPart.id?'selected':''}>${esc(partName(p.id))}</option>`).join('');
   if(!targets.length){toast('Add a bar or another structure part to attach to.');return;}
   let result=null,request=0;const revision=state.revision;
   state.placementPending=true;gizmo?.detach();
   modal(reconnect?'Reconnect body attachment':chain?'Attach flexible line to a part':'Add connection · human',reconnect?`<p>${esc(reconnect)}</p><p>Preview reaching the saved attachment point.</p><p id="attachment-preview-status" role="status"></p>`:`
     <div class="single-field"><label for="attachment-limb">${chain?'LINE END OR SEGMENT':'BODY PART'}</label><select id="attachment-limb">${limbOptions}</select></div>
     ${chain?`<div class="single-field"><label for="attachment-source-port">POINT ON LINK</label><select id="attachment-source-port"><option value="b">B eye</option><option value="a">A eye</option></select></div>`:''}
-    <div class="single-field"><label for="attachment-target">STRUCTURE PART</label><select id="attachment-target">${targets.map(p=>`<option value="${esc(p.id)}">${esc(p.id)}</option>`).join('')}</select></div>
+    <div class="single-field"><label for="attachment-target">STRUCTURE PART</label><select id="attachment-target">${targets.map(p=>`<option value="${esc(p.id)}">${esc(partName(p.id))}</option>`).join('')}</select></div>
     <div id="attachment-location"></div><div class="single-field"><label for="attachment-kind">ATTACHMENT</label><select id="attachment-kind"><option value="revolute">Grip · pivots around the bar</option><option value="fixed">Fixed · holds position and orientation</option><option value="spherical">Ball joint · rotates freely</option></select></div>
     <p>${chain?'':'For a hand gripping a round bar, the bar diameter sets the curled hand shape automatically. '}The preview poses the connected ${chain?'line':'limb'} to meet the attachment. Other attachments and joint limits remain active.${chain?' Multiple links can attach along a body; each connection is an idealized no-slip point, not frictional wrapping.':''}</p><p id="attachment-preview-status" role="status"></p>`,[
     {label:'Cancel',action:closeModal},
@@ -2153,7 +2385,10 @@ function renderChainControls(instance,selectedPart){
     <div class="single-field"><label for="chain-length">Length · mm</label><input id="chain-length" type="number" required min="0.001" max="${info.pitch_mm*1000}" step="any" value="${info.requested_length_mm}"></div>
     <p id="chain-length-summary">${info.count} segments × ${info.pitch_mm} mm pitch = ${info.length_mm} mm. Length rounds up to whole segments.</p>
     <div class="single-field"><label for="chain-profile">Material and section</label><select id="chain-profile">${profiles.map(([id,part])=>`<option value="${esc(id)}" ${id===info.link_catalog?'selected':''}>${esc(part.name||id)}</option>`).join('')}</select></div>
+    <div class="single-field"><label for="chain-preset">READY-TO-USE SHAPE</label><select id="chain-preset"><option value="" ${instance.pose_preset?'':'selected'}>Choose a shape…</option>${FLEXIBLE_LINE_POSES.map(([id,label])=>`<option value="${id}" ${instance.pose_preset===id?'selected':''}>${esc(label)}</option>`).join('')}</select></div>
+    <p>Presets keep each segment's length and fit around existing connections as far as the joints allow. Short lines use fewer spiral turns. Move whole line keeps the chosen shape.</p>
     <p>${esc(info.profile)} · ${info.break_force_n?`illustrative break threshold ${displayValue(info.break_force_n,'force',preferences.forceUnit)} ${preferences.forceUnit}${info.break_strain?` at about ${(100*info.break_strain).toFixed(1)}% tensile strain`:''}`:'no break threshold'}. Segment dimensions and mass follow the selected profile. Replace illustrative strengths with verified ratings for a real design.</p>
+    ${info.bend_stiffness_nm_rad?'<p>This webbing bends most easily across its broad face in simulation. It can still twist and bend edgewise, allowing a diagonal belt to hang under gravity. Bending values are illustrative.</p>':''}
     <p>Move the line as one object or choose Pose segments. Simulation always lets its joints flex.</p>
     <div class="object-modes"><button id="chain-select-start">Select start</button><button id="chain-select-end">Select end</button></div>
     <div class="single-field"><label for="chain-link-index">Select segment</label><input id="chain-link-index" type="number" min="1" max="${info.count}" step="1" value="${Number(selectedPart.id.split('/link-').pop())||1}"></div>
@@ -2161,21 +2396,24 @@ function renderChainControls(instance,selectedPart){
   $('#object-expand').closest('.inspect-section').before(section);
   $('#chain-length').onchange=async e=>{if(!e.target.reportValidity())return;await objectEdit('object-parameters',{object:instance.id,parameters:{...instance.parameters,length_mm:+e.target.value}});};
   $('#chain-profile').onchange=e=>objectEdit('object-parameters',{object:instance.id,parameters:{...instance.parameters,link_catalog:e.target.value}});
+  $('#chain-preset').onchange=async e=>{if(!e.target.value)return;const result=await objectEdit('chain-pose',{object:instance.id,preset:e.target.value});if(result?.message)toast(result.message);};
   const selectEnd=end=>select(end==='start'?info.start_part:info.end_part);
   $('#chain-select-start').onclick=()=>selectEnd('start');$('#chain-select-end').onclick=()=>selectEnd('end');
   $('#chain-link-index').onchange=e=>{if(e.target.reportValidity())select(instance.id+'/link-'+e.target.value);};
   for(const end of ['start','end'])$('#chain-attach-'+end).onclick=()=>attachmentDialog(instance,state.scene.parts.find(p=>p.id===info[end+'_part']));
 }
 
-function wheelDialog(catalog='generic.wheel',position=null,wheelId=null){
+function wheelDialog(catalog='generic.wheel',position=null,wheelId=null,jointId=null){
   const wheels=Object.entries(state.library).filter(([,part])=>part.kind==='wheel'&&part.ports?.axle);
   if(!wheels.length){toast('No wheel with an axle port is available.');return;}
   const existing=wheelId&&state.scene.parts.find(part=>part.id===wheelId);
+  const mountJoint=jointId?state.doc.joints?.find(joint=>joint.id===jointId):null;
+  const currentTarget=mountJoint&&(mountJoint.a.part===wheelId?mountJoint.b:mountJoint.a);
   const definition=state.library[catalog]||wheels[0][1];
   const parameters=existing?{...definition.parameters,...state.doc.parts.find(part=>part.id===wheelId)?.parameters}:definition.parameters;
   const targets=state.scene.parts.filter(part=>part.id!==wheelId&&!draftRun(state.doc,part.id));
   if(existing&&!targets.length){toast('Add a part to mount this wheel to first.');return;}
-  const selectedTarget=targets.some(part=>part.id===state.selected)?state.selected:existing?targets[0]?.id:'';
+  const selectedTarget=currentTarget?.part||(targets.some(part=>part.id===state.selected)?state.selected:existing?targets[0]?.id:'');
   const revision=state.revision;
   const wheelOptions=wheels.map(([id,part])=>`<option value="${esc(id)}" ${id===catalog?'selected':''}>${esc(part.name||id)}</option>`).join('');
   const targetOptions=`${existing?'':'<option value="">Leave unattached for now</option>'}${targets.map(part=>`<option value="${esc(part.id)}">${esc(part.label||part.id)} · ${esc(part.id)}</option>`).join('')}`;
@@ -2183,7 +2421,7 @@ function wheelDialog(catalog='generic.wheel',position=null,wheelId=null){
     <div class="fields"><div class="field"><label for="wheel-diameter">DIAMETER · mm</label><input id="wheel-diameter" type="number" min="0.01" step="any" value="${esc(parameters.diameter_mm)}"></div>
     <div class="field"><label for="wheel-width">WIDTH · mm</label><input id="wheel-width" type="number" min="0.01" step="any" value="${esc(parameters.width_mm)}"></div>
     <div class="field"><label for="wheel-mass">MASS · kg</label><input id="wheel-mass" type="number" min="0.001" step="any" value="${esc(parameters.mass_kg)}"></div></div>`;
-  modal(existing?'Mount wheel axle':'Add a wheel',`${dimensions}<div class="single-field"><label for="wheel-target">MOUNT TO</label><select id="wheel-target">${targetOptions}</select></div>
+  modal(mountJoint?'Edit wheel axle':existing?'Mount wheel axle':'Add a wheel',`${dimensions}<div class="single-field"><label for="wheel-target">MOUNT TO</label><select id="wheel-target">${targetOptions}</select></div>
     <div id="wheel-mount-fields"><div class="single-field"><label for="wheel-location">AXLE LOCATION</label><select id="wheel-location"></select></div>
     <div id="wheel-station-fields" class="fields"><div class="field"><label for="wheel-station">DISTANCE FROM PIPE START · mm</label><input id="wheel-station" type="number" min="0" step="any"></div>
     <div class="field"><label for="wheel-side">SIDE</label><select id="wheel-side"><option value="y">+Y</option><option value="-y">−Y</option><option value="x">+X</option><option value="-x">−X</option></select></div>
@@ -2193,7 +2431,7 @@ function wheelDialog(catalog='generic.wheel',position=null,wheelId=null){
       <div class="single-field"><label for="wheel-axis">AXLE DIRECTION</label><select id="wheel-axis"><option value="0,1,0">+Y</option><option value="0,-1,0">−Y</option><option value="1,0,0">+X</option><option value="-1,0,0">−X</option><option value="0,0,1">+Z</option><option value="0,0,-1">−Z</option></select></div></div>
     <p id="wheel-mount-summary" role="status"></p></div><p>The wheel spins on a revolute axle joint. Specify the real axle, bearing and retaining hardware before fabrication.</p>`,[
     {label:'Cancel',action:closeModal},
-    {label:existing?'Mount wheel':'Add wheel',primary:true,action:async()=>{
+    {label:mountJoint?'Save axle':existing?'Mount wheel':'Add wheel',primary:true,action:async()=>{
       const positive=(id,label)=>{const value=Number($(id).value);if(!Number.isFinite(value)||value<=0)throw new Error(`${label} must be positive.`);return value;};
       const wheelWidth=existing?parameters.width_mm:positive('#wheel-width','Wheel width');
       const targetId=$('#wheel-target').value;
@@ -2216,18 +2454,19 @@ function wheelDialog(catalog='generic.wheel',position=null,wheelId=null){
           target={part:targetId,frame:{position_mm:coordinates,axis:$('#wheel-axis').value.split(',').map(Number)}};
         }
       }else if(existing)throw new Error('Choose a part to mount the wheel to.');
-      const payload=existing?{wheel:wheelId,target}:{catalog:$('#wheel-catalog').value,
+      const payload=existing?{wheel:wheelId,target,...(mountJoint?{replace_joint:mountJoint.id}:{})}:{catalog:$('#wheel-catalog').value,
         parameters:{diameter_mm:positive('#wheel-diameter','Wheel diameter'),width_mm:wheelWidth,mass_kg:positive('#wheel-mass','Wheel mass')},target,
         ...(position?{pose:{position_mm:[position[0],position[1],position[2]+positive('#wheel-diameter','Wheel diameter')/2]}}:{})};
       const result=await api(existing?'mount-wheel':'add-wheel',payload);
       closeModal();state.selected=result.wheel;await acceptPlacement(result,revision);
-      setMode('design');setTool('translate');toast(target?'Wheel mounted on a free-spinning axle.':'Wheel added. Select it to mount its axle later.');
+      setMode('design');setTool('translate');toast(mountJoint?'Wheel axle updated.':target?'Wheel mounted on a free-spinning axle.':'Wheel added. Select it to mount its axle later.');
     }}]);
   $('#wheel-target').value=selectedTarget||'';
   function refreshLocation(){
     const part=targets.find(item=>item.id===$('#wheel-target').value),fields=$('#wheel-mount-fields');
     fields.classList.toggle('hidden',!part);if(!part)return;
-    const ports=Object.entries(part.ports||{}).filter(([name,port])=>port.type!=='socket'&&!socketOccupied(state.scene,part.id,name));
+    const ports=Object.entries(part.ports||{}).filter(([name,port])=>port.type!=='socket'&&
+      (!socketOccupied(state.scene,part.id,name)||(currentTarget?.part===part.id&&currentTarget?.port===name)));
     $('#wheel-location').innerHTML=`${part.kind==='member'?'<option value="station">Along pipe or profile</option>':''}${ports.length?'<option value="port">Attachment port</option>':''}<option value="custom">Local point</option>`;
     $('#wheel-station').value=part.kind==='member'?part.length_mm/2:0;
     $('#wheel-station').max=part.length_mm||0;
@@ -2251,6 +2490,33 @@ function wheelDialog(catalog='generic.wheel',position=null,wheelId=null){
     for(const [field,key] of [['#wheel-diameter','diameter_mm'],['#wheel-width','width_mm'],['#wheel-mass','mass_kg']])$(field).value=next[key];
   };
   refreshLocation();
+  if(currentTarget){
+    if(currentTarget.port&&$('#wheel-location').querySelector('[value="port"]')){
+      $('#wheel-location').value='port';$('#wheel-port').value=currentTarget.port;
+    }else if(currentTarget.frame){
+      const part=targets.find(item=>item.id===currentTarget.part),point=currentTarget.frame.position_mm||[0,0,0];
+      const axis=currentTarget.frame.axis||[0,1,0];
+      const direction=axis.join(',');
+      if(part?.kind==='member'&&$('#wheel-location').querySelector('[value="station"]')&&
+          (direction==='1,0,0'||direction==='-1,0,0'||direction==='0,1,0'||direction==='0,-1,0')){
+        const side=direction==='1,0,0'?'x':direction==='-1,0,0'?'-x':direction==='0,1,0'?'y':'-y';
+        const index=side.endsWith('x')?0:1,section=part.section||{};
+        const radius=(section.diameter_mm||Math.max(section.width_mm||0,section.height_mm||0))/2;
+        const clearance=Math.abs(point[index])-radius-parameters.width_mm/2;
+        if(Math.abs(point[1-index])<1e-6&&clearance>=-1e-6){
+          $('#wheel-location').value='station';$('#wheel-station').value=point[2]+part.length_mm/2;
+          $('#wheel-side').value=side;$('#wheel-clearance').value=Math.max(0,clearance);
+        }else $('#wheel-location').value='custom';
+      }else $('#wheel-location').value='custom';
+      for(const [index,key] of ['x','y','z'].entries())$(`#wheel-local-${key}`).value=point[index];
+      if(!$('#wheel-axis').querySelector(`[value="${direction}"]`)){
+        const option=document.createElement('option');option.value=direction;
+        option.textContent=`Current direction (${direction})`;$('#wheel-axis').append(option);
+      }
+      $('#wheel-axis').value=direction;
+    }
+    refreshMode();
+  }
 }
 
 function chainDialog(catalog='generic.chain-link',position=null){
@@ -2350,9 +2616,22 @@ function renderObjectInspector(instance,selectedPart){
 
 }
 
-function renderChecks(){const result=state.checks,analysis=state.analysis;$('#inspector').innerHTML=`<div class="inspect-section"><div class="report-head"><div class="report-symbol ${result&&!result.valid?'error':''}">${result?(result.valid?'✓':'!'):'◇'}</div><div><h2>${result?(result.valid?'Geometry checked':'Review connections'):'Check the design'}</h2><div class="subtle">Sockets · alignment · collisions</div></div></div><button class="inspect-action" data-run="validate">${state.busy?'Working…':'Run validation'}</button>${result?`<div class="metric-cards"><div class="metric"><strong>${result.summary.errors}</strong><span>ERRORS</span></div><div class="metric"><strong>${result.summary.warnings}</strong><span>ADVISORIES</span></div></div>`:''}</div><div class="inspect-section"><h3>STRUCTURAL RESPONSE</h3><p>3D beam analysis of the current load case. Review the material and connector assumptions with the results.</p><button class="inspect-action secondary" data-run="analyse">Calculate stress & deflection</button>${analysis?`<p><b>${esc(analysis.status)}</b></p>${analysis.message?'<p>'+esc(analysis.message)+'</p>':''}${(analysis.members||[]).map(m=>`<button class="issue" data-result-part="${esc(m.part)}"><div class="issue-code">${esc(m.part)}</div><div class="property-row"><span>Peak stress</span><strong>${m.max_von_mises_mpa.toFixed(2)} MPa</strong></div><div class="property-row"><span>Deflection</span><strong>${m.max_displacement_mm.toFixed(3)} mm</strong></div></button>`).join('')}<p>Model results · unverified strength data remains unknown.</p>`:''}</div>${result?'<div class="inspect-section"><h3>FINDINGS</h3>'+result.issues.map((i,index)=>`<button class="issue ${i.severity}" data-result-finding="${index}" data-result-part="${esc(i.parts?.[0]||'')}"><div class="issue-code">${esc(i.code)}</div><p>${esc(i.message)}</p></button>`).join('')+'</div>':''}`;bindOperations();}
-function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label>DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="1" value="${state.simulationOptions?.duration||Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||preferences.simulationSeconds))}"></div><div class="single-field"><label for="sim-mode">SIMULATION MODE</label><select id="sim-mode" ${state.busy?'disabled':''}>${[['preview','Preview'],['full','Full physics']].map(([value,label])=>`<option value="${value}" ${(state.simulationMode||preferences.simulationMode)===value?'selected':''}>${label}</option>`).join('')}</select></div><p>Preview quality is configured in Preferences. Full physics retains individual links and finer beam detail.</p><button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${r?`<p id="simulation-recording-mode">${r.mode==='preview'?(r.quality?.resolved_mode==='full'?'Preview recording - automatically refined to Full physics':'Preview recording - motion and damage are approximate'):'Full physics recording'}</p><div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><button class="inspect-action secondary" id="render-recording-video">Render recording as video</button><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(c.id)}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part||e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$('#sim-mode').onchange=()=>{state.simulationMode=$('#sim-mode').value;};$('#fit-human').onclick=fitDialog;if($('#render-recording-video'))$('#render-recording-video').onclick=videoRenderDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;updateSimulationProgress();}
-function renderBuild(){const p=state.plan;$('#inspector').innerHTML=`<div class="inspect-section"><h2>A plan you can build.</h2><p>Find an insertion order with clear paths and stable intermediate structures.</p><button class="inspect-action" data-run="plan">${state.busy?'Checking insertion paths…':'Find assembly order'}</button>${p?`<div class="report-head" style="margin-top:17px"><div class="report-symbol ${p.status==='buildable'?'':'warn'}">${p.status==='buildable'?'✓':'?'}</div><div><b>${esc(p.status)}</b><div class="subtle">${p.steps.length} assembly steps</div></div></div>${p.reason?'<p>'+esc(p.reason)+'</p>':''}`:''}</div>${p?.status==='buildable'?`<div class="inspect-section"><h3>STEP ${state.step+1} OF ${p.steps.length}</h3><p>${esc(p.steps[state.step].instruction)}</p>${p.steps[state.step].fasten.map(f=>'<p>↳ '+esc(f.action)+'</p>').join('')}<button class="inspect-action" id="export-build">Export illustrated build book ↗</button></div><div class="inspect-section"><h3>ASSEMBLY ORDER</h3>${p.steps.map((s,i)=>`<button class="build-step ${i===state.step?'active':''}" data-step="${i}"><span>${String(s.number).padStart(2,'0')}</span>${esc(s.part)}</button>`).join('')}</div>`:''}`;bindOperations();$$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));if($('#export-build'))$('#export-build').onclick=()=>exportBuild();}
+function renderChecks(){const result=state.checks,analysis=state.analysis;$('#inspector').innerHTML=`<div class="inspect-section"><div class="report-head"><div class="report-symbol ${result&&!result.valid?'error':''}">${result?(result.valid?'✓':'!'):'◇'}</div><div><h2>${result?(result.valid?'Geometry checked':'Review connections'):'Check the design'}</h2><div class="subtle">Sockets · alignment · collisions</div></div></div><button class="inspect-action" data-run="validate">${state.busy?'Working…':'Run validation'}</button>${result?`<div class="metric-cards"><div class="metric"><strong>${result.summary.errors}</strong><span>ERRORS</span></div><div class="metric"><strong>${result.summary.warnings}</strong><span>ADVISORIES</span></div></div>`:''}</div><div class="inspect-section"><h3>STRUCTURAL RESPONSE</h3><p>3D beam analysis of the current load case. Review the material and connector assumptions with the results.</p><button class="inspect-action secondary" data-run="analyse">Calculate stress & deflection</button>${analysis?`<p><b>${esc(analysis.status)}</b></p>${analysis.message?'<p>'+esc(analysis.message)+'</p>':''}${(analysis.members||[]).map(m=>`<button class="issue" data-result-part="${esc(m.part)}"><div class="issue-code">${esc(partName(m.part))}</div><div class="property-row"><span>Peak stress</span><strong>${m.max_von_mises_mpa.toFixed(2)} MPa</strong></div><div class="property-row"><span>Deflection</span><strong>${m.max_displacement_mm.toFixed(3)} mm</strong></div></button>`).join('')}<p>Model results · unverified strength data remains unknown.</p>`:''}</div>${result?'<div class="inspect-section"><h3>FINDINGS</h3>'+result.issues.map((i,index)=>`<button class="issue ${i.severity}" data-result-finding="${index}" data-result-part="${esc(i.parts?.[0]||'')}"><div class="issue-code">${esc(i.code)}</div><p>${esc(i.message)}</p></button>`).join('')+'</div>':''}`;bindOperations();}
+function simulationDuration(){return state.simulationOptions?.duration??Math.min(30,Math.max(.1,Number(state.doc.metadata?.simulation_duration_s)||preferences.simulationSeconds));}
+function rememberSimulationDuration(event){
+  // Keep the editing value (including an empty field) through inspector redraws.
+  state.simulationOptions={...state.simulationOptions,duration:event.currentTarget.value};
+}
+function previewDetailChoices(){
+  const lines=(state.doc.objects||[]).filter(o=>o.template==='chain');
+  return [...lines,...state.scene.parts.filter(p=>p.kind==='member'||p.kind==='chain'&&!lines.some(o=>p.id.startsWith(o.id+'/')))];
+}
+function previewDetailFields(){
+  const choices=previewDetailChoices(),selected=state.simulationOptions?.preview_detail_parts||[];
+  return `<details id="preview-detail"><summary>Extra Preview detail · ${selected.filter(id=>choices.some(p=>p.id===id)).length} selected</summary><p>Only selected lines use individual segments; only selected beams can bend. This keeps the same Preview solver budget.</p>${choices.map(p=>`<label class="check-label"><input type="checkbox" data-preview-detail="${esc(p.id)}" ${selected.includes(p.id)?'checked':''} ${state.busy?'disabled':''}>${esc(partName(p.id))}</label>`).join('')||'<p>No flexible lines or beams in this design.</p>'}</details>`;
+}
+function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label for="sim-duration">DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="any" required ${state.busy?'disabled':''} value="${esc(simulationDuration())}"></div><div class="single-field"><label for="sim-mode">SIMULATION MODE</label><select id="sim-mode" ${state.busy?'disabled':''}>${[['preview','Preview'],['full','Full physics']].map(([value,label])=>`<option value="${value}" ${(state.simulationMode||preferences.simulationMode)===value?'selected':''}>${label}</option>`).join('')}</select></div><p>Preview uses rigid beams, coarse lines and a fixed solver budget. Configure speed in Preferences or select extra detail below. Use Full physics for strength and breakage; Preview keeps overloaded lines and joints connected.</p>${previewDetailFields()}<button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${state.pendingSimulationResult?'<button class="inspect-action secondary" id="retry-simulation-result">Fetch completed recording</button>':''}${r?`<p id="simulation-recording-mode">${r.mode==='preview'?(r.quality?.resolved_mode==='full'?'Preview recording - automatically refined to Full physics because a flexible joint separated beyond the preview limit':r.quality?.resolved_mode==='mixed'?`Preview recording - ${r.quality.refinement.lines.length} affected rope, chain or beam length(s) replayed with finer segments after a joint gap exceeded 8 mm`:(r.quality?.strength_evaluation===false?'Preview recording - approximate motion; overload breakage disabled':'Preview recording - motion and damage are approximate')):'Full physics recording'}</p><div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><button class="inspect-action secondary" id="render-recording-video">Render recording as video</button><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(partName(c.id))}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part?partName(e.part):e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$$('[data-preview-detail]').forEach(input=>input.onchange=()=>{state.simulationOptions={...state.simulationOptions,preview_detail_parts:$$('[data-preview-detail]:checked').map(field=>field.dataset.previewDetail)};$('#preview-detail summary').textContent='Extra Preview detail · '+state.simulationOptions.preview_detail_parts.length+' selected';});$('#sim-duration').oninput=rememberSimulationDuration;$('#sim-duration').onchange=rememberSimulationDuration;$('#sim-mode').onchange=()=>{state.simulationMode=$('#sim-mode').value;};$('#fit-human').onclick=fitDialog;if($('#render-recording-video'))$('#render-recording-video').onclick=videoRenderDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;if($('#retry-simulation-result'))$('#retry-simulation-result').onclick=retrySimulationResult;updateSimulationProgress();}
+function renderBuild(){const p=state.plan;$('#inspector').innerHTML=`<div class="inspect-section"><h2>A plan you can build.</h2><p>Find an insertion order with clear paths and stable intermediate structures.</p><button class="inspect-action" data-run="plan">${state.busy?'Checking insertion paths…':'Find assembly order'}</button>${p?`<div class="report-head" style="margin-top:17px"><div class="report-symbol ${p.status==='buildable'?'':'warn'}">${p.status==='buildable'?'✓':'?'}</div><div><b>${esc(p.status)}</b><div class="subtle">${p.steps.length} assembly steps</div></div></div>${p.reason?'<p>'+esc(p.reason)+'</p>':''}`:''}</div>${p?.status==='buildable'?`<div class="inspect-section"><h3>STEP ${state.step+1} OF ${p.steps.length}</h3><p>${esc(p.steps[state.step].instruction)}</p>${p.steps[state.step].fasten.map(f=>'<p>↳ '+esc(f.action)+'</p>').join('')}<button class="inspect-action" id="export-build">Export illustrated build book ↗</button></div><div class="inspect-section"><h3>ASSEMBLY ORDER</h3>${p.steps.map((s,i)=>`<button class="build-step ${i===state.step?'active':''}" data-step="${i}"><span>${String(s.number).padStart(2,'0')}</span>${esc(partName(s.part))}</button>`).join('')}</div>`:''}`;bindOperations();$$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));if($('#export-build'))$('#export-build').onclick=()=>exportBuild();}
 function findingReference(button){
   const finding=state.checks?.issues[Number(button.dataset.resultFinding)]||{};
   const joints=[finding.joint,...(finding.joints||[])].filter(Boolean);
@@ -2423,7 +2702,14 @@ async function generateSimulation(options){
       if(job.status==='cancelled'){status('Simulation cancelled');return null;}
       if(job.status==='failed')throw new Error(job.error||'Simulation failed');
       if(job.status==='completed'){
-        const completed=await api('simulation-result',{document:null,job_id:job.id});
+        let completed;
+        for(let attempt=0;attempt<3;attempt++){
+          try{completed=await api('simulation-result',{document:null,job_id:job.id});break;}
+          catch(error){
+            if(attempt===2){state.pendingSimulationResult=job.id;throw new Error(`The simulation finished, but its recording could not be fetched: ${error.message}. The server has kept the result; use Fetch completed recording to retry.`);}
+            await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
+          }
+        }
         if(job.cancelRequested){status('Simulation cancelled');return null;}
         if(!completed.result)throw new Error(completed.error||'Simulation recording is unavailable');
         return completed.result;
@@ -2432,18 +2718,25 @@ async function generateSimulation(options){
       Object.assign(job,await api('simulation-status',{document:null,job_id:job.id}));updateSimulationProgress();
     }
   }catch(error){
-    if(job.id&&job.status==='running'){
-      try{await api('simulation-cancel',{document:null,job_id:job.id});}
-      catch{error.message+='; unable to reach the worker to cancel it. Restart the server if it is still running.';}
-    }
+    if(job.id&&job.status!=='cancelled')state.pendingSimulationResult=job.id;
+    if(error instanceof TypeError&&/fetch/i.test(error.message))
+      throw new Error(`The editor could not reach the local simulation server. The simulation was not cancelled. ${error.message}`);
     throw error;
   }
 }
-async function run(operation){if(state.busy)return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value||3),mode:state.simulationMode||preferences.simulationMode,chain_links_per_body:(state.simulationMode||preferences.simulationMode)==='preview'?preferences.simulationChainLinks:1,preview_steps_per_second:preferences.previewStepsPerSecond,preview_solver_iterations:preferences.previewSolverIterations,preview_beam_segment_mm:preferences.previewBeamSegmentMm,deflection_warning_mm:preferences.deflectionWarningMm}:{};if(operation==='simulate'){state.simulationError=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
+async function retrySimulationResult(){
+  if(state.busy||!state.pendingSimulationResult)return;
+  state.busy=true;const jobId=state.pendingSimulationResult;
+  try{if(state.simulationRevision!==state.revision)throw new Error('The design changed since this simulation started. Run it again for the current design.');const statusResult=await api('simulation-status',{document:null,job_id:jobId});if(statusResult.status==='running')throw new Error('The simulation is still running. Fetch the recording after it completes.');if(statusResult.status==='failed')throw new Error(statusResult.error||'The simulation worker failed');const completed=await api('simulation-result',{document:null,job_id:jobId});if(!completed.result)throw new Error(completed.error||'Simulation recording is unavailable');state.pendingSimulationResult=null;state.simulationError=null;installSimulationRecording(completed.result);}
+  catch(error){state.simulationError=`Could not fetch the completed recording: ${error.message}`;}
+  finally{state.busy=false;renderInspector();}
+}
+function installSimulationRecording(result){state.doc.results||={};state.doc.results.simulate=result;state.dirty=true;state.recording=result;state.frame=0;installBeamPlayback(result);$('#time-slider').max=result.frames.length-1;$('#timeline-mid').textContent=(result.duration_s/2).toFixed(1)+' s';$('#timeline-end').textContent=result.duration_s.toFixed(1)+' s';state.playing=true;showFrame(0);status('Simulation recorded · '+result.frames.length+' frames');updateHeader();}
+async function run(operation){if(state.busy)return;if(operation==='simulate'&&$('#sim-duration')&&!$('#sim-duration').reportValidity())return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value??simulationDuration()),mode:state.simulationMode||preferences.simulationMode,chain_links_per_body:(state.simulationMode||preferences.simulationMode)==='preview'?preferences.simulationChainLinks:1,preview_steps_per_second:preferences.previewStepsPerSecond,preview_solver_iterations:preferences.previewSolverIterations,preview_beam_segment_mm:preferences.previewBeamSegmentMm,preview_detail_parts:(state.simulationOptions?.preview_detail_parts||[]).filter(id=>previewDetailChoices().some(p=>p.id===id)),deflection_warning_mm:preferences.deflectionWarningMm}:{};if(operation==='simulate'){state.simulationRevision=revision;state.simulationError=null;state.pendingSimulationResult=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
   try{const result=operation==='simulate'?await generateSimulation(extra):await api(operation,extra);if(!result)return;if(revision!==state.revision){toast('The design changed during the calculation. Run it again for the current design.');return;}state.doc.results||={};state.doc.results[operation]=result;state.dirty=true;
     if(operation==='validate'){state.checks=result;status(result.valid?'Geometry checks passed':'Design has '+result.summary.errors+' errors');}
     if(operation==='analyse'){state.analysis=result;status('Structural analysis: '+result.status);applyStructuralColors();}
-    if(operation==='simulate'){state.recording=result;state.frame=0;installBeamPlayback(result);$('#time-slider').max=result.frames.length-1;$('#timeline-mid').textContent=(result.duration_s/2).toFixed(1)+' s';$('#timeline-end').textContent=result.duration_s.toFixed(1)+' s';state.playing=true;showFrame(0);status('Simulation recorded · '+result.frames.length+' frames');}
+    if(operation==='simulate')installSimulationRecording(result);
     if(operation==='plan'){state.plan=result;state.doc.build_plan=result;state.step=0;status('Assembly search: '+result.status);if(result.status==='buildable')showStep(0);}
     if(operation==='fit')jsonDialog('Human fit results',result);updateHeader();
   }catch(e){if(operation==='simulate')state.simulationError=e.message;toast(e.message,true);status('Operation needs attention');}finally{state.busy=false;state.simulation=null;renderInspector();}}
@@ -2691,7 +2984,7 @@ function scheduleAutosave(){
   if(!preferences.autosaveEnabled||!state.doc||!state.dirty||state.revision===lastAutosavedRevision)return;
   autosaveTimer=setTimeout(performAutosave,preferences.autosaveMinutes*60000);
 }
-function fitDialog(){const humans=state.scene.parts.filter(p=>p.kind==='human'&&p.id.endsWith('/pelvis')).map(p=>p.id.slice(0,-7));if(!humans.length){humanDialog();return;}modal('Human fit test',`<div class="single-field"><label>HUMAN</label><select id="fit-id">${humans.map(id=>`<option>${esc(id)}</option>`).join('')}</select></div><div class="single-field"><label>TEST</label><select id="fit-kind"><option value="reach">Right-hand reach</option><option value="seat">Seated dimensions</option></select></div><div class="fields">${['X','Y','Z'].map((v,i)=>`<div class="field"><label>TARGET ${v} mm</label><input id="fit-${i}" type="number" value="${[300,400,1200][i]}"></div>`).join('')}</div><div class="single-field"><label>SEAT PART (FOR SEATED TEST)</label><select id="fit-seat">${state.scene.parts.filter(p=>p.kind==='panel').map(p=>`<option>${esc(p.id)}</option>`).join('')}</select></div>`,[{label:'Cancel',action:closeModal},{label:'Run fit test',primary:true,action:async()=>{const params={human:$('#fit-id').value};if($('#fit-kind').value==='reach')params.target=[0,1,2].map(i=>+$('#fit-'+i).value);else params.seat=$('#fit-seat').value;const r=await api('fit',params);closeModal();if(r.parts)for(const [id,p] of Object.entries(r.parts))if(partObjects.has(id))setPose(partObjects.get(id),p);jsonDialog('Fit test result',r);}}]);}
+function fitDialog(){const humans=state.scene.parts.filter(p=>p.kind==='human'&&p.id.endsWith('/pelvis')).map(p=>p.id.slice(0,-7));if(!humans.length){humanDialog();return;}modal('Human fit test',`<div class="single-field"><label>HUMAN</label><select id="fit-id">${humans.map(id=>`<option value="${esc(id)}">${esc(partName(id))}</option>`).join('')}</select></div><div class="single-field"><label>TEST</label><select id="fit-kind"><option value="reach">Right-hand reach</option><option value="seat">Seated dimensions</option></select></div><div class="fields">${['X','Y','Z'].map((v,i)=>`<div class="field"><label>TARGET ${v} mm</label><input id="fit-${i}" type="number" value="${[300,400,1200][i]}"></div>`).join('')}</div><div class="single-field"><label>SEAT PART (FOR SEATED TEST)</label><select id="fit-seat">${state.scene.parts.filter(p=>p.kind==='panel').map(p=>`<option value="${esc(p.id)}">${esc(partName(p.id))}</option>`).join('')}</select></div>`,[{label:'Cancel',action:closeModal},{label:'Run fit test',primary:true,action:async()=>{const params={human:$('#fit-id').value};if($('#fit-kind').value==='reach')params.target=[0,1,2].map(i=>+$('#fit-'+i).value);else params.seat=$('#fit-seat').value;const r=await api('fit',params);closeModal();if(r.parts)for(const [id,p] of Object.entries(r.parts))if(partObjects.has(id))setPose(partObjects.get(id),p);jsonDialog('Fit test result',r);}}]);}
 function connectDialog(connector,port=null,replaceJoint=null){
   const old=state.doc.joints?.find(j=>j.id===replaceJoint);
   const member=state.scene.parts.find(p=>p.id===(old?.b.part||state.connectionSource)&&p.kind==='member');
@@ -2720,11 +3013,20 @@ function connectDialog(connector,port=null,replaceJoint=null){
   if(wasStation&&sockets.some(([name])=>name==='through'))port='through';
   if(!port)port=sockets.some(([name])=>name==='through')?'through':sockets[0][0];
   const occupiedEnds=new Set(state.scene.joints.filter(j=>j.id!==replaceJoint).flatMap(j=>[j.a,j.b]).filter(e=>e.part===member.id).map(e=>e.end));
+  const matrices=currentMatrices(),memberMatrix=matrices.get(member.id),fittingMatrix=matrices.get(connector);
+  const visibleStation=socket=>{
+    if(!socket.through||!memberMatrix||!fittingMatrix)return null;
+    const start=new THREE.Vector3(0,0,-member.length_mm/2).applyMatrix4(memberMatrix);
+    const axis=new THREE.Vector3(0,0,1).transformDirection(memberMatrix);
+    const mouth=new THREE.Vector3(...(socket.position_mm||[0,0,0])).applyMatrix4(fittingMatrix);
+    const mouthAxis=new THREE.Vector3(...(socket.axis||[0,0,1])).transformDirection(fittingMatrix);
+    return mountedThroughStation(start,axis,member.length_mm,mouth,mouthAxis,socket);
+  };
   const matches=sockets.map(([name,socket])=>({member:member.id,connector,port:name,
     end:old?.b.end||(occupiedEnds.has('start')?'end':'start'),
-    at_mm:old?.b.at_mm??(wasStation?old.insertion_mm:member.length_mm/2),
+    at_mm:old?.b.at_mm??(wasStation?old.insertion_mm:visibleStation(socket)??member.length_mm/2),
     insertion_mm:name===old?.a.port?old.insertion_mm:Math.min(30,socket.engagement_mm*.8),
-    label:connector+' / '+(socket.label||name)+' · '+(socket.through?'continuous pipe':'pipe end')
+    label:partName(connector)+' / '+(socket.label||name)+' → '+partName(member.id)+' · '+(socket.through?'continuous pipe':'pipe end')
   })).sort((a,b)=>(a.port===port?-1:b.port===port?1:0));
   connectionReview(matches,{},state.revision,null,replaceJoint);
 }
@@ -2849,6 +3151,9 @@ function clearResizeDrag(){
 if(renderer){let down=null;
   renderer.domElement.addEventListener('pointerdown',e=>{
     down=[e.clientX,e.clientY];if(e.button!==0||state.placementPending||state.mode!=='design')return;
+    // TransformControls has already highlighted the hovered axis. Let its
+    // pointer listener own that press instead of the overlapping resize knob.
+    if(state.tool==='translate'&&gizmo.axis)return;
     ray(e);
     const handle=resizeHandles.children.length?pickResizeHandle(e):null;
     if(handle){
@@ -2888,7 +3193,7 @@ if(renderer){let down=null;
       status(`Resize ${drag.target.id}: ${drag.length.toFixed(1)} mm · connectors ${behavior==='follow'?'follow':'stay put'}`);return;
     }
     if(!pointerDrag&&!dragStart&&resizeHandles.children.length){
-      ray(e);renderer.domElement.style.cursor=pickResizeHandle(e)?'grab':'';
+      ray(e);renderer.domElement.style.cursor=state.tool==='translate'&&gizmo.axis?'':pickResizeHandle(e)?'grab':'';
       if(state.tool==='resize')return;
     }
     if(!pointerDrag||pointerDrag.pointerId!==e.pointerId)return;e.stopImmediatePropagation();
@@ -2965,6 +3270,9 @@ document.addEventListener('keydown',e=>{
   if((e.ctrlKey||e.metaKey)&&key==='z'){e.preventDefault();$('#undo').click();return;}
   if((e.ctrlKey||e.metaKey)&&key==='y'){e.preventDefault();$('#redo').click();return;}
   if((e.ctrlKey||e.metaKey)&&key==='s'){e.preventDefault();saveDialog();return;}
+  if(e.ctrlKey&&e.altKey&&!e.metaKey&&key==='j'){
+    e.preventDefault();if(!e.repeat)quickConnections(e.shiftKey?'attach':'detach');return;
+  }
   if(e.altKey&&!e.ctrlKey&&!e.metaKey&&key==='d'){
     e.preventDefault();
     if(e.repeat||!state.selected||state.mode!=='design'||state.busy||dragStart)return;
@@ -2994,7 +3302,7 @@ document.addEventListener('keydown',e=>{
 });
 window.addEventListener('beforeunload',e=>{if(state.dirty){e.preventDefault();e.returnValue='';}});
 let last=performance.now(),accumulator=0;
-function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();humanModels.update(state.recording?.frames[state.frame]?.time_s||0);syncMirrorPreviews();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}positionResizeLabels();renderer?.render(scene,camera);}requestAnimationFrame(tick);
+function tick(now){requestAnimationFrame(tick);const dt=Math.min((now-last)/1000,.1);last=now;if(state.playing&&state.recording){accumulator+=dt;const step=1/(state.recording.fps||30);if(accumulator>=step){showFrame((state.frame+1)%state.recording.frames.length);accumulator%=step;}$('#play-button').textContent='Ⅱ';}orbit?.update();humanModels.update($('#modal').classList.contains('human-bone-modal')&&!state.playing?now/1000:(state.recording?.frames[state.frame]?.time_s||0));syncMirrorPreviews();if(state.selected&&partObjects.has(state.selected)){const pos=partObjects.get(state.selected).position.clone().project(camera);const rect=viewport.getBoundingClientRect();const label=$('#selection-label');label.style.left=((pos.x+1)*rect.width/2+15)+'px';label.style.top=((1-pos.y)*rect.height/2+48)+'px';}positionResizeLabels();renderer?.render(scene,camera);}requestAnimationFrame(tick);
 async function startupDesign(bootstrap){
   if(preferences.startup==='empty'){
     const document={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Untitled creation',parts:[],joints:[],anchors:[]};
@@ -3019,7 +3327,7 @@ async function startupDesign(bootstrap){
   }
   return bootstrap;
 }
-try{const response=await fetch('/api/bootstrap'),bootstrap=await response.json();if(!response.ok)throw new Error(bootstrap.error);token=bootstrap.token;serverApiVersion=bootstrap.api_version;const data=await startupDesign(bootstrap);state.doc=data.document;state.path=data.path;state.library={...data.library,...state.doc.definitions};state.examples=bootstrap.examples;state.dirty=!!(data.autosaved||data.auto_symmetry);state.mirrorPoseError=data.mirror_pose_error||null;state.selected=data.scene.parts.some(p=>p.id==='leg-1')?'leg-1':null;adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();renderInspector();updateHeader();setTool(preferences.defaultTool);if(preferences.fitOnOpen)fitView();$('#grid-button').classList.toggle('active',grid.visible);$('#ports-button').classList.toggle('active',state.ports);if(state.dirty)scheduleAutosave();const notice=compatibilityMessage(serverApiVersion);if(notice){status(serverApiVersion>EDITOR_API_VERSION?'Editor page update required':'Editor server update required');toast(notice,true);}else status(data.autosaved?'Recovered autosave · Save to keep this version':'Workspace ready · all changes stay local');if(state.mirrorPoseError)toast(state.mirrorPoseError,true);}catch(e){toast(e.message,true);status('Workspace could not be opened');}
+try{const response=await fetch('/api/bootstrap'),bootstrap=await response.json();if(!response.ok)throw new Error(bootstrap.error);token=bootstrap.token;serverApiVersion=bootstrap.api_version;humanImportMaxBytes=bootstrap.human_import_max_bytes||humanImportMaxBytes;const data=await startupDesign(bootstrap);state.doc=data.document;state.path=data.path;state.library={...data.library,...state.doc.definitions};state.examples=bootstrap.examples;state.dirty=!!(data.autosaved||data.auto_symmetry);state.mirrorPoseError=data.mirror_pose_error||null;state.selected=data.scene.parts.some(p=>p.id==='leg-1')?'leg-1':null;adoptLoadedMirrorModes(data.scene);buildScene(data.scene);renderLibrary();renderOutline();renderInspector();updateHeader();setTool(preferences.defaultTool);if(preferences.fitOnOpen)fitView();$('#grid-button').classList.toggle('active',grid.visible);$('#ports-button').classList.toggle('active',state.ports);if(state.dirty)scheduleAutosave();const notice=compatibilityMessage(serverApiVersion);if(notice){status(serverApiVersion>EDITOR_API_VERSION?'Editor page update required':'Editor server update required');toast(notice,true);}else status(data.autosaved?'Recovered autosave · Save to keep this version':'Workspace ready · all changes stay local');if(state.mirrorPoseError)toast(state.mirrorPoseError,true);}catch(e){toast(e.message,true);status('Workspace could not be opened');}
 
 function nearbyPanelBoltHoles(panel){
   const box=panel.geometry.find(shape=>shape.type==='box'&&shape.size_mm?.length===3);
@@ -3089,25 +3397,51 @@ function jointCreateDialog(){
   const parts=state.scene.parts,selected=parts.find(part=>part.id===state.selected);
   if(!selected||parts.length<2){toast('Add a second part first.');return;}
   const usable=part=>Object.entries(part.ports||{}).filter(([name,port])=>port.type!=='socket'&&!socketOccupied(state.scene,part.id,name));
-  const position=(part,port)=>new THREE.Vector3(...port.position_mm).applyMatrix4(partObjects.get(part.id).matrix);
+  const position=(part,port)=>{
+    const mesh=partObjects.get(part.id);
+    return mesh?new THREE.Vector3(...port.position_mm).applyMatrix4(mesh.matrix):new THREE.Vector3(...part.pose.position_mm);
+  };
+  const neighbors=new Map(parts.map(part=>[part.id,new Set()]));
+  const link=(a,b)=>{if(a!==b&&neighbors.has(a)&&neighbors.has(b)){neighbors.get(a).add(b);neighbors.get(b).add(a);}};
+  for(const joint of state.scene.joints||[])link(joint.a?.part,joint.b?.part);
+  for(const group of state.scene.groups||[])for(const id of group.slice(1))link(group[0],id);
+  const connectedTo=id=>{const seen=new Set([id]),pending=[id];
+    for(let index=0;index<pending.length;index++)for(const next of neighbors.get(pending[index])||[]){
+      if(!seen.has(next)){seen.add(next);pending.push(next);}
+    }
+    return seen;
+  };
+  const points=part=>{
+    const ports=usable(part),source=ports.length?ports:Object.entries(part.ports||{}).filter(([,port])=>port.type!=='socket');
+    return source.length?source.map(([,port])=>position(part,port)):[new THREE.Vector3(...part.pose.position_mm)];
+  };
+  const rankedTargets=firstId=>{
+    const first=parts.find(part=>part.id===firstId),connected=connectedTo(firstId),from=points(first);
+    return parts.filter(part=>part.id!==firstId).map((part,index)=>{
+      const distance=Math.min(...points(part).flatMap(to=>from.map(point=>point.distanceTo(to))));
+      return {part,index,distance,connected:connected.has(part.id)};
+    }).sort((a,b)=>Number(a.connected)-Number(b.connected)||a.distance-b.distance||a.index-b.index);
+  };
+  const option=part=>`<option value="${esc(part.id)}">${esc(partName(part.id))}${partName(part.id)!==part.id?' · '+esc(part.id):''}</option>`;
+  const firstOptions=parts.map(option).join('');
+  const secondOptions=firstId=>rankedTargets(firstId).map(({part})=>option(part)).join('');
+  const other=rankedTargets(selected.id)[0].part;
   const complement=usable(selected).flatMap(([firstName,first])=>{
     if(!['eye','clevis'].includes(first.type)||first.assembly!=='bolt')return [];
-    return parts.flatMap(part=>part.id===selected.id?[]:usable(part)
+    return usable(other)
       .filter(([,port])=>['eye','clevis'].includes(port.type)&&port.type!==first.type&&port.assembly==='bolt'&&
         Math.abs((first.diameter_mm||0)-(port.diameter_mm||0))<=1)
-      .map(([name,port])=>({part,name,firstName,distance:position(selected,first).distanceTo(position(part,port))})));
+      .map(([name,port])=>({part:other,name,firstName,distance:position(selected,first).distanceTo(position(other,port))}));
   }).sort((a,b)=>a.distance-b.distance)[0];
-  const other=complement?.part||parts.find(part=>part.id!==selected.id&&part.kind==='load')||parts.find(part=>part.id!==selected.id);
-  const options=parts.map(part=>`<option value="${esc(part.id)}">${esc(part.id)} · ${esc(part.label||part.catalog||part.kind)}</option>`).join('');
   const raw={id:'attachment-'+(state.doc.joints?.length||0),type:'fixed',
     a:{part:selected.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},
     b:{part:other.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},
     metadata:{hardware:'Specify the actual bolt, bracket or connector and its installation method'}};
   const revision=state.revision;let preview=null,request=0;
-  modal('Add joint or attachment',`<p>Choose the parts and their attachment points. Named ports align when joined. Abstract loads need no port and attach at their current position.</p>
-    <div class="single-field"><label for="joint-part-a">FIRST PART</label><select id="joint-part-a">${options}</select></div>
+  modal('Add joint or attachment',`<p>Choose the parts and their attachment points. Named ports align when joined. Nearby unconnected parts appear first; parts already linked to the first part appear last. Abstract loads need no port and attach at their current position.</p>
+    <div class="single-field"><label for="joint-part-a">FIRST PART</label><select id="joint-part-a">${firstOptions}</select></div>
     <div class="single-field"><label for="joint-port-a">ATTACHMENT POINT</label><select id="joint-port-a"></select></div>
-    <div class="single-field"><label for="joint-part-b">SECOND PART</label><select id="joint-part-b">${options}</select></div>
+    <div class="single-field"><label for="joint-part-b">SECOND PART</label><select id="joint-part-b">${secondOptions(selected.id)}</select></div>
     <div class="single-field"><label for="joint-port-b">ATTACHMENT POINT</label><select id="joint-port-b"></select></div>
     <div class="fields"><div class="field"><label for="joint-create-type">JOINT</label><select id="joint-create-type"><option value="revolute">Hinge · rotates</option><option value="fixed">Fixed</option><option value="spherical">Ball · rotates freely</option></select></div>
     <div class="field"><label for="joint-create-move">PARTS TO MOVE</label><select id="joint-create-move"><option value="auto">Automatic</option><option value="a">First connected body</option><option value="b">Second connected body</option></select></div></div>
@@ -3155,7 +3489,12 @@ function jointCreateDialog(){
     }catch(error){if(current===request)$('#joint-create-status').textContent=error.message;}
   }
   const refill=()=>{for(const side of ['a','b'])fillPort('#joint-part-'+side,'#joint-port-'+side,$('#joint-port-'+side).value);refresh();};
-  $('#joint-part-a').onchange=refill;
+  $('#joint-part-a').onchange=()=>{
+    const previous=$('#joint-part-b').value,first=$('#joint-part-a').value;
+    $('#joint-part-b').innerHTML=secondOptions(first);
+    if(previous!==first&&parts.some(part=>part.id===previous))$('#joint-part-b').value=previous;
+    refill();
+  };
   $('#joint-part-b').onchange=refill;
   for(const id of ['#joint-port-a','#joint-port-b','#joint-create-type','#joint-create-move'])$(id).onchange=refresh;
   reviewCleanup=()=>{request++;clearSnapPreview();};
@@ -3166,12 +3505,17 @@ function jointCreateDialog(){
 function jointDialog(id=null){
   const old=id?state.doc.joints?.find(j=>j.id===id):null;
   if(old?.type==='socket')return connectDialog(old.a.part,old.a.port,id);
+  if(old?.type==='revolute'){
+    const axle=old.a.port==='axle'?old.a:old.b.port==='axle'?old.b:null;
+    const wheel=axle&&state.scene.parts.find(part=>part.id===axle.part&&part.kind==='wheel');
+    if(wheel)return wheelDialog(wheel.catalog,null,wheel.id,id);
+  }
   if(id&&!old){toast('Expand this object before editing its joints.');return;}
   if(!old)return jointCreateDialog();
   const others=state.scene.parts.filter(p=>p.id!==state.selected);
   const selected=state.scene.parts.find(p=>p.id===state.selected), other=others[0];
   const pivot=new THREE.Vector3(...selected.pose.position_mm), local=other?pivot.clone().applyMatrix4(partObjects.get(other.id).matrix.clone().invert()):pivot;
   const value=old||{id:'attachment-'+(state.doc.joints?.length||0),type:'fixed',a:{part:selected.id,frame:{position_mm:[0,0,0],axis:[0,0,1]}},b:{part:other.id,frame:{position_mm:local.toArray(),axis:[0,0,1]}},metadata:{hardware:'Specify the actual bolt, bracket or connector and its installation method'}};
-  modal(old?'Edit connection':'Add connection','<p>Set the two part IDs and their local attachment frames or named ports. Choose fixed, revolute, prismatic, cylindrical, spherical or distance. Limits use mm and degrees; motor torque uses N·m.</p><textarea id="joint-source" spellcheck="false"></textarea>',[{label:'Cancel',action:closeModal},{label:'Apply connection',primary:true,action:async()=>{const edited=JSON.parse($('#joint-source').value);await mutate(()=>{state.doc.joints||=[];if(old)state.doc.joints[state.doc.joints.findIndex(j=>j.id===old.id)]=edited;else state.doc.joints.push(edited);});closeModal();}}]);
+  modal(old?'Edit connection':'Add connection',`<p>${esc(partName(value.a.part))} ↔ ${esc(partName(value.b.part))}</p>`+'<p>Set the two part IDs and their local attachment frames or named ports. Choose fixed, revolute, prismatic, cylindrical, spherical or distance. Limits use mm and degrees; motor torque uses N·m.</p><textarea id="joint-source" spellcheck="false"></textarea>',[{label:'Cancel',action:closeModal},{label:'Apply connection',primary:true,action:async()=>{const edited=JSON.parse($('#joint-source').value);await mutate(()=>{state.doc.joints||=[];if(old)state.doc.joints[state.doc.joints.findIndex(j=>j.id===old.id)]=edited;else state.doc.joints.push(edited);});closeModal();}}]);
   $('#joint-source').value=JSON.stringify(value,null,2);
 }

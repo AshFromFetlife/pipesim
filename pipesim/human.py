@@ -90,12 +90,14 @@ def humanoid(stature_mm=1750,mass_kg=75,pose='standing',measurements=None,joint_
     body('pelvis',{'type':'box','size_mm':[.18*H*girth['pelvis'],.12*H*girth['pelvis'],.11*H]},[0,0,z(.54)],.142)
     body('lumbar',{'type':'box','size_mm':[.14*H*girth['lumbar'],.115*H*girth['lumbar'],.10*H]},[0,0,z(.632)],.12)
     body('thorax',{'type':'box','size_mm':[.20*H*girth['thorax'],.13*H*girth['thorax'],.17*H]},[0,0,z(.745)],.20)
-    body('neck',{'type':'capsule','radius_mm':.024*H,'length_mm':.035*H},[0,0,z(.856)],.011)
-    body('head',{'type':'capsule','radius_mm':.045*H,'length_mm':.03*H},[0,0,z(.94)],.0694)
+    # Keep the neck short and the skull tall. The previous small head capsule
+    # sat high above the shoulders and exaggerated imported shoulder/neck bends.
+    body('neck',{'type':'capsule','radius_mm':.020*H,'length_mm':.030*H},[0,0,z(.85)],.011)
+    body('head',{'type':'capsule','radius_mm':.045*H,'length_mm':.060*H},[0,0,z(.925)],.0694)
     join('lumbar_flex','pelvis','lumbar',[0,0,z(.585)],limits={'rotation_deg':[[-30,45],[-20,20],[-30,30]]})
     join('thoracic_flex','lumbar','thorax',[0,0,z(.67)],limits={'rotation_deg':[[-20,35],[-20,20],[-35,35]]})
-    join('neck_base','thorax','neck',[0,0,z(.827)],limits={'rotation_deg':[[-35,40],[-25,25],[-40,40]]})
-    join('neck_head','neck','head',[0,0,z(.89)],limits={'rotation_deg':[[-25,30],[-20,20],[-40,40]]})
+    join('neck_base','thorax','neck',[0,0,z(.82)],limits={'rotation_deg':[[-35,40],[-25,25],[-40,40]]})
+    join('neck_head','neck','head',[0,0,z(.875)],limits={'rotation_deg':[[-25,30],[-20,20],[-40,40]]})
     for side,sign in (('left',-1),('right',1)):
         shoulder_pos=[sign*shoulder,0,z(.80)]; collar=[sign*.035*H,0,z(.805)]
         elbow=[sign*shoulder,0,z(.80)-upper]; wrist=[sign*shoulder,0,elbow[2]-forearm]

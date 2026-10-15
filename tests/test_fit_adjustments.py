@@ -53,7 +53,7 @@ def test_one_mm_rejection_can_use_a_small_explicit_assembly_allowance(frame,fact
     strict=connect(frame,force=True,tolerance_mm=.03)
     assert strict['recommended'] is None and '1.00 mm' in strict['options'][0]['reason']
     option=chosen(connect(frame));after=verify(frame,option,factory)
-    assert option['gap_mm']==pytest.approx(1) and option['requires_preview']
+    assert option['gap_mm']==pytest.approx(1) and not option.get('requires_preview')
     assert after.joints[-1]['fit_tolerance_mm']==2
     assert 'Accepted connection gap: 1.00 mm' in option['description']
     for pid in frame.parts: assert np.allclose(frame.parts[pid].matrix,after.parts[pid].matrix,atol=1e-6,rtol=0)
@@ -138,7 +138,7 @@ def test_force_solves_cut_length_with_the_connected_poses_and_previews_real_geom
     original=copy.deepcopy(frame.doc)
     option=chosen(connect(frame,force=True,tolerance_mm=.03,force_options={'resize_members':1,'max_length_change_mm':2}))
     after=verify(frame,option,factory,resize=1,maximum=2)
-    assert after.parts['left-arm'].length==pytest.approx(400,abs=.03)
+    assert after.parts['left-arm'].length==400
     assert option['gap_mm']<.03 and not option['adjustments']['unlocked']
     assert len(option['preview_parts'])==1 and option['preview_parts'][0]['length_mm']==pytest.approx(400,abs=.03)
     assert after.parts['left-arm'].shapes!=frame.parts['left-arm'].shapes

@@ -115,6 +115,8 @@ def test_worker_progress_result_cancellation_and_restart(factory,blank):
             time.sleep(.05);job=jobs.get(job['id'])
         assert job['status']=='completed',job
         assert 'result' not in job
+        assert 'result' not in jobs.jobs[job['id']]
+        assert jobs.result_bytes(job['id'])
         result=jobs.get(job['id'],include_result=True)['result']
         assert result['frames'] and result['chain_simplification']['links_per_body']==2
         assert result['mode']=='preview'

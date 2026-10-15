@@ -9,12 +9,15 @@ test('preview preferences persist, migrate older settings, and validate quality 
   assert.equal(loadPreferences(storage).simulationChainLinks,12);
   assert.equal(loadPreferences(storage).simulationMode,'preview');
   values.set('pipesim.preferences.v1',JSON.stringify({simulationChainLinks:1,simulationSeconds:5}));
-  assert.equal(loadPreferences(storage).simulationChainLinks,8);
+  assert.equal(loadPreferences(storage).simulationChainLinks,1000);
   assert.equal(loadPreferences(storage).simulationSeconds,5);
   savePreferences(storage,{...DEFAULT_PREFERENCES,simulationChainLinks:1});
   assert.equal(loadPreferences(storage).simulationChainLinks,1);
+  values.set('pipesim.preferences.v1',JSON.stringify({previewStepsPerSecond:1000,previewSolverIterations:240,simulationSeconds:5,lengthUnit:'in'}));
+  assert.equal(loadPreferences(storage).previewStepsPerSecond,60);assert.equal(loadPreferences(storage).previewSolverIterations,60);
+  assert.equal(loadPreferences(storage).lengthUnit,'in');assert.equal(loadPreferences(storage).simulationSeconds,5);
   const saved=savePreferences(storage,{...DEFAULT_PREFERENCES,simulationMode:'full',simulationChainLinks:6,
-    previewStepsPerSecond:2000,previewSolverIterations:480,previewBeamSegmentMm:1000});
+    previewStepsPerSecond:120,previewSolverIterations:80,previewBeamSegmentMm:1000});
   assert.deepEqual(loadPreferences(storage),saved);
   for(const [key,value] of Object.entries({simulationMode:'fast',previewStepsPerSecond:0,previewSolverIterations:1,previewBeamSegmentMm:Infinity}))
     assert.throws(()=>validatePreferences({...saved,[key]:value}),new RegExp(key));

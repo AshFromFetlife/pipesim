@@ -47,13 +47,16 @@ def _movement_coordinates(before, after):
     This checks a requested rigid movement, rather than solving general inverse
     kinematics. Hinges, sliders, ball joints and loose sockets retain their DOFs.
     """
+    changed={pid for pid,part in before.parts.items()
+             if not np.array_equal(part.matrix,after.parts[pid].matrix)}
     for anchor in before.anchors:
         pid=anchor['part']
-        if not np.allclose(before.parts[pid].matrix,after.parts[pid].matrix,atol=1e-5,rtol=0):
+        if pid in changed and not np.allclose(before.parts[pid].matrix,after.parts[pid].matrix,atol=1e-5,rtol=0):
             raise DocumentError(f'{pid} is fixed to the world')
     coordinates={};socket_contacts=[]
     for joint in before.joints:
         aid,bid=joint['a']['part'],joint['b']['part']
+        if aid not in changed and bid not in changed: continue
         a0,b0=before.parts[aid],before.parts[bid]; a1,b1=after.parts[aid],after.parts[bid]
         rel0=np.linalg.inv(a0.matrix)@b0.matrix; rel1=np.linalg.inv(a1.matrix)@b1.matrix
         if np.allclose(rel0,rel1,atol=1e-5,rtol=0): continue
@@ -349,13 +352,19 @@ def connection_options(assembly, member, connector, port, end='start', insertion
     baseline_errors={issue_key(i) for i in validate(assembly,collisions=False,geometry=False,support_checks=False)['issues'] if i['severity']=='error'}
     from .sliding import sliding_context,slide_connection
     sliding=sliding_context(assembly,connector,member)
-    choices=[('connector',connector),('member',member)]
-    if poses and member in poses and connector not in poses: choices.reverse()
-    choices+=([('both',None)] if sliding else [])
-    choices.append(('fit',None))
-    for side,pid in choices:
+    sides=[('connector',connector),('member',member)]
+    if poses and member in poses and connector not in poses: sides.reverse()
+    # Use the assembly allowance before changing authored geometry. If motion
+    # is needed, try whole-mm translation and unchanged angles on both sides
+    # before rotating either body to remove an already acceptable axis error.
+    choices=[('keep',None,'keep')]
+    choices.extend((side,pid,style) for style in ('grid','translate','exact') for side,pid in sides)
+    choices+=([('both',None,'exact')] if sliding else [])
+    choices.append(('fit',None,'exact'))
+    for side,pid,style in choices:
         check_cancelled(cancelled)
-        if side=='fit' and any(o['available'] and (not force or not o.get('requires_preview')) for o in options): continue
+        if any(o['move']==side and o['available'] for o in options): continue
+        if side=='fit' and any(o['available'] for o in options): continue
         if side=='fit' and force: options=[]
         group=next((g for g in groups if pid in g),[])
         if separate and pid is not None:
@@ -366,7 +375,15 @@ def connection_options(assembly, member, connector, port, end='start', insertion
         try:
             fitted_joint=joint
             adjusted_document=None
-            if side=='fit':
+            if side=='keep':
+                pa,pb,_=placed.joint_frames(joint)
+                if np.linalg.norm(pb-pa)>tolerance_mm+1e-7: continue
+                final_poses={i:pose_of(p.matrix) for i,p in placed.parts.items()
+                             if not np.allclose(p.matrix,assembly.parts[i].matrix,atol=1e-7,rtol=0)}
+                rotation=np.eye(3)
+                option.update(label='Keep existing geometry',local_alignment=True,
+                              description='Existing angles, positions and cut lengths are preserved.')
+            elif side=='fit':
                 from .fitting import fit_connection
                 if force and (controls['unlock_connectors'] or controls['resize_members']):
                     adjusted=adjust_connection(assembly,joint,placed,controls,cancelled=cancelled)
@@ -376,7 +393,10 @@ def connection_options(assembly, member, connector, port, end='start', insertion
                 else:
                     final_poses,fitted_joint,motions,context,angle=fit_connection(assembly,joint,placed,force,tolerance_mm=tolerance_mm,cancelled=cancelled)
                 rotation=Rotation.from_rotvec([np.deg2rad(angle),0,0]).as_matrix()
-                description=f'{len(motions)} joints adjusted continuously; rotation snap increments do not limit the fit.'
+                station_only=not motions and not final_poses and fitted_joint!=joint
+                description=('The parts stay in place.' if station_only else
+                             'Existing angles are preserved; connected parts slide into place.' if angle<1e-7 else
+                             f'{len(motions)} joints adjusted to fit the connection.')
                 if fitted_joint!=joint:
                     value=fitted_joint['b']['at_mm'] if socket.get('through') else fitted_joint['insertion_mm']
                     description+=f' Fitted socket {"centre from pipe start" if socket.get("through") else "insertion"}: {value:.2f} mm.'
@@ -388,7 +408,7 @@ def connection_options(assembly, member, connector, port, end='start', insertion
                 local_alignment=(not force and angle<=np.rad2deg(np.arccos(SOCKET_AXIS_MIN_DOT)) and
                     all(j['type']=='socket' and not j.get('locked') for j in assembly.joints if j['id'] in moved_joints))
                 option.update(motions=motions,context_parts=context,requires_preview=not local_alignment,local_alignment=local_alignment,description=description,
-                              label=f'Solve hinges and slides together ({len(final_poses)} parts)',joint=fitted_joint)
+                              label='Keep existing part positions' if station_only else f'Solve hinges and slides together ({len(final_poses)} parts)',joint=fitted_joint)
             elif side=='both':
                 final_poses,slides,context=slide_connection(assembly,joint,placed,sliding);rotation=np.eye(3)
                 option.update(slides=slides,context_parts=context,requires_preview=True,
@@ -401,8 +421,15 @@ def connection_options(assembly, member, connector, port, end='start', insertion
                 mouth,axis=fitting.frame(joint['a']); point,tube_axis=tube.frame(endpoint)
                 if socket.get('through') and axis@tube_axis<0: tube_axis=-tube_axis
                 rotation=align_axis(axis,tube_axis) if side=='connector' else align_axis(tube_axis,axis)
+                if style!='exact':
+                    from .validation import SOCKET_AXIS_MIN_DOT
+                    if axis@tube_axis<SOCKET_AXIS_MIN_DOT: raise DocumentError('This fit needs a rotation')
+                    rotation=np.eye(3)
+                    option['description']='Existing angles and cut lengths are preserved.'
+                    option['local_alignment']=True
                 delta=np.eye(4); delta[:3,:3]=rotation
-                delta[:3,3]=(point+tube_axis*insertion-rotation@mouth) if side=='connector' else (mouth-axis*insertion-rotation@point)
+                delta[:3,3]=(point+(rotation@axis)*insertion-rotation@mouth) if side=='connector' else (mouth-axis*insertion-rotation@point)
+                if style=='grid': delta[:3,3]=np.round(delta[:3,3])
                 if member in group and connector in group:
                     if np.linalg.norm(mouth-axis*insertion-point)>tolerance_mm+1e-7 or np.linalg.norm(rotation-np.eye(3))>1e-4:
                         raise DocumentError('These parts already belong to one rigid body; their attachment frames must already coincide')
@@ -420,6 +447,8 @@ def connection_options(assembly, member, connector, port, end='start', insertion
             final=Assembly.from_doc(result,assembly.base,assembly.library)
             pa,pb,_=final.joint_frames(fitted_joint);gap=float(np.linalg.norm(pb-pa))
             option['gap_mm']=gap;option['tolerance_mm']=tolerance_mm
+            if gap>tolerance_mm+1e-7:
+                raise DocumentError(f'Connection frames miss by {gap:.2f} mm')
             if gap>.03:
                 if not option.get('local_alignment'): option['requires_preview']=True
                 option['description']=option.get('description','')+f' Accepted connection gap: {gap:.2f} mm (allowance {tolerance_mm:g} mm).'
@@ -439,7 +468,12 @@ def connection_options(assembly, member, connector, port, end='start', insertion
             option.update(available=True,document=result,poses=final_poses,moved=list(final_poses),
                           rotation_deg=float(np.rad2deg(Rotation.from_matrix(rotation).magnitude())))
         except DocumentError as exc: option['reason']=str(exc)
+        # Each side exposes its best valid candidate, not its internal trials.
+        # Failed preservation trials fall through to the exact solver.
+        if side=='keep' and not option['available']: continue
+        options=[o for o in options if o['move']!=side]
         options.append(option)
+        if side=='keep' and option['available']: break
         # A clear drop intent can commit immediately. Review requests still
         # enumerate both sides and articulated alternatives as before.
         if first_valid and option['available'] and not option.get('requires_preview'): break

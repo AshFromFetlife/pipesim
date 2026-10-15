@@ -6,7 +6,9 @@ import pytest
 from test_server import editor
 
 from pipesim.document import Assembly, DocumentError
+from pipesim.drafting import preview
 from pipesim.geometry import mesh_for_part
+from pipesim.snapping import move_document
 from pipesim.symmetry import materialize_mirror, materialize_all
 
 
@@ -230,6 +232,44 @@ def test_explicit_free_mode_does_not_constrain_a_pipe(tmp_path):
     doc = design()
     doc['draft_subassemblies'][0]['mirrors'][0]['run_modes'] = {'tube': 'free'}
     Assembly.from_doc(doc, tmp_path)
+
+
+@pytest.mark.parametrize(('start', 'end', 'warning'), [
+    ([-500, -500, 100], [500, 500, 100], True),
+    ([-300, -2.5, 100], [300, 2.5, 100], False),
+    ([0, -500, 100], [0, 500, 100], False),
+    ([-500, 0, 100], [500, 0, 100], False),
+    ([100, -500, 100], [500, 500, 100], False),
+])
+def test_free_oblique_mirror_crossing_warns_in_preview(tmp_path, start, end, warning):
+    doc = design()
+    doc['parts'] = []
+    run = doc['draft_subassemblies'][0]['runs'][0]
+    run.update(start_mm=start, end_mm=end, attachments=[])
+    doc['draft_subassemblies'][0]['mirrors'] = [
+        {'id': 'x-zero', 'axis': 'x', 'offset_mm': 0, 'run_modes': {'tube': 'free'}}]
+    shown = preview(Assembly.from_doc(doc, tmp_path))[0]
+    assert any(item['code'] == 'MIRROR_SELF_INTERSECTION'
+               for item in shown['warnings']) is warning
+    assert not shown['conflicts']
+    assert (shown['color'] == '#cf815d') is warning
+
+
+def test_rotating_free_draft_structure_keeps_oblique_warning_nonblocking(tmp_path):
+    doc = design()
+    doc['draft_subassemblies'][0]['mirrors'] = [
+        {'id': 'x-middle', 'axis': 'x', 'offset_mm': 500,
+         'run_modes': {'tube': 'free'}}]
+    assembly = Assembly.from_doc(doc, tmp_path)
+    target = copy.deepcopy(doc['parts'][0]['pose'])
+    target['rotation_deg'] = [0, 0, 45]
+    moved = move_document(assembly, {'left': target})
+    after = Assembly.from_doc(moved, tmp_path)
+    run = moved['draft_subassemblies'][0]['runs'][0]
+    assert len(run['attachments']) == 2
+    assert moved['draft_subassemblies'][0]['mirrors'][0]['run_modes']['tube'] == 'free'
+    assert any(item['code'] == 'MIRROR_SELF_INTERSECTION'
+               for item in preview(after)[0]['warnings'])
 
 
 def test_pipe_centreline_can_lie_at_an_angle_in_a_height_plane(tmp_path):

@@ -39,7 +39,7 @@ def test_anchored_connector_offers_pipe_movement(blank,factory):
     doc=two_parts(blank); doc['anchors']=[{'part':'fitting','surface':'ceiling'}]
     result=connection_options(factory(doc),'pipe','fitting','z',end='start')
     assert result['recommended']=='member'
-    assert not result['options'][0]['available']
+    assert not next(o for o in result['options'] if o['move']=='connector')['available']
     assert validate(factory(chosen(result,'member')))['valid']
 
 
@@ -84,7 +84,7 @@ def test_connection_can_be_changed_from_pipe_end_to_continuous_run(blank,factory
     doc=two_parts(blank,'TC104C')
     doc=connect_member(doc,'.','pipe','fitting','run_end')
     old=doc['joints'][0]['id']
-    result=connection_options(factory(doc),'pipe','fitting','through',at_mm=500,replace_joint=old)
+    result=connection_options(factory(doc),'pipe','fitting','through',at_mm=500,replace_joint=old,tolerance_mm=.03)
     final=factory(chosen(result))
     assert len(final.joints)==1 and final.joints[0]['id']==old
     assert np.allclose(final.parts['pipe'].matrix[:3,3],final.parts['fitting'].matrix[:3,3])

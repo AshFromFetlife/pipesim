@@ -63,6 +63,8 @@ retained beam response, and preservation of the authored document. Seeds 0–2
 retain the reported swing and fragment cases, and seed 3032479272 retains a
 chain-in-hand contact failure found by this campaign. Seed 3198599736 retains a
 joint-drift failure with jute and a light counterweight, before fresh cases run.
+Seed 3919911892 retains a heavy webbing payload that opened an unbroken joint
+on the first step even though its initial attachment frames were aligned.
 The exact swing runs through the production recording path for all three seconds
 and must retain its nylon connections; deleting constraints cannot satisfy the
 continuity check by removing every joint it would inspect. Injected false breaks
@@ -77,6 +79,14 @@ cases vary grouping, force-update rate, solver iterations, and beam resolution.
 The completed swing recording is retained alongside failure artifacts. A retained
 regression also checks joint closure through the late 1.5-second impact; checking
 only the first quarter-second allowed an insufficient solver budget to pass.
+For Full runs with yielding beams or wide webbing and no metal rings, the solver uses 5% joint
+position correction while retaining its substep budget. This keeps both the
+late yielding-beam impact and the first-step heavy webbing impulse connected.
+Ordinary rope and metal links retain gentler correction for their contacts.
+If a Full joint still opens beyond 5 mm, the line projector closes its
+attachment frames and separating velocity without removing a real break.
+Full checks that gap at roughly 1 kHz and whenever it records a frame.
+The late-impact regression guards both joint closure and the two-substep budget.
 Use `PIPESIM_DYNAMICS_FUZZ_MINUTES` to change the budget,
 `PIPESIM_DYNAMICS_FUZZ_SEED` to repeat a campaign, or
 `PIPESIM_DYNAMICS_FUZZ_CASE_SEED` to replay one case. Failures save the exact
@@ -91,44 +101,30 @@ physics steps per second, and solver iterations. Full ignores these Preview
 settings and retains individual links. Recordings store their mode and effective
 quality settings; playback identifies approximate Preview results. The CLI exposes
 the same controls with `simulate --mode preview` and `--preview-*` options.
-Older browser preferences migrate the prototype's one-link Full default to
-Preview's eight-link maximum. Custom larger groups are retained, and explicitly
-selecting one link in the new Preview preferences remains supported.
+Preview defaults to 60 Hz, 60 solver iterations and exactly four internal
+substeps. The step rate range is 30–240 Hz and the iteration range 10–120.
+Legacy browser rates above 240 Hz and iteration settings above 120 migrate
+individually to the new defaults; other preferences survive.
 
-Preview groups uniform rated rope and chain sections while preserving mass,
-authored poses, attachment links, and the complete centerline load-transfer path.
-Remaining flexible boundaries retain the original tensile rating. Weaker sections,
-motors, and drives remain flexible; breaks occur at retained boundaries, so their
-location is approximate. Grouping preserves existing slack bends and targets
-about ten groups along sufficiently long lines. End links may join a compound;
-their external attachments retain their original joints and frames, avoiding
-isolated tiny bodies beside heavy payloads. Saved joint coordinates are applied
-before choosing groups. The legacy explicit `chain_links_per_body` option also
-works in Full, but the editor always uses one link per body for Full physics.
+Structural beams stay rigid unless explicitly selected using
+`preview_detail_parts`. The editor offers individual members and flexible-line
+objects; object IDs expand to their own parts only. Selected lines retain
+individual segments and selected beams use `preview_beam_segment_mm`.
+Unselected lines target four coarse groups with extra segments at bends,
+attachments and material boundaries. There are no automatic detail replays or
+Full fallbacks.
 
-Preview keeps dynamic bending enabled on members at least twice the selected
-beam segment length; shorter members remain rigid. Eligible members use at least
-two elements. Full retains its finer element selection. Internal contact steps
-remain finer than the outer force-update step because gram-scale links coupled
-to heavy bodies still need stable contacts.
-Preview increases contact substeps and solver iterations when measured joint drift
-exceeds 2 mm, retaining the extra effort after a topology rebuild and reducing it
-again after twenty steps below 1 mm drift. The recording
-reports requested and effective solver settings and number of contact refinements.
-If a recorded frame still has an unbroken link gap over 8 mm, Preview discards
-that attempt and replays the authored model with Full physics. This avoids
-returning a successful-looking disconnected recording. Progress and playback
-identify the automatic refinement; cancellation remains available. The default
-saved-swing Preview must complete without this fallback, while retained seed 7
-checks the high-step contact case that needs it. Such cases prioritize closure
-over Preview speed. Full flexible-only models update forces at least 2,000 times
-per second; internal Bullet contact steps remain finer.
-Regression tests compare loaded pendulum trajectories with Full physics, check
-mass and pose preservation, and force a grouped line to break and lose its support
-spring. The elastic cantilever check compares the same physical tip against Full
-and the beam calculation, rather than comparing centres from different meshes.
-The dynamics campaign retains a complete three-second Preview replay
-(seed 3) and varies link grouping and materials in fresh cases.
+To remain stable at large timesteps, Preview conditions coarse line inertia,
+uses an implicit span spring and performs bounded position projection of the
+physical line bodies and articulated mounts together, respecting joint limits.
+A sparse solve closes the whole line graph and removes separating velocity;
+its iteration budget is fixed. These poses feed both collision queries and
+recording; Full retains its original dynamics and masses. Preview records these
+approximations as limitations.
+The original design is never mutated. Selected beam bending is qualitative;
+Preview disables material and joint overload breakage, since coarse contact
+corrections are not reliable stress measurements. Full is required for detailed
+stress, deformation and damage results.
 
 The local HTTP service serves a vendored Three.js frontend and calls the same Python functions as the CLI. It has no database, cloud storage or remote execution endpoint. Writes require a per-session token, a trusted loopback Host and same-origin requests. Paths are resolved within the editor root, excluding repository control directories. This is a local single-user service, not an internet-facing deployment.
 
@@ -230,8 +226,9 @@ actions). It prints the actual completed case/action counts and writes
 `campaign.json`; elapsed time or a case limit is not evidence of stability
 outside the generated scenarios. A zero process exit without the expected case
 and operation coverage report fails the campaign; tests verify that skipped
-workflows and empty coverage cannot count as passes. The four Python campaigns now default to
-fifteen minutes each. The manual Geometry fuzz workflow runs the editor campaign
+workflows and empty coverage cannot count as passes. The Python draft/connection
+campaign defaults to twenty minutes; the other three default to fifteen minutes.
+The manual Geometry fuzz workflow runs the editor campaign
 and fault checks; normal checks run the bounded editor suite on all three OSes.
 Both workflows retain failure artifacts.
 
@@ -438,8 +435,9 @@ python -m pytest -q tests/test_solver_fuzz.py -k draft_repair_varied
 Remove-Item Env:PIPESIM_FUZZ_CASE_SEEDS
 ```
 
-The four extended fuzz campaigns run in the normal Python suite. Each runs for
-fifteen minutes by default, or until its one-million-model limit is reached. Set
+The four extended fuzz campaigns run in the normal Python suite. The draft and
+connection campaign runs for twenty minutes by default; the other three run for
+fifteen minutes, or until their one-million-model limit is reached. Set
 `PIPESIM_FUZZ_MINUTES` to change the time in minutes for each campaign. The
 random root seed and each failing case seed are printed so a failure can be
 reproduced. Supplying a root
@@ -452,7 +450,34 @@ python -m pytest -s -q tests/test_solver_fuzz.py -k draft_repair_long_randomized
 Remove-Item Env:PIPESIM_FUZZ_MINUTES, Env:PIPESIM_FUZZ_CASES
 ```
 
-The draft repair campaign runs at most 25 models per child process. Connected
+The draft repair campaign also checks detached through-socket reconnections at
+each seed: one family retains a mounted tee and pipe at an offset station; the
+other uses a solid collision proxy whose overlap is allowed only by the new
+socket. It verifies that Force chooses the occupied station without moving
+parts. Replay a reconnect case with `PIPESIM_FUZZ_SEEDS=<case_seed>` and
+`python -m pytest -q tests/test_solver_fuzz.py -k detached_through_fitting`.
+Each seed also repeats 30 detach/connect operations on a square assembly,
+varying socket offsets, bore angles, whole-mm translations, world orientation,
+anchors, and cylindrical guides, with and without Force. These cases require
+unchanged cut lengths and orientations, integer positions, and no cumulative
+pose drift. Replay with `PIPESIM_FUZZ_SEEDS=<case_seed>` and
+`python -m pytest -q tests/test_solver_fuzz.py -k connection_preserves_square`.
+It also returns a Body to draft through a loose socket on a different Body,
+covering terminal and through sockets, world anchors, arbitrary orientations,
+and preserved joint limits, fit allowances and metadata. Re-finalization must
+keep the screw loose and restore the joint's identity and settings. Replay with
+`PIPESIM_FUZZ_SEEDS=<case_seed>` and
+`python -m pytest -q tests/test_solver_fuzz.py -k reopen_body_with_external_loose_socket`.
+Each seed also drops an unanchored frame with several loose horizontal sockets
+and closed loops to the floor. It varies the selected Body, part order, tilt,
+floor penetration, lower attached geometry and grouped payloads. An unrelated
+world fixing must not affect placement. Every part must receive the same vertical
+translation, with unchanged cut lengths and joint settings and an idempotent
+second click. The fixed regression and seeded fuzz cases both reproduced the
+former false joint-travel error before the fix. Replay with
+`PIPESIM_FUZZ_SEEDS=<case_seed>` and
+`python -m pytest -q tests/test_solver_fuzz.py -k free_frame_drop_to_floor_seeded`.
+The campaign runs at most 25 seeds per child process. Connected
 resize batches run at most ten seeds, each testing both a generated graph and
 a six-edit lattice workflow; the mirror campaigns run at most ten seeds. Short budgets use smaller batches,
 and completed-case speed sizes later batches near the deadline. A running case

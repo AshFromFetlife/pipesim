@@ -7,6 +7,7 @@ from scipy.spatial.transform import Rotation
 from pathlib import Path
 
 from pipesim.document import Assembly, DocumentError, read
+from pipesim.fitting import fit_connection
 from pipesim.math3d import pose_of, transform
 from pipesim.posing import transform_part
 from pipesim.snapping import connection_options, _movement_coordinates
@@ -28,7 +29,12 @@ def verify(before, option, factory):
     after=factory(option['document'])
     report=validate(after)
     assert report['valid'],report['issues']
-    assert not [i for i in report['issues'] if i['code']=='INTERSECTION'],report['issues']
+    # Preserving untouched geometry can leave a pre-existing overlap at the
+    # next, still-disconnected fitting. It must not introduce or worsen one.
+    existing={tuple(i['parts']):i['depth_mm'] for i in validate(before)['issues'] if i['code']=='INTERSECTION'}
+    for issue in report['issues']:
+        if issue['code']=='INTERSECTION':
+            assert issue['depth_mm']<=existing.get(tuple(issue['parts']),0)+1e-5,issue
     for pid, part in before.parts.items():
         assert after.parts[pid].length==part.length
     for pid in ('bottom','right','top','left',*[f'corner-{i}' for i in range(4)]):
@@ -40,7 +46,8 @@ def verify(before, option, factory):
         a,b,axis=after.joint_frames(j)
         delta=b-a
         if j['type']=='socket' and not j.get('locked'): delta-=axis*(delta@axis)
-        assert np.linalg.norm(delta)<.03,j['id']
+        limit=.03 if j['id'] in {old['id'] for old in before.joints} else j.get('fit_tolerance_mm',.03)
+        assert np.linalg.norm(delta)<=limit+1e-7,j['id']
     _movement_coordinates(before,after)
     return after
 
@@ -88,6 +95,48 @@ def test_force_adjusts_the_requested_station_when_slide_limits_require_a_differe
     assert 'Fitted socket centre' in forced['description']
     assert len(after.joints)==len(middle.joints)+1
     assert middle.doc==original
+
+
+def test_force_reconnects_a_through_fitting_at_its_existing_station(factory):
+    doc=read(Path(__file__).parent.parent/'examples/tee-midpoint.pipe.yaml')
+    pipe=next(p for p in doc['parts'] if p['id']=='upper-crossbar')
+    pipe['parameters']['length_mm']=1600
+    pipe['pose']['position_mm']=[-48,0,1133.04]
+    doc['joints']=[j for j in doc['joints'] if j['id']!='upper-midpoint']
+    before=factory(doc)
+    original=copy.deepcopy(before.doc)
+    joint={'id':'reconnect','type':'socket','a':{'part':'upper-tee','port':'through'},
+           'b':{'part':'upper-crossbar','at_mm':800},'insertion_mm':0,'locked':True,'fit_tolerance_mm':10}
+    poses,fitted,motions,_,_=fit_connection(before,joint,before,True,tolerance_mm=10)
+    assert fitted['b']['at_mm']==pytest.approx(848)
+    assert poses=={} and motions==[]
+    doc['joints'].append(fitted)
+    assert validate(factory(doc),collisions=False)['valid']
+    assert before.doc==original
+
+
+def test_force_reconnects_an_intersecting_through_socket_without_moving_anchors(factory):
+    doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','name':'Rejoin an occupied bore',
+         'parts':[{'id':'pipe','catalog':'tubeclamp.tube-C','parameters':{'length_mm':1600},
+                   'pose':{'position_mm':[0,0,800]}},
+                  {'id':'collar','body':{'kind':'connector','mass_kg':1,
+                   'geometry':[{'type':'box','size_mm':[50,50,50]}],
+                   'ports':{'bore':{'type':'socket','through':True,'profile':'round',
+                                   'diameter_mm':42.4,'engagement_mm':60,
+                                   'position_mm':[0,0,0],'axis':[0,0,1]}}},
+                   'pose':{'position_mm':[0,0,848]}}],
+         'joints':[],'anchors':[{'part':'pipe','surface':'fixture'},
+                                {'part':'collar','surface':'fixture'}],
+         'environment':{'ground':False}}
+    before=factory(doc)
+    original=copy.deepcopy(before.doc)
+    result=connection_options(before,'pipe','collar','bore',at_mm=800,locked=True,
+                              tolerance_mm=10,force=True)
+    option=chosen(result)
+    assert option['joint']['b']['at_mm']==pytest.approx(848)
+    assert option['moved']==[]
+    assert validate(factory(option['document']))['valid']
+    assert before.doc==original
 
 
 def test_force_keeps_locked_connections_and_reports_search_failure_without_changing_document(load,factory):

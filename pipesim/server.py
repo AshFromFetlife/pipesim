@@ -17,11 +17,15 @@ import urllib.parse
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from .document import Assembly,Library,DocumentError,read,write,parse,plain,DATA
+from .human_assets import MAX_ASSET_BYTES
 
 WEB=Path(__file__).parent/'web'
 BUNDLED_MESHES=(DATA/'libraries'/'meshes').resolve()
 DESIGN_SUFFIXES={'.yaml','.yml','.json'}
-EDITOR_API_VERSION=26
+EDITOR_API_VERSION=30
+MAX_JSON_REQUEST_BYTES=32*1024*1024
+# File bytes expand by 4/3 in base64; allow filenames and the JSON envelope too.
+MAX_HUMAN_IMPORT_REQUEST_BYTES=((MAX_ASSET_BYTES+2)//3)*4+1024*1024
 
 def bundled_mesh(relative):
     path=(BUNDLED_MESHES/relative).resolve()
@@ -105,12 +109,29 @@ class Handler(BaseHTTPRequestHandler):
     server: EditorServer
     def log_message(self,format,*args): pass
     def send_data(self,status,data,mime='application/json'):
-        if mime=='application/json': data=json.dumps(plain(data),allow_nan=False).encode()
+        if mime=='application/json' and not isinstance(data,bytes): data=json.dumps(plain(data),allow_nan=False).encode()
         elif isinstance(data,str): data=data.encode('utf-8')
         self.send_response(status); self.send_header('Content-Type',mime); self.send_header('Content-Length',str(len(data)))
         self.send_header('X-Content-Type-Options','nosniff'); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(data)
     def trusted_host(self):
         return self.headers.get('Host') in (f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}')
+    def reject_large_request(self,size,limit):
+        # Closing with unread upload bytes resets the socket on Windows and
+        # browsers lose the JSON explanation. Drain without retaining the body.
+        previous_timeout=self.connection.gettimeout()
+        self.connection.settimeout(5)
+        try:
+            remaining=size
+            while remaining:
+                chunk=self.rfile.read(min(remaining,1024*1024))
+                if not chunk: break
+                remaining-=len(chunk)
+        except OSError:
+            pass
+        finally:
+            self.connection.settimeout(previous_timeout)
+        self.close_connection=True
+        self.send_data(413,{'error':f'Upload is {size/(1024*1024):.1f} MiB; this request allows {limit/(1024*1024):.1f} MiB.'})
     def file(self,path):
         if not path.is_file(): self.send_data(404,{'error':'File not found'}); return
         mime=mimetypes.guess_type(path)[0] or 'application/octet-stream'
@@ -210,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
                 else: doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','name':'Untitled creation','parts':[],'joints':[]}
                 assembly=self.assembly(doc,path.parent,validate_mirror_geometry=False)
                 doc,assembly,updated,error=self.scene_human_document(assembly)
-                self.send_data(200,{'token':self.server.token,'api_version':EDITOR_API_VERSION,'path':path.relative_to(self.server.root).as_posix(),'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts,'auto_symmetry':updated,'mirror_pose_error':error,'examples':[p.relative_to(self.server.root).as_posix() for p in sorted((self.server.root/'examples').glob('*.pipe.yaml'))]})
+                self.send_data(200,{'token':self.server.token,'api_version':EDITOR_API_VERSION,'human_import_max_bytes':MAX_ASSET_BYTES,'path':path.relative_to(self.server.root).as_posix(),'document':doc,'scene':self.scene(assembly),'library':assembly.library.parts,'auto_symmetry':updated,'mirror_pose_error':error,'examples':[p.relative_to(self.server.root).as_posix() for p in sorted((self.server.root/'examples').glob('*.pipe.yaml'))]})
             elif request.path=='/api/open':
                 path=self.server.path(query['path'][0])
                 if path.suffix.lower() not in DESIGN_SUFFIXES: raise DocumentError('Open a .yaml, .yml or .json design')
@@ -255,14 +276,20 @@ class Handler(BaseHTTPRequestHandler):
         if origin and origin not in (f'http://127.0.0.1:{self.server.server_port}',f'http://localhost:{self.server.server_port}'):
             self.send_data(403,{'error':'Cross-origin writes are not permitted'}); return
         try:
-            size=int(self.headers.get('Content-Length','0'))
-            if size<=0 or size>32*1024*1024: raise DocumentError('Request must be between 1 byte and 32 MiB')
-            data=json.loads(self.rfile.read(size))
             route=urllib.parse.urlparse(self.path).path
+            size=int(self.headers.get('Content-Length','0'))
+            limit=MAX_HUMAN_IMPORT_REQUEST_BYTES if route=='/api/import-human-model' else MAX_JSON_REQUEST_BYTES
+            if size<=0: raise DocumentError('Request must contain a JSON body')
+            if size>limit:
+                self.reject_large_request(size,limit);return
+            data=json.loads(self.rfile.read(size))
             base=self.server.path(data.get('path',self.server.design)).parent
             if route in ('/api/simulation-status','/api/simulation-cancel','/api/simulation-result'):
-                result=self.server.simulations.get(data['job_id'],cancel=route=='/api/simulation-cancel',
-                                                   include_result=route=='/api/simulation-result')
+                if route=='/api/simulation-result':
+                    payload=self.server.simulations.result_bytes(data['job_id'])
+                    if payload is not None:
+                        self.send_data(200,payload);return
+                result=self.server.simulations.get(data['job_id'],cancel=route=='/api/simulation-cancel')
             elif route=='/api/connection-cancel':
                 result=self.server.connections.cancel(data['job_id'])
             elif route=='/api/snap-options':
@@ -304,6 +331,7 @@ class Handler(BaseHTTPRequestHandler):
                     include_run_ids=()
                     blocking=None
                     mirror_source_document=None
+                    mirror_warnings=[]
                     if operation is finalize and any(g.get('mirrors') for g in assembly.doc.get('draft_subassemblies', [])):
                         from .symmetry import materialize_all
                         # A draft mirror is only a preview. Close recoverable
@@ -324,10 +352,17 @@ class Handler(BaseHTTPRequestHandler):
                         if blocking is None:
                             try:
                                 mirror_source_document=copy.deepcopy(assembly.doc)
-                                document=materialize_all(assembly,{owner} if selected else None)
+                                document=materialize_all(assembly,{owner} if selected else None,
+                                                         warnings=mirror_warnings)
                             except DocumentError as exc:
+                                message=str(exc)
+                                named=message.split(':',1)[0]
+                                part=next((pid for pid in assembly.parts
+                                           if f'{pid}/' in message),None)
                                 blocking={'status':'conflict','conflicts':[{
-                                    'code':'MIRROR_BAKE','message':str(exc)}]}
+                                    'code':'MIRROR_BAKE','message':message,
+                                    **({'run':named} if any(named==r['id'] for g in assembly.doc['draft_subassemblies'] for r in g['runs']) else {}),
+                                    **({'part':part} if part else {})}]}
                             else:
                                 if selected:
                                     include_run_ids=tuple(r['id'] for r in runs(document) if r['id'] not in existing and
@@ -340,6 +375,8 @@ class Handler(BaseHTTPRequestHandler):
                     if mirror_source_document is not None:
                         from .drafting import remember_mirrored_draft
                         result=remember_mirrored_draft(mirror_source_document,result)
+                    if mirror_warnings and result['status']=='finalized':
+                        result['warnings']=mirror_warnings
                     if result['status'] in ('finalized','repaired'):
                         result['scene']=self.scene(self.assembly(result['document'],base,
                                                                validate_mirror_geometry=False))
@@ -418,9 +455,9 @@ class Handler(BaseHTTPRequestHandler):
                 result={'document':doc,'library':assembly.library.parts,'import':record}
             else:
                 doc=data['document']; prepared=None
-                if route in ('/api/move-object','/api/drop-to-floor') or (route=='/api/move' and data.get('selected')):
+                if route in ('/api/move-object','/api/drop-to-floor','/api/attach-part') or (route=='/api/move' and data.get('selected')):
                     prepared=self.server.previews.prepared(doc,base,lambda:self.assembly(
-                        doc,base,validate_mirror_geometry=route=='/api/drop-to-floor'))
+                        doc,base,validate_mirror_geometry=route in ('/api/drop-to-floor','/api/attach-part')))
                     assembly=prepared.assembly
                 else: assembly=self.assembly(doc,base,validate_mirror_geometry=route not in ('/api/resolve','/api/move','/api/resize-drag'))
                 if route=='/api/resolve':
@@ -438,8 +475,10 @@ class Handler(BaseHTTPRequestHandler):
                     result['scene']=self.scene(self.assembly(result['document'],base,validate_mirror_geometry=False))
                 elif route=='/api/draft-mirror-bake':
                     from .symmetry import materialize_mirror
-                    document=materialize_mirror(assembly,data['group'],data['plane'])
-                    result={'document':document,'scene':self.scene(self.assembly(document,base))}
+                    warnings=[]
+                    document=materialize_mirror(assembly,data['group'],data['plane'],warnings=warnings)
+                    result={'document':document,'scene':self.scene(self.assembly(document,base)),
+                            'warnings':warnings}
                 elif route=='/api/draft-update':
                     from .drafting import runs
                     document=copy.deepcopy(doc)
@@ -514,6 +553,11 @@ class Handler(BaseHTTPRequestHandler):
                     from .grouping import update_object_parameters
                     document=update_object_parameters(assembly,data['object'],data['parameters'])
                     result={'document':document,'scene':self.scene(self.assembly(document,base))}
+                elif route=='/api/chain-pose':
+                    from .chain_poses import apply_preset
+                    result=apply_preset(assembly,data['object'],data['preset'])
+                    if result['changed']:
+                        result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/human-symmetry':
                     from .human_symmetry import set_human_symmetry
                     document=set_human_symmetry(assembly,data['object'],data.get('group'),data.get('plane'))
@@ -541,6 +585,20 @@ class Handler(BaseHTTPRequestHandler):
                         data.get('poses'),bool(data.get('preview')))
                     if not data.get('preview'):
                         result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/quick-connections':
+                    from .quick_connections import detach_all, attach_nearby, attach_similar, attached_connector_ports
+                    operation=data.get('operation')
+                    if operation=='detach': result=detach_all(assembly,data.get('selected'))
+                    elif operation=='attach':
+                        result=attach_nearby(assembly,data.get('selected'))
+                        if result['changed']:
+                            result['attached_ports']=attached_connector_ports(assembly.doc,result['document'],data.get('selected'))
+                    elif operation in ('similar-preview','attach-similar'):
+                        result=attach_similar(assembly,data.get('connector'),data.get('port'),
+                                              apply=operation=='attach-similar')
+                    else: raise DocumentError('Choose detach or attach')
+                    if result['changed']:
+                        result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/add-wheel':
                     from .wheels import add_wheel
                     result=add_wheel(assembly,data.get('catalog','generic.wheel'),
@@ -548,7 +606,7 @@ class Handler(BaseHTTPRequestHandler):
                     result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/mount-wheel':
                     from .wheels import mount_wheel
-                    result=mount_wheel(assembly,data.get('wheel'),data.get('target'))
+                    result=mount_wheel(assembly,data.get('wheel'),data.get('target'),data.get('replace_joint'))
                     result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/validate':
                     if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before validation')
@@ -564,9 +622,10 @@ class Handler(BaseHTTPRequestHandler):
                     if duration>30: raise DocumentError('Editor simulations are limited to 30 seconds; use the CLI for longer runs')
                     result=self.server.simulations.start(assembly,duration=duration,fps=30,
                         chain_links_per_body=data.get('chain_links_per_body'),mode=data.get('mode','full'),
-                        preview_steps_per_second=data.get('preview_steps_per_second',1000),
-                        preview_solver_iterations=data.get('preview_solver_iterations',240),
+                        preview_steps_per_second=data.get('preview_steps_per_second',60),
+                        preview_solver_iterations=data.get('preview_solver_iterations',60),
                         preview_beam_segment_mm=data.get('preview_beam_segment_mm',800),
+                        preview_detail_parts=data.get('preview_detail_parts',[]),
                         deflection_warning_mm=float(data.get('deflection_warning_mm',10)))
                 elif route=='/api/plan':
                     if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before build planning')

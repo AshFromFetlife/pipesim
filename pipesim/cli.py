@@ -26,10 +26,11 @@ def parser():
         if name=='simulate':
             command.add_argument('--duration',type=float,default=3); command.add_argument('--fps',type=float,default=30); command.add_argument('--dt',type=float,default=1/240)
             command.add_argument('--mode',choices=['full','preview'],default='full')
-            command.add_argument('--chain-links-per-body',type=int,help='Rigid groups of up to N links (default: Full 1, Preview 8)')
-            command.add_argument('--preview-steps-per-second',type=int,default=1000)
-            command.add_argument('--preview-solver-iterations',type=int,default=240)
+            command.add_argument('--chain-links-per-body',type=int,help='Rigid groups of up to N links (default: Full 1, Preview targets four groups per line)')
+            command.add_argument('--preview-steps-per-second',type=int,default=60)
+            command.add_argument('--preview-solver-iterations',type=int,default=60)
             command.add_argument('--preview-beam-segment-mm',type=int,default=800)
+            command.add_argument('--preview-detail-part',action='append',default=[],help='Part or line object for extra Preview detail; repeat to select more')
             command.add_argument('--quiet',action='store_true',help='Hide simulation progress')
         if name=='stress':
             command.add_argument('--part',required=True); command.add_argument('--max-force',type=float,default=10000); command.add_argument('--directions',type=int,default=24); command.add_argument('--steps',type=int,default=12); command.add_argument('--seed',type=int,default=1)
@@ -111,7 +112,7 @@ def main(argv=None):
                 result=simulate_in_worker(assembly,duration=args.duration,fps=args.fps,dt=args.dt,
                     chain_links_per_body=args.chain_links_per_body,progress=progress,mode=args.mode,
                     preview_steps_per_second=args.preview_steps_per_second,preview_solver_iterations=args.preview_solver_iterations,
-                    preview_beam_segment_mm=args.preview_beam_segment_mm)
+                    preview_beam_segment_mm=args.preview_beam_segment_mm,preview_detail_parts=args.preview_detail_part)
             elif args.command=='bom':
                 from .exporting import bom,cutting_plan
                 result={'bom':bom(assembly),'cutting':cutting_plan(assembly,args.kerf,args.stock,args.trim)}

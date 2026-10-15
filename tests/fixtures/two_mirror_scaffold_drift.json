@@ -1,0 +1,228 @@
+{
+  "format": "pipesim/1",
+  "units": "mm-kg-s-N-deg",
+  "name": "Two-plane scaffold with small socket rotation",
+  "parts": [
+    {
+      "id": "tc131c-1",
+      "catalog": "tubeclamp.TC131C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          500,
+          500,
+          100
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "tc116c-1",
+      "catalog": "tubeclamp.TC116C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          499.99995074,
+          500.00001792,
+          672.2283739
+        ],
+        "rotation_deg": [
+          -2.932e-05,
+          -8.069e-05,
+          179.99105719
+        ]
+      }
+    },
+    {
+      "id": "tc116c-1-copy",
+      "catalog": "tubeclamp.TC116C",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          500.00000308,
+          499.99999637,
+          2083.30000102
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          179.99106
+        ]
+      }
+    }
+  ],
+  "joints": [],
+  "anchors": [],
+  "draft_subassemblies": [
+    {
+      "id": "draft-1",
+      "runs": [
+        {
+          "id": "tube-c-1",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            425.5181718707498,
+            527.090225965045,
+            267.6085706388724
+          ],
+          "end_mm": [
+            736.9562554843613,
+            413.8144549076729,
+            2239.9612063930463
+          ],
+          "attachments": [
+            {
+              "connector": "tc116c-1",
+              "port": "through"
+            },
+            {
+              "connector": "tc131c-1",
+              "port": "socket",
+              "end": "start",
+              "insertion_mm": 30
+            },
+            {
+              "connector": "tc116c-1-copy",
+              "port": "through"
+            }
+          ],
+          "roll_deg": 0
+        },
+        {
+          "id": "tube-c-2",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            -466.7999511444326,
+            500.1509174796928,
+            672.2297354502869
+          ],
+          "end_mm": [
+            466.7999511444326,
+            500.0051998250778,
+            672.2284206557649
+          ],
+          "attachments": [
+            {
+              "connector": "tc116c-1",
+              "port": "x",
+              "end": "end",
+              "insertion_mm": 30
+            }
+          ],
+          "roll_deg": 6.297887763782329e-09
+        },
+        {
+          "id": "tube-c-3",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            499.8490511586393,
+            -466.80001832440405,
+            672.2278791588925
+          ],
+          "end_mm": [
+            499.99476883489825,
+            466.80001832440405,
+            672.2283569105462
+          ],
+          "attachments": [
+            {
+              "connector": "tc116c-1",
+              "port": "y",
+              "end": "end",
+              "insertion_mm": 30
+            }
+          ],
+          "roll_deg": -2.2881355656103943e-09
+        },
+        {
+          "id": "tube-c-3-copy",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            499.8491509215637,
+            -466.79999677414565,
+            2083.30000102
+          ],
+          "end_mm": [
+            499.99482280317477,
+            466.79999677414565,
+            2083.30000102
+          ],
+          "attachments": [
+            {
+              "connector": "tc116c-1-copy",
+              "port": "y",
+              "end": "end",
+              "insertion_mm": 30
+            }
+          ],
+          "roll_deg": 0
+        },
+        {
+          "id": "tube-c-2-copy",
+          "catalog": "tubeclamp.tube-C",
+          "parameters": {
+            "wall_mm": 3.2
+          },
+          "start_mm": [
+            -466.80000348414563,
+            500.1508485305303,
+            2083.30000102
+          ],
+          "end_mm": [
+            466.80000348414563,
+            500.00517664682525,
+            2083.30000102
+          ],
+          "attachments": [
+            {
+              "connector": "tc116c-1-copy",
+              "port": "x",
+              "end": "end",
+              "insertion_mm": 30
+            }
+          ],
+          "roll_deg": -2.0883641619891002e-12
+        }
+      ],
+      "mirrors": [
+        {
+          "id": "mirror-1",
+          "axis": "x",
+          "offset_mm": 0,
+          "scope": "scene",
+          "run_modes": {
+            "tube-c-2": "centered",
+            "tube-c-3": "free",
+            "tube-c-2-copy": "centered"
+          }
+        },
+        {
+          "id": "mirror-2",
+          "axis": "y",
+          "offset_mm": 0,
+          "scope": "scene",
+          "run_modes": {
+            "tube-c-3": "centered",
+            "tube-c-3-copy": "centered"
+          }
+        }
+      ]
+    }
+  ]
+}

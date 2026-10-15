@@ -1,0 +1,1658 @@
+{
+  "format": "pipesim/1",
+  "units": "mm-kg-s-N-deg",
+  "name": "Mirrored semi-circle chain attachment regression",
+  "parts": [
+    {
+      "id": "tc173mc-1",
+      "catalog": "tubeclamp.TC173MC",
+      "parameters": {},
+      "pose": {
+        "position_mm": [
+          150,
+          -490,
+          700.7951
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          90
+        ]
+      }
+    },
+    {
+      "id": "chain-1/link-1-mirror-mirror-1",
+      "pose": {
+        "position_mm": [
+          162.58583134,
+          -430,
+          700.7951
+        ],
+        "rotation_deg": [
+          90,
+          0,
+          0
+        ]
+      },
+      "label": "Mirror of chain-1/link-1",
+      "body": {
+        "kind": "chain",
+        "material": "steel-assumed",
+        "color": "#87949e",
+        "mass_kg": 0.015413438956674921,
+        "geometry": [
+          {
+            "type": "box",
+            "size_mm": [
+              10,
+              10,
+              10
+            ]
+          }
+        ],
+        "ports": {
+          "a": {
+            "type": "eye",
+            "position_mm": [
+              0,
+              0,
+              -10
+            ],
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "assembly": "hook"
+          },
+          "b": {
+            "type": "eye",
+            "position_mm": [
+              0,
+              0,
+              10
+            ],
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "assembly": "hook"
+          }
+        }
+      }
+    },
+    {
+      "id": "tc173mc-1-mirror-mirror-1",
+      "pose": {
+        "position_mm": [
+          -150,
+          -490,
+          700.7951
+        ],
+        "rotation_deg": [
+          0,
+          0,
+          -90
+        ]
+      },
+      "label": "Mirror of tc173mc-1",
+      "body": {
+        "kind": "connector",
+        "material": "cast-iron",
+        "color": "#9aabb7",
+        "mass_kg": 0.316,
+        "geometry": [
+          {
+            "type": "box",
+            "size_mm": [
+              20,
+              20,
+              20
+            ]
+          }
+        ],
+        "ports": {
+          "through": {
+            "type": "socket",
+            "position_mm": [
+              0,
+              0,
+              0
+            ],
+            "axis": [
+              0,
+              0,
+              1
+            ],
+            "diameter_mm": 42.4,
+            "profile": "round",
+            "through": true,
+            "engagement_mm": 45,
+            "min_engagement_mm": 25,
+            "assembly": "slide",
+            "capacity": 1,
+            "clearance_mm": 1,
+            "geometry_status": "inferred-engagement"
+          },
+          "hinge": {
+            "type": "eye",
+            "position_mm": [
+              -50,
+              0,
+              0
+            ],
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "diameter_mm": 10.6,
+            "assembly": "bolt",
+            "capacity": 1
+          }
+        }
+      }
+    }
+  ],
+  "joints": [
+    {
+      "id": "chain-1-link-30-attachment",
+      "type": "spherical",
+      "a": {
+        "part": "tc173mc-1",
+        "port": "hinge"
+      },
+      "b": {
+        "part": "chain-1/link-30",
+        "frame": {
+          "position_mm": [
+            0,
+            0,
+            -10
+          ],
+          "axis": [
+            0,
+            1.0000000000000007,
+            0
+          ]
+        }
+      },
+      "metadata": {
+        "hardware": "Assumed chain end attachment; choose a hook or shackle and its limits",
+        "snapshot_reference_coordinates": {}
+      }
+    }
+  ],
+  "objects": [
+    {
+      "id": "chain-1",
+      "template": "chain",
+      "parameters": {
+        "length_mm": 600,
+        "link_catalog": "generic.chain-link"
+      },
+      "pose": {
+        "position_mm": [
+          -6.29291567,
+          -613.28440977,
+          700.7951
+        ],
+        "rotation_deg": [
+          90,
+          0,
+          0
+        ]
+      },
+      "components": {
+        "parts": [
+          {
+            "id": "link-1",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -156.29291567,
+                0,
+                -183.28440977
+              ],
+              "rotation_deg": [
+                0,
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "id": "link-2",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -156.29291567,
+                0,
+                -203.28440977
+              ],
+              "rotation_deg": [
+                0,
+                0,
+                -90
+              ]
+            }
+          },
+          {
+            "id": "link-3",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -156.24667401,
+                0,
+                -223.28430285
+              ],
+              "rotation_deg": [
+                0,
+                0.26494615,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-4",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -155.22005613,
+                0,
+                -243.23602303
+              ],
+              "rotation_deg": [
+                -5.62617919,
+                0,
+                90
+              ]
+            }
+          },
+          {
+            "id": "link-5",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -151.9965129,
+                0,
+                -262.93301311
+              ],
+              "rotation_deg": [
+                0,
+                -12.96270102,
+                0
+              ]
+            }
+          },
+          {
+            "id": "link-6",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -146.28411659,
+                0,
+                -282.05711251
+              ],
+              "rotation_deg": [
+                20.29922279,
+                0,
+                -90
+              ]
+            }
+          },
+          {
+            "id": "link-7",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -138.17639917,
+                0,
+                -300.29519267
+              ],
+              "rotation_deg": [
+                0,
+                27.6357446,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-8",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -127.80611238,
+                0,
+                -317.34863223
+              ],
+              "rotation_deg": [
+                -34.97226654,
+                0,
+                90
+              ]
+            }
+          },
+          {
+            "id": "link-9",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -115.34305412,
+                0,
+                -332.93820657
+              ],
+              "rotation_deg": [
+                0,
+                -42.30878872,
+                0
+              ]
+            }
+          },
+          {
+            "id": "link-10",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -100.99128831,
+                0,
+                -346.8086596
+              ],
+              "rotation_deg": [
+                49.64531121,
+                0,
+                -90
+              ]
+            }
+          },
+          {
+            "id": "link-11",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -84.9854522,
+                0,
+                -358.73234241
+              ],
+              "rotation_deg": [
+                0,
+                56.98552952,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-12",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -67.58767454,
+                0,
+                -368.51395412
+              ],
+              "rotation_deg": [
+                -64.32217315,
+                0,
+                90
+              ]
+            }
+          },
+          {
+            "id": "link-13",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -49.08323804,
+                0,
+                -375.9938257
+              ],
+              "rotation_deg": [
+                0,
+                -71.65869534,
+                0
+              ]
+            }
+          },
+          {
+            "id": "link-14",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -29.77513678,
+                0,
+                -381.04950322
+              ],
+              "rotation_deg": [
+                78.9952173,
+                0,
+                -90
+              ]
+            }
+          },
+          {
+            "id": "link-15",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                -9.97951213,
+                0,
+                -383.59820758
+              ],
+              "rotation_deg": [
+                0,
+                86.33173911,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-16",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                9.97951213,
+                0,
+                -383.59820758
+              ],
+              "rotation_deg": [
+                -93.66826089,
+                0,
+                90
+              ]
+            }
+          },
+          {
+            "id": "link-17",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                29.77513678,
+                0,
+                -381.04950322
+              ],
+              "rotation_deg": [
+                180,
+                -78.9952173,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-18",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                49.08323804,
+                0,
+                -375.9938257
+              ],
+              "rotation_deg": [
+                108.34130466,
+                0,
+                -90
+              ]
+            }
+          },
+          {
+            "id": "link-19",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                67.58767454,
+                0,
+                -368.51395412
+              ],
+              "rotation_deg": [
+                180,
+                64.32217315,
+                0
+              ]
+            }
+          },
+          {
+            "id": "link-20",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                84.9854522,
+                0,
+                -358.73234241
+              ],
+              "rotation_deg": [
+                -123.01447048,
+                0,
+                90
+              ]
+            }
+          },
+          {
+            "id": "link-21",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                100.99128831,
+                0,
+                -346.8086596
+              ],
+              "rotation_deg": [
+                180,
+                -49.64531121,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-22",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                115.34305412,
+                0,
+                -332.93820657
+              ],
+              "rotation_deg": [
+                137.69121128,
+                0,
+                -90
+              ]
+            }
+          },
+          {
+            "id": "link-23",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                127.80611238,
+                0,
+                -317.34863223
+              ],
+              "rotation_deg": [
+                180,
+                34.97226654,
+                0
+              ]
+            }
+          },
+          {
+            "id": "link-24",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                138.17639917,
+                0,
+                -300.29519267
+              ],
+              "rotation_deg": [
+                -152.3642554,
+                0,
+                90
+              ]
+            }
+          },
+          {
+            "id": "link-25",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                146.28411659,
+                0,
+                -282.05711251
+              ],
+              "rotation_deg": [
+                180,
+                -20.29922279,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-26",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                151.9965129,
+                0,
+                -262.93301311
+              ],
+              "rotation_deg": [
+                167.03729898,
+                0,
+                -90
+              ]
+            }
+          },
+          {
+            "id": "link-27",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                155.22005613,
+                0,
+                -243.23602303
+              ],
+              "rotation_deg": [
+                180,
+                5.62617919,
+                0
+              ]
+            }
+          },
+          {
+            "id": "link-28",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                156.24667401,
+                0,
+                -223.28430285
+              ],
+              "rotation_deg": [
+                -179.73505385,
+                0,
+                90
+              ]
+            }
+          },
+          {
+            "id": "link-29",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                156.29291567,
+                0,
+                -203.28440977
+              ],
+              "rotation_deg": [
+                180,
+                0,
+                180
+              ]
+            }
+          },
+          {
+            "id": "link-30",
+            "catalog": "generic.chain-link",
+            "pose": {
+              "position_mm": [
+                156.29291567,
+                0,
+                -183.28440977
+              ],
+              "rotation_deg": [
+                180,
+                0,
+                -90
+              ]
+            }
+          }
+        ],
+        "joints": [
+          {
+            "id": "join-1",
+            "type": "spherical",
+            "a": {
+              "part": "link-1",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-2",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-2",
+            "type": "spherical",
+            "a": {
+              "part": "link-2",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-3",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-3",
+            "type": "spherical",
+            "a": {
+              "part": "link-3",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-4",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-4",
+            "type": "spherical",
+            "a": {
+              "part": "link-4",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-5",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-5",
+            "type": "spherical",
+            "a": {
+              "part": "link-5",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-6",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-6",
+            "type": "spherical",
+            "a": {
+              "part": "link-6",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-7",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-7",
+            "type": "spherical",
+            "a": {
+              "part": "link-7",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-8",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-8",
+            "type": "spherical",
+            "a": {
+              "part": "link-8",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-9",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-9",
+            "type": "spherical",
+            "a": {
+              "part": "link-9",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-10",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-10",
+            "type": "spherical",
+            "a": {
+              "part": "link-10",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-11",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-11",
+            "type": "spherical",
+            "a": {
+              "part": "link-11",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-12",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-12",
+            "type": "spherical",
+            "a": {
+              "part": "link-12",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-13",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-13",
+            "type": "spherical",
+            "a": {
+              "part": "link-13",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-14",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-14",
+            "type": "spherical",
+            "a": {
+              "part": "link-14",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-15",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-15",
+            "type": "spherical",
+            "a": {
+              "part": "link-15",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-16",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-16",
+            "type": "spherical",
+            "a": {
+              "part": "link-16",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-17",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-17",
+            "type": "spherical",
+            "a": {
+              "part": "link-17",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-18",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-18",
+            "type": "spherical",
+            "a": {
+              "part": "link-18",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-19",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-19",
+            "type": "spherical",
+            "a": {
+              "part": "link-19",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-20",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-20",
+            "type": "spherical",
+            "a": {
+              "part": "link-20",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-21",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-21",
+            "type": "spherical",
+            "a": {
+              "part": "link-21",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-22",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-22",
+            "type": "spherical",
+            "a": {
+              "part": "link-22",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-23",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-23",
+            "type": "spherical",
+            "a": {
+              "part": "link-23",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-24",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-24",
+            "type": "spherical",
+            "a": {
+              "part": "link-24",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-25",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-25",
+            "type": "spherical",
+            "a": {
+              "part": "link-25",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-26",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-26",
+            "type": "spherical",
+            "a": {
+              "part": "link-26",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-27",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-27",
+            "type": "spherical",
+            "a": {
+              "part": "link-27",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-28",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-28",
+            "type": "spherical",
+            "a": {
+              "part": "link-28",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-29",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          },
+          {
+            "id": "join-29",
+            "type": "spherical",
+            "a": {
+              "part": "link-29",
+              "port": "a"
+            },
+            "b": {
+              "part": "link-30",
+              "port": "b"
+            },
+            "limits": {
+              "rotation_deg": [
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -80,
+                  80
+                ],
+                [
+                  -180,
+                  180
+                ]
+              ]
+            },
+            "damping": 0.001,
+            "assembly": "hook",
+            "metadata": {
+              "chain_link": true
+            }
+          }
+        ],
+        "parameter_reference": {
+          "length_mm": 600,
+          "link_catalog": "generic.chain-link"
+        }
+      },
+      "pose_preset": "u-wide"
+    }
+  ],
+  "anchors": []
+}

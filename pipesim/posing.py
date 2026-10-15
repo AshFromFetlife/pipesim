@@ -47,10 +47,11 @@ class Mechanism:
         for j in assembly.joints:
             a,b=(self.group_of[j[e]['part']] for e in ('a','b'))
             if a!=b: edges[a].append((b,j));edges[b].append((a,j))
-        component={self.selected};queue=[self.selected]
+        component={self.selected};queue=[self.selected];distance={self.selected:0}
         for g in queue:
             for other,_ in edges[g]:
-                if other not in component: component.add(other);queue.append(other)
+                if other not in component:
+                    component.add(other);queue.append(other);distance[other]=distance[g]+1
         self.component=component;self.parts={p for g in component for p in self.groups[g]}
         anchored={self.group_of[a['part']] for a in assembly.anchors}&component
         pelvis=[g for g in component if any(assembly.parts[p].kind=='human' and p.split('/')[-1]=='pelvis' for p in self.groups[g])]
@@ -64,7 +65,9 @@ class Mechanism:
         candidates=hosts or component
         score=lambda g:(len(self.groups[g]),sum(assembly.parts[p].length or 0 for p in self.groups[g]),-g)
         structural=[g for g in candidates if any(assembly.parts[p].kind in ('member','connector') and p not in chain_parts for p in self.groups[g])]
-        self.root=min(anchored) if anchored else max(structural,key=score) if structural else pelvis[0] if pelvis else max(candidates,key=score)
+        # Start at the nearest fixed group. A distant anchor must not recruit
+        # every joint between it and a locally sliding selected part.
+        self.root=min(anchored,key=lambda g:(distance[g],g)) if anchored else max(structural,key=score) if structural else pelvis[0] if pelvis else max(candidates,key=score)
         if not anchored and not pelvis and assembly.parts[selected].kind=='connector':
             hosts={self.group_of[j['b']['part']] for j in assembly.joints if j['type']=='socket' and not j.get('locked',False)
                    and self.group_of[j['a']['part']]==self.selected and self.group_of[j['b']['part']]!=self.selected}
@@ -111,11 +114,28 @@ class Mechanism:
             self.variables[j['id']]=entries
         self.lower=np.array(self.lower);self.upper=np.array(self.upper)
         parents={child:(parent,j) for parent,child,j,_ in self.tree}
-        relevant={j['id'] for j in self.closures}
-        ends={self.selected}|anchored|{self.group_of[j[e]['part']] for j in self.closures for e in ('a','b')}
-        for g in ends:
-            while g in parents:
-                g,j=parents[g];relevant.add(j['id'])
+        def path_to_root(group):
+            path=set()
+            while group in parents:
+                group,j=parents[group];path.add(j['id'])
+            return path
+        relevant=path_to_root(self.selected)
+        closure_paths=[(j,path_to_root(self.group_of[j['a']['part']]) ^
+                           path_to_root(self.group_of[j['b']['part']])) for j in self.closures]
+        anchor_paths=[(g,path_to_root(g)) for g in anchored-{self.root}]
+        # A stationary off-path branch remains valid with all its coordinates
+        # at zero. Pull in a loop or another anchor only when the moving path
+        # crosses it, then repeat because that path may meet another loop.
+        while True:
+            expanded=set(relevant)
+            for joint,path in closure_paths:
+                if path & relevant: expanded.update(path);expanded.add(joint['id'])
+            for _,path in anchor_paths:
+                if path & relevant: expanded.update(path)
+            if expanded==relevant: break
+            relevant=expanded
+        self.active_closures=[j for j,path in closure_paths if path & relevant]
+        self.active_anchors={g for g,path in anchor_paths if path & relevant}
         self.active=np.array([index for jid,entries in self.variables.items() if jid in relevant for _,index,_,_,_ in entries if index is not None],dtype=int)
         # Pose a limb from its anatomical base before recruiting the torso and
         # the opposite limbs. This also keeps interactive previews inexpensive.
@@ -178,13 +198,56 @@ def drop_to_floor(assembly, selected, object_id=None, *, prepared=None):
     if object_id is not None:
         instance=next((o for o in assembly.doc.get('objects',[]) if o['id']==object_id),None)
         if instance is None or not selected.startswith(object_id+'/'): raise DocumentError('Select a part of the grouped object to drop')
+
+    # Floor placement is a layout operation. An IK reference body is not a
+    # world fixing: any free attachment component has an exact vertical move,
+    # even when the selected body cannot slide vertically relative to its root.
+    # Include complete reusable objects so attached payloads keep their pose.
+    graph={p:set() for p in assembly.parts}
+    for joint in assembly.joints:
+        a,b=joint['a']['part'],joint['b']['part']
+        graph[a].add(b);graph[b].add(a)
+    for obj in assembly.doc.get('objects',[]):
+        parts=[p for p in assembly.parts if p.startswith(obj['id']+'/')]
+        for p in parts[1:]:
+            graph[parts[0]].add(p);graph[p].add(parts[0])
+    component={selected};queue=[selected]
+    for p in queue:
+        for other in graph[p]-component:
+            component.add(other);queue.append(other)
+    anchors=[a['part'] for a in assembly.anchors if a['part'] in component]
+    if not anchors:
+        from .snapping import rigid_draft_follow
+        # Discover free draft attachments with a unit translation, using the
+        # same following rules as the eventual commit. Include their support
+        # geometry before calculating the final translation.
+        probe={p:pose_of(assembly.parts[p].matrix) for p in component}
+        for pose in probe.values(): pose['position_mm'][2]+=1
+        probe,followed_runs=rigid_draft_follow(assembly,probe)
+        heights=[lowest_z(assembly.parts[p]) for p in probe]
+        if followed_runs:
+            from .document import Part
+            from .drafting import preview
+            for run in preview(assembly):
+                if run['id'] in followed_runs:
+                    part=Part(run['id'],{},run,transform(run['pose']),assembly.library.paths.get(run['catalog'],assembly.base))
+                    heights.append(lowest_z(part))
+        original_height=min(heights)
+        if abs(original_height)<=1e-6:
+            return {'poses':{},'moved':[],'limited':False,'floor_gap_mm':original_height,
+                    'document':copy.deepcopy(assembly.doc),'message':'Already resting on Z = 0'}
+        poses={p:pose_of(assembly.parts[p].matrix) for p in probe}
+        for pose in poses.values(): pose['position_mm'][2]-=original_height
+        document=commit_transform(assembly,poses)
+        return {'poses':poses,'moved':list(poses),'limited':False,'document':document,'floor_gap_mm':0.,
+                'message':f'{"Lifted" if original_height<0 else "Dropped"} connected assembly to the floor (Z = 0); shape preserved'}
+
+    if object_id is not None:
         members={p for p in assembly.parts if p.startswith(object_id+'/')}
         target=pose_of(transform(instance.get('pose')))
     else:
         mechanism=prepared.mechanism(selected) if prepared else Mechanism(assembly,selected)
-        # Moving the unanchored root carries the whole mechanism, including any
-        # hanging branches. Its lowest part must stop on the floor too.
-        members=mechanism.parts if mechanism.selected==mechanism.root and not mechanism.anchored else set(mechanism.groups[mechanism.selected])
+        members=set(mechanism.groups[mechanism.selected])
         target=pose_of(assembly.parts[selected].matrix)
     def height(poses):
         return min(lowest_z(assembly.parts[p],transform(poses[p]) if p in poses else None) for p in members)
@@ -203,9 +266,11 @@ def drop_to_floor(assembly, selected, object_id=None, *, prepared=None):
         target['position_mm'][2]-=remaining
     else: remaining=height(result['poses'])
     if abs(remaining)>.01:
-        anchors=[a['part'] for a in assembly.anchors if a['part'] in members]
-        reason=f'{", ".join(anchors)} is fixed to the world.' if anchors else result.get('message','A connection limits this movement.')
-        raise DocumentError(f'Cannot reach the floor: {reason} Loosen or detach the limiting connection, or release the world fixing, then retry.')
+        fixing=f'{", ".join(anchors)} {"is" if len(anchors)==1 else "are"} fixed to the world'
+        side='above' if remaining>0 else 'below'
+        raise DocumentError(f'Cannot reach the floor: {fixing}. The available joint motion leaves '
+                            f'{selected}\'s moving body {abs(remaining):.2f} mm {side} Z = 0. '
+                            'Release that world fixing to place the connected assembly as a whole.')
     document=move_object(assembly,object_id,target)['document'] if object_id is not None else commit_transform(assembly,result['poses'])
     return {**result,'document':document,'floor_gap_mm':remaining,'message':f'{"Lifted" if original_height<0 else "Dropped"} to the floor (Z = 0)'}
 
@@ -224,6 +289,7 @@ def transform_part(assembly, selected, target, mode='translate', seed=None, *, p
     original=assembly.parts[selected].matrix
     if symmetry_owner and selected==symmetry_owner['id']+'/pelvis':
         desired=transform(project_pelvis_target(target,original))
+    slide_guided=slide_stopped=False
     if mechanism.selected==mechanism.root:
         delta=np.eye(4) if mechanism.anchored else desired@np.linalg.inv(original)
         q=np.zeros(len(mechanism.lower));deltas=mechanism.forward(q,delta)
@@ -233,26 +299,47 @@ def transform_part(assembly, selected, target, mode='translate', seed=None, *, p
         q0=np.zeros(len(mechanism.lower))
         if isinstance(seed,list) and len(seed)==len(q0) and np.isfinite(seed).all(): q0=np.array(seed)
         q0=np.clip(q0,mechanism.lower+1e-8,mechanism.upper-1e-8)
-        def difference(a,b):
-            return np.r_[a[:3,3]-b[:3,3],100*Rotation.from_matrix(a[:3,:3]@b[:3,:3].T).as_rotvec()]
-        def residual(q):
-            deltas=mechanism.forward(q);actual=deltas[mechanism.selected]@original
-            position=(actual[:3,3]-desired[:3,3])*(.001 if mode=='rotate' else 1)
-            angular=Rotation.from_matrix(actual[:3,:3]@desired[:3,:3].T).as_rotvec()*(1000 if mode=='rotate' else 2)
-            errors=[position,angular,.01*q]
-            for j in mechanism.closures:
-                a,b=(mechanism.group_of[j[e]['part']] for e in ('a','b'))
-                errors.append(1000*difference(deltas[a]@mechanism.delta(j,q),deltas[b]))
-            for g in mechanism.anchored-{mechanism.root}: errors.append(1000*difference(deltas[g],np.eye(4)))
-            return np.concatenate(errors)
-        active=mechanism.local_active
-        def full(values):
-            q=np.zeros(len(mechanism.lower));q[active]=values;return q
-        solved=least_squares(lambda values:residual(full(values)),q0[active],bounds=(mechanism.lower[active],mechanism.upper[active]),
-                             max_nfev=65,ftol=None,xtol=1e-8,gtol=1e-7)
-        q=full(solved.x);deltas=mechanism.forward(q)
+        direct=next(((parent,j,forward) for parent,child,j,forward in mechanism.tree
+                     if child==mechanism.selected and parent==mechanism.root),None)
+        slide=next(((index,scale) for name,index,scale,_,_ in mechanism.variables[direct[1]['id']]
+                    if name=='slide_mm' and index is not None),None) if direct else None
+        if (mode=='translate' and direct and slide and not mechanism.active_closures and not mechanism.active_anchors
+                and joint_kind(direct[1]) in ('prismatic','cylindrical')
+                and np.allclose(desired[:3,:3],original[:3,:3],atol=1e-5,rtol=0)):
+            # A leaf sliding on one guide has an exact one-dimensional answer.
+            # Do not fit unrelated hanging chains or free limbs to this target.
+            axis=mechanism.frames[direct[1]['id']][1]*(1 if direct[2] else -1)
+            index,scale=slide
+            q=np.zeros(len(mechanism.lower))
+            requested=float((desired[:3,3]-original[:3,3])@axis)/scale
+            q[index]=np.clip(requested,mechanism.lower[index],mechanism.upper[index])
+            slide_guided=True;slide_stopped=abs(requested-q[index])>1e-7
+            deltas=mechanism.forward(q)
+        else:
+            def difference(a,b):
+                return np.r_[a[:3,3]-b[:3,3],100*Rotation.from_matrix(a[:3,:3]@b[:3,:3].T).as_rotvec()]
+            def residual(q):
+                deltas=mechanism.forward(q);actual=deltas[mechanism.selected]@original
+                position=(actual[:3,3]-desired[:3,3])*(.001 if mode=='rotate' else 1)
+                angular=Rotation.from_matrix(actual[:3,:3]@desired[:3,:3].T).as_rotvec()*(1000 if mode=='rotate' else 2)
+                errors=[position,angular,.01*q]
+                for j in mechanism.active_closures:
+                    a,b=(mechanism.group_of[j[e]['part']] for e in ('a','b'))
+                    errors.append(1000*difference(deltas[a]@mechanism.delta(j,q),deltas[b]))
+                for g in mechanism.active_anchors: errors.append(1000*difference(deltas[g],np.eye(4)))
+                return np.concatenate(errors)
+            active=mechanism.local_active
+            def full(values):
+                q=np.zeros(len(mechanism.lower));q[active]=values;return q
+            solved=least_squares(lambda values:residual(full(values)),q0[active],bounds=(mechanism.lower[active],mechanism.upper[active]),
+                                 max_nfev=65,ftol=None,xtol=1e-8,gtol=1e-7)
+            q=full(solved.x);deltas=mechanism.forward(q)
     posed=copy.copy(assembly);posed.parts={p:copy.copy(v) for p,v in assembly.parts.items()}
-    for p in mechanism.parts: posed.parts[p].matrix=deltas[mechanism.group_of[p]]@assembly.parts[p].matrix
+    identity=np.eye(4)
+    moved_groups={g for g in mechanism.component if not np.array_equal(deltas[g],identity)}
+    for p in mechanism.parts:
+        if mechanism.group_of[p] in moved_groups:
+            posed.parts[p].matrix=deltas[mechanism.group_of[p]]@assembly.parts[p].matrix
     if symmetry_owner:
         mirror_limb_poses(posed,symmetry_owner,selected)
     # A difficult or impossible loop must leave the authored assembly intact.
@@ -263,7 +350,9 @@ def transform_part(assembly, selected, target, mode='translate', seed=None, *, p
         _movement_coordinates(assembly,posed)
     except DocumentError as exc:
         blocked=str(exc);posed=assembly;q=np.zeros(len(mechanism.lower))
-    poses={p:pose_of(v.matrix) for p,v in posed.parts.items() if not np.allclose(v.matrix,assembly.parts[p].matrix,atol=1e-7,rtol=0)}
+    candidates=posed.parts if symmetry_owner else (p for p in mechanism.parts if mechanism.group_of[p] in moved_groups)
+    poses={p:pose_of(posed.parts[p].matrix) for p in candidates
+           if not np.allclose(posed.parts[p].matrix,assembly.parts[p].matrix,atol=1e-7,rtol=0)}
     if poses and assembly.doc.get('draft_subassemblies'):
         from .snapping import apply_rigid_draft_follow, check_rigid_draft_follow, rigid_draft_follow
 
@@ -279,8 +368,12 @@ def transform_part(assembly, selected, target, mode='translate', seed=None, *, p
     position_error=float(np.linalg.norm(actual[:3,3]-desired[:3,3]))
     angle_error=float(np.rad2deg(Rotation.from_matrix(actual[:3,:3]@desired[:3,:3].T).magnitude()))
     limited=position_error>.5 if mode=='translate' else angle_error>.1
+    message=blocked or ('Movement stopped at the available joint travel' if slide_stopped
+                        else 'Movement follows the available slide axis' if limited and slide_guided
+                        else 'Movement stopped at the available joint travel' if limited
+                        else 'Connected joints follow the movement')
     result={'poses':poses,'moved':list(poses),'seed':q.tolist(),'limited':limited,
             'position_error_mm':position_error,'angle_error_deg':angle_error,
-            'message':blocked or ('Movement stopped at the available joint travel' if limited else 'Connected joints follow the movement')}
+            'message':message}
     if not preview: result['document']=commit_transform(assembly,poses)
     return result

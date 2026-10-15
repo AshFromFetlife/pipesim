@@ -7,35 +7,35 @@ parts:
   parameters: {}
   pose:
     position_mm:
-    - 442.06874578
-    - -942.03543146
-    - 339.10950275
+    - 442.0472704
+    - -941.24726806
+    - 397.93401749
     rotation_deg:
-    - 100.58477839
-    - -0.05254869
-    - 179.96464674
+    - 100.6486911
+    - -0.05339902
+    - 179.96414965
 - id: tc173mc-1
   catalog: tubeclamp.TC173MC
   parameters: {}
   pose:
     position_mm:
-    - 348.94880267
-    - -941.97797357
-    - 339.19490753
+    - 348.92732907
+    - -941.18900228
+    - 398.02080427
     rotation_deg:
-    - 90.05817918
-    - -25.41521016
-    - 89.93967767
+    - 90.05908934
+    - -25.35129712
+    - 89.93884951
 - id: tc128c-1-mirror-mirror-3
   pose:
     position_mm:
-    - 443.65829752
-    - -654.33340215
-    - 1878.69800404
+    - 443.66294191
+    - -651.82805446
+    - 1937.20061105
     rotation_deg:
-    - -100.58477839
-    - 0.05254869
-    - -0.03535326
+    - -100.6486911
+    - 0.05339902
+    - -0.03585035
   label: Mirror of tc128c-1
   body:
     kind: connector
@@ -106,13 +106,13 @@ parts:
 - id: tc173mc-1-mirror-mirror-3
   pose:
     position_mm:
-    - 350.53835441
-    - -654.27594427
-    - 1878.7834088
+    - 350.54300058
+    - -651.76978868
+    - 1937.28739781
     rotation_deg:
-    - -90.07645885
-    - -46.58475293
-    - -89.97981418
+    - -90.07778785
+    - -46.64866475
+    - -89.97928629
   label: Mirror of tc173mc-1
   body:
     kind: connector
@@ -158,13 +158,13 @@ parts:
 - id: tc128c-1-mirror-mirror-2
   pose:
     position_mm:
-    - 442.79865994
-    - 695.85199718
-    - 33.0376551
+    - 442.78493526
+    - 696.29771986
+    - 90.03532312
     rotation_deg:
-    - 79.41522161
-    - 0.05254869
-    - -0.03535326
+    - 79.3513089
+    - 0.05339902
+    - -0.03585035
   label: Mirror of tc128c-1
   body:
     kind: connector
@@ -235,13 +235,13 @@ parts:
 - id: tc128c-1-mirror-mirror-3-mirror-mirror-2
   pose:
     position_mm:
-    - 444.38821168
-    - 983.55402647
-    - 1572.62615637
+    - 444.40060677
+    - 985.71693344
+    - 1629.30191666
     rotation_deg:
-    - -79.41522161
-    - -0.05254869
-    - 179.96464674
+    - -79.3513089
+    - -0.05339902
+    - 179.96414965
   label: Mirror of tc128c-1-mirror-mirror-3
   body:
     kind: connector
@@ -312,13 +312,13 @@ parts:
 - id: tc173mc-1-mirror-mirror-2
   pose:
     position_mm:
-    - 349.67871683
-    - 695.90945507
-    - 33.12305988
+    - 349.66499393
+    - 696.35598564
+    - 90.1221099
     rotation_deg:
-    - 90.07645885
-    - 46.58475293
-    - 90.02018582
+    - 90.07778785
+    - 46.64866475
+    - 90.02071371
   label: Mirror of tc173mc-1
   body:
     kind: connector
@@ -364,13 +364,13 @@ parts:
 - id: tc173mc-1-mirror-mirror-3-mirror-mirror-2
   pose:
     position_mm:
-    - 351.26826856
-    - 983.61148437
-    - 1572.71156117
+    - 351.28066543
+    - 985.77519923
+    - 1629.38870347
     rotation_deg:
-    - -90.05817918
-    - 25.41521016
-    - -90.06032233
+    - -90.05908934
+    - 25.35129712
+    - -90.06115049
   label: Mirror of tc173mc-1-mirror-mirror-3
   body:
     kind: connector
@@ -416,13 +416,13 @@ parts:
 - id: tc128c-1-mirror-mirror-1
   pose:
     position_mm:
-    - -1224.17023624
-    - -941.0073103
-    - 340.63769064
+    - -1224.19167977
+    - -940.20469091
+    - 399.48693426
     rotation_deg:
-    - 100.58477839
-    - -0.05254869
-    - 179.96464674
+    - 100.6486911
+    - -0.05339902
+    - 179.96414965
   label: Mirror of tc128c-1
   body:
     kind: connector
@@ -493,13 +493,13 @@ parts:
 - id: tc128c-1-mirror-mirror-2-mirror-mirror-1
   pose:
     position_mm:
-    - -1223.44032208
-    - 696.88011834
-    - 34.565843
+    - -1223.45401491
+    - 697.340297
+    - 91.5882399
     rotation_deg:
-    - 79.41522161
-    - 0.05254869
-    - -0.03535326
+    - 79.3513089
+    - 0.05339902
+    - -0.03585035
   label: Mirror of tc128c-1-mirror-mirror-2
   body:
     kind: connector
@@ -570,13 +570,13 @@ parts:
 - id: tc128c-1-mirror-mirror-3-mirror-mirror-1
   pose:
     position_mm:
-    - -1222.58068449
-    - -653.30528101
-    - 1880.22619192
+    - -1222.57600826
+    - -650.78547733
+    - 1938.75352781
     rotation_deg:
-    - -100.58477839
-    - 0.05254869
-    - -0.03535326
+    - -100.6486911
+    - 0.05339902
+    - -0.03585035
   label: Mirror of tc128c-1-mirror-mirror-3
   body:
     kind: connector
@@ -647,13 +647,13 @@ parts:
 - id: tc128c-1-mirror-mirror-3-mirror-mirror-2-mirror-mirror-1
   pose:
     position_mm:
-    - -1221.85077035
-    - 984.58214762
-    - 1574.15434428
+    - -1221.83834341
+    - 986.75951058
+    - 1630.85483345
     rotation_deg:
-    - -79.41522161
-    - -0.05254869
-    - 179.96464674
+    - -79.3513089
+    - -0.05339902
+    - 179.96414965
   label: Mirror of tc128c-1-mirror-mirror-3-mirror-mirror-2
   body:
     kind: connector
@@ -724,13 +724,13 @@ parts:
 - id: tc173mc-1-mirror-mirror-1
   pose:
     position_mm:
-    - -1131.05029313
-    - -941.0647682
-    - 340.55228586
+    - -1131.07173844
+    - -940.26295671
+    - 399.40014747
     rotation_deg:
-    - 89.94182082
-    - 25.41521016
-    - -90.06032233
+    - 89.94091066
+    - 25.35129712
+    - -90.06115049
   label: Mirror of tc173mc-1
   body:
     kind: connector
@@ -776,13 +776,13 @@ parts:
 - id: tc173mc-1-mirror-mirror-2-mirror-mirror-1
   pose:
     position_mm:
-    - -1130.32037898
-    - 696.82266044
-    - 34.48043821
+    - -1130.33407359
+    - 697.28203121
+    - 91.50145311
     rotation_deg:
-    - 89.92354115
-    - -46.58475293
-    - -89.97981418
+    - 89.92221215
+    - -46.64866475
+    - -89.97928629
   label: Mirror of tc173mc-1-mirror-mirror-2
   body:
     kind: connector
@@ -828,13 +828,13 @@ parts:
 - id: tc173mc-1-mirror-mirror-3-mirror-mirror-1
   pose:
     position_mm:
-    - -1129.4607414
-    - -653.36273892
-    - 1880.14078715
+    - -1129.45606695
+    - -650.84374313
+    - 1938.66674103
     rotation_deg:
-    - -89.92354115
-    - 46.58475293
-    - 90.02018582
+    - -89.92221215
+    - 46.64866475
+    - 90.02071371
   label: Mirror of tc173mc-1-mirror-mirror-3
   body:
     kind: connector
@@ -880,13 +880,13 @@ parts:
 - id: tc173mc-1-mirror-mirror-3-mirror-mirror-2-mirror-mirror-1
   pose:
     position_mm:
-    - -1128.73082724
-    - 984.52468973
-    - 1574.0689395
+    - -1128.71840208
+    - 986.70124479
+    - 1630.76804667
     rotation_deg:
-    - -89.94182082
-    - -25.41521016
-    - 89.93967767
+    - -89.94091066
+    - -25.35129712
+    - 89.93884951
   label: Mirror of tc173mc-1-mirror-mirror-3-mirror-mirror-2
   body:
     kind: connector
@@ -936,13 +936,13 @@ parts:
     length_mm: 1500
   pose:
     position_mm:
-    - 442.86352167
-    - -798.18441683
-    - 1108.9037534
+    - 442.85510618
+    - -796.53766128
+    - 1167.56731427
     rotation_deg:
-    - -10.58477839
-    - 0.05254869
-    - -0.03535326
+    - -10.6486911
+    - 0.05339902
+    - -0.03585035
 - id: tube-c-2
   catalog: tubeclamp.tube-C
   parameters:
@@ -950,13 +950,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - -391.05074522
-    - -941.52137089
-    - 339.87359671
+    - -391.07220467
+    - -940.7259795
+    - 398.71047589
     rotation_deg:
-    - -90.28605832
-    - 79.41509268
-    - -90.31654363
+    - -90.28896268
+    - 79.35117659
+    - -90.31983627
 - id: tube-c-3
   catalog: tubeclamp.tube-C
   parameters:
@@ -964,13 +964,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - 442.43370286
-    - -123.09171714
-    - 186.07357894
+    - 442.41610283
+    - -122.4747741
+    - 243.98467032
     rotation_deg:
-    - 79.41522161
-    - 0.05254869
-    - -0.03535326
+    - 79.3513089
+    - 0.05339902
+    - -0.03585035
 - id: tube-c-2-mirror-mirror-3
   catalog: tubeclamp.tube-C
   parameters:
@@ -978,13 +978,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - -389.46119349
-    - -653.81934159
-    - 1879.46209799
+    - -389.45653318
+    - -651.3067659
+    - 1937.97706944
     rotation_deg:
-    - -90.28605832
-    - 79.41509268
-    - -90.31654363
+    - -90.28896268
+    - 79.35117659
+    - -90.31983627
 - id: tube-c-3-mirror-mirror-3
   catalog: tubeclamp.tube-C
   parameters:
@@ -992,13 +992,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - 444.0232546
-    - 164.61031216
-    - 1725.66208021
+    - 444.03177434
+    - 166.94443949
+    - 1783.25126386
     rotation_deg:
-    - 79.41522161
-    - 0.05254869
-    - -0.03535326
+    - 79.3513089
+    - 0.05339902
+    - -0.03585035
 - id: tube-c-1-mirror-mirror-2
   catalog: tubeclamp.tube-C
   parameters:
@@ -1006,13 +1006,13 @@ parts:
     length_mm: 1500
   pose:
     position_mm:
-    - 443.59343581
-    - 839.70301182
-    - 802.83190573
+    - 443.59277102
+    - 841.00732664
+    - 859.66861988
     rotation_deg:
-    - -10.58477839
-    - 0.05254869
-    - -0.03535326
+    - -10.6486911
+    - 0.05339902
+    - -0.03585035
 - id: tube-c-2-mirror-mirror-2
   catalog: tubeclamp.tube-C
   parameters:
@@ -1020,13 +1020,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - -390.32083108
-    - 696.36605777
-    - 33.80174905
+    - -390.33453983
+    - 696.81900844
+    - 90.81178151
     rotation_deg:
-    - -90.28605832
-    - 79.41509268
-    - -90.31654363
+    - -90.28896268
+    - 79.35117659
+    - -90.31983627
 - id: tube-c-2-mirror-mirror-3-mirror-mirror-2
   catalog: tubeclamp.tube-C
   parameters:
@@ -1034,13 +1034,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - -388.73127934
-    - 984.06808706
-    - 1573.39025034
+    - -388.71886833
+    - 986.23822202
+    - 1630.07837507
     rotation_deg:
-    - -90.28605832
-    - 79.41509268
-    - -90.31654363
+    - -90.28896268
+    - 79.35117659
+    - -90.31983627
 - id: tube-c-1-mirror-mirror-1
   catalog: tubeclamp.tube-C
   parameters:
@@ -1048,13 +1048,13 @@ parts:
     length_mm: 1500
   pose:
     position_mm:
-    - -1223.37546037
-    - -797.15629567
-    - 1110.43194129
+    - -1223.38384402
+    - -795.49508414
+    - 1169.12023104
     rotation_deg:
-    - -10.58477839
-    - 0.05254869
-    - -0.03535326
+    - -10.6486911
+    - 0.05339902
+    - -0.03585035
 - id: tube-c-3-mirror-mirror-1
   catalog: tubeclamp.tube-C
   parameters:
@@ -1062,13 +1062,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - -1223.80527916
-    - -122.06359599
-    - 187.60176683
+    - -1223.82284734
+    - -121.43219697
+    - 245.53758709
     rotation_deg:
-    - 79.41522161
-    - 0.05254869
-    - -0.03535326
+    - 79.3513089
+    - 0.05339902
+    - -0.03585035
 - id: tube-c-3-mirror-mirror-3-mirror-mirror-1
   catalog: tubeclamp.tube-C
   parameters:
@@ -1076,13 +1076,13 @@ parts:
     length_mm: 1600
   pose:
     position_mm:
-    - -1222.21572742
-    - 165.63843331
-    - 1727.1902681
+    - -1222.20717583
+    - 167.98701663
+    - 1784.80418063
     rotation_deg:
-    - 79.41522161
-    - 0.05254869
-    - -0.03535326
+    - 79.3513089
+    - 0.05339902
+    - -0.03585035
 - id: tube-c-1-mirror-mirror-2-mirror-mirror-1
   catalog: tubeclamp.tube-C
   parameters:
@@ -1090,89 +1090,65 @@ parts:
     length_mm: 1500
   pose:
     position_mm:
-    - -1222.64554621
-    - 840.73113298
-    - 804.36009364
+    - -1222.64617916
+    - 842.04990379
+    - 861.22153668
     rotation_deg:
-    - -10.58477839
-    - 0.05254869
-    - -0.03535326
+    - -10.6486911
+    - 0.05339902
+    - -0.03585035
 - id: tc104c-1
   catalog: tubeclamp.TC104C
   parameters: {}
   pose:
     position_mm:
-    - 187.9569348
-    - 983.71225247
-    - 1572.86134186
+    - 181.1245449
+    - 985.88166703
+    - 1629.54728714
     rotation_deg:
-    - -89.896048
-    - -59.63483117
-    - 89.87495471
-- id: tc131c-1
-  catalog: tubeclamp.TC131C
-  parameters: {}
-  pose:
-    position_mm:
-    - 523.69162254
-    - 1701.2784641
-    - 2707.9254907
-    rotation_deg:
-    - 0.03513068
-    - -89.69024307
-    - 0.36854059
-- id: tc131c-2
-  catalog: tubeclamp.TC131C
-  parameters: {}
-  pose:
-    position_mm:
-    - -522.86710765
-    - 1693.90491551
-    - 2713.58367288
-    rotation_deg:
-    - 179.96486932
-    - 89.69024307
-    - -179.63145941
+    - -89.88214341
+    - -63.05821711
+    - 89.85908429
 - id: tc161c-1
   catalog: tubeclamp.TC161C
   parameters: {}
   pose:
     position_mm:
-    - 189.4380057
-    - 1662.3383223
-    - 2731.16698292
+    - 182.62049903
+    - 1594.12968325
+    - 2826.30942192
     rotation_deg:
-    - -30.36373963
-    - 0.30975707
-    - 0.40367161
+    - -26.94039864
+    - 0.28393278
+    - 0.41774968
 - id: box-1
   catalog: generic.box
   parameters:
     width_mm: 200
     depth_mm: 200
     height_mm: 200
-    mass_kg: 200
+    mass_kg: 150
   pose:
     position_mm:
-    - 182.19633808
-    - 2871.66605089
-    - 4916.02241761
+    - 175.40243385
+    - 2670.833588
+    - 5079.47960378
     rotation_deg:
-    - 7.04524677
-    - 0.05650247
-    - -0.02860383
+    - 10.46864082
+    - 0.05694271
+    - -0.02887687
 - id: tc132c-1
   catalog: tubeclamp.TC132C
   parameters: {}
   pose:
     position_mm:
-    - 192.07035656
-    - 2868.48071934
-    - 4789.85821516
+    - 185.27930229
+    - 2675.18706231
+    - 4953.35052986
     rotation_deg:
-    - 149.63487677
-    - 0.05650247
-    - -0.02860383
+    - 153.05827082
+    - 0.05694271
+    - -0.02887687
 - id: tube-c-4
   catalog: tubeclamp.tube-C
   parameters:
@@ -1180,63 +1156,49 @@ parts:
     length_mm: 3639.423219
   pose:
     position_mm:
-    - 190.00098071
-    - 1920.29325172
-    - 3171.45459224
+    - 183.18913135
+    - 1825.3329645
+    - 3281.2148636
     rotation_deg:
-    - -149.63487871
-    - -0.05650306
-    - 179.97139623
-- id: tube-c-5
-  catalog: tubeclamp.tube-C
-  parameters:
-    wall_mm: 3.2
-    length_mm: 1000
-  pose:
-    position_mm:
-    - 0.41225745
-    - 1697.5916898
-    - 2710.75458178
-    rotation_deg:
-    - 179.96486932
-    - 89.69024307
-    - -179.63145941
+    - -153.05827276
+    - -0.05694329
+    - 179.97112322
 - id: tc104c-1-copy
   catalog: tubeclamp.TC104C
   parameters: {}
   pose:
     position_mm:
-    - -436.35166149
-    - 984.09746992
-    - 1573.43392345
+    - -48.4780287
+    - 986.0253338
+    - 1629.76128739
     rotation_deg:
-    - -89.89605235
-    - -59.63483484
-    - 89.87495894
+    - -89.89099001
+    - -60.67030195
+    - 89.8691135
 - id: tc161c-1-copy
   catalog: tubeclamp.TC161C
   parameters: {}
   pose:
     position_mm:
-    - -99.21041762
-    - 1660.20012772
-    - 2732.54801437
+    - -46.94767341
+    - 1592.40044752
+    - 2827.33521589
     rotation_deg:
-    - -30.08291826
-    - 0.30975707
-    - 0.40367161
+    - -26.79110837
+    - 0.28409601
+    - 0.41766683
 - id: tc132c-1-copy
   catalog: tubeclamp.TC132C
   parameters: {}
   pose:
     position_mm:
-    - -96.47505141
-    - 2856.23823042
-    - 4797.12578611
+    - -44.22688942
+    - 2667.91215169
+    - 4957.1857206
     rotation_deg:
-    - 149.91568616
-    - 0.05862415
-    - -0.0298399
+    - 153.20755353
+    - 0.05827042
+    - -0.02954965
 - id: tube-c-4-copy
   catalog: tubeclamp.tube-C
   parameters:
@@ -1244,49 +1206,49 @@ parts:
     length_mm: 3639.423219
   pose:
     position_mm:
-    - -98.62541095
-    - 1915.9940747
-    - 3174.0945645
+    - -46.36578541
+    - 1822.4176879
+    - 3282.84149686
     rotation_deg:
-    - -149.9156881
-    - -0.05862474
-    - 179.97016016
+    - -153.20755547
+    - -0.058271
+    - 179.97045044
 - id: tc104c-1-copy-2
   catalog: tubeclamp.TC104C
   parameters: {}
   pose:
     position_mm:
-    - 856.6777811
-    - 991.32733597
-    - 1567.80849201
+    - -288.71956945
+    - 986.11444942
+    - 1629.87596674
     rotation_deg:
-    - -89.89087117
-    - -59.91563634
-    - 89.86896343
+    - -89.87829001
+    - -63.2360555
+    - 89.85476527
 - id: tc161c-1-copy-2
   catalog: tubeclamp.TC161C
   parameters: {}
   pose:
     position_mm:
-    - 858.21681273
-    - 1664.26830794
-    - 2729.42614596
+    - -287.18718813
+    - 1590.64485025
+    - 2828.52025952
     rotation_deg:
-    - -30.08291826
-    - 0.30975707
-    - 0.40367161
+    - -26.76254953
+    - 0.28393258
+    - 0.41774988
 - id: tc132c-1-copy-2
   catalog: tubeclamp.TC132C
   parameters: {}
   pose:
     position_mm:
-    - 860.95217894
-    - 2860.30641064
-    - 4794.0039177
+    - -284.4636417
+    - 2665.09480037
+    - 4958.90658314
     rotation_deg:
-    - 149.91568616
-    - 0.05862415
-    - -0.0298399
+    - 153.23611243
+    - 0.05832993
+    - -0.0295791
 - id: tube-c-4-copy-2
   catalog: tubeclamp.tube-C
   parameters:
@@ -1294,13 +1256,279 @@ parts:
     length_mm: 3639.423219
   pose:
     position_mm:
-    - 858.8018194
-    - 1920.06225492
-    - 3170.97269609
+    - -286.60470933
+    - 1820.4350157
+    - 3284.14113486
     rotation_deg:
-    - -149.9156881
-    - -0.05862474
-    - 179.97016016
+    - -153.23611437
+    - -0.05833052
+    - 179.970421
+- id: box-1-copy
+  catalog: generic.box
+  parameters:
+    width_mm: 200
+    depth_mm: 200
+    height_mm: 200
+    mass_kg: 150
+  pose:
+    position_mm:
+    - -37.76254073
+    - 2590.70758573
+    - 5145.9383604
+    rotation_deg:
+    - 10.44802729
+    - 0.05694532
+    - -0.02887473
+- id: box-1-copy-2
+  catalog: generic.box
+  parameters:
+    width_mm: 200
+    depth_mm: 200
+    height_mm: 200
+    mass_kg: 150
+  pose:
+    position_mm:
+    - -280
+    - 2700
+    - 5080
+    rotation_deg:
+    - 10.47659
+    - 0.057
+    - -0.02891
+- id: tc116c-1
+  catalog: tubeclamp.TC116C
+  parameters: {}
+  pose:
+    position_mm:
+    - -1720.23529373
+    - 1617.685655
+    - 2813.77131793
+    rotation_deg:
+    - -89.53727579
+    - 43.7477523
+    - -89.23441944
+- id: tc101c-1
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - -1658.99619604
+    - -1109.42339379
+    - 159.31452219
+    rotation_deg:
+    - 88.56398158
+    - -44.22346335
+    - 91.29115336
+- id: tc101c-1-copy
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - -1700.06556548
+    - 4239.09204221
+    - 29.80358092
+    rotation_deg:
+    - -89.07132167
+    - -46.72586717
+    - -90.44583516
+- id: tc101c-1-copy-2
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 851.53837595
+    - -1092.54157518
+    - 208.466357
+    rotation_deg:
+    - 88.76488577
+    - -43.57323663
+    - 90.99759857
+- id: tc101c-1-copy-3
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 817.7792099
+    - 4241.88810615
+    - 65.5308522
+    rotation_deg:
+    - -89.17337624
+    - -46.44230522
+    - -90.30335642
+- id: tc116c-1-copy
+  catalog: tubeclamp.TC116C
+  parameters: {}
+  pose:
+    position_mm:
+    - 804.18786571
+    - 1636.64236577
+    - 2805.38812966
+    rotation_deg:
+    - -89.68423121
+    - 43.56466958
+    - -89.37780072
+- id: tc101c-2-copy-2
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 716.30218991
+    - 4241.77439048
+    - 64.08994756
+    rotation_deg:
+    - 90.81042702
+    - -1.52484287
+    - -89.83928504
+- id: tc101c-2-copy-4
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - -1577.10267634
+    - -1108.85760996
+    - 160.9023071
+    rotation_deg:
+    - 88.877707
+    - 1.44624873
+    - 90.35660021
+- id: tc101c-2-copy-6
+  catalog: tubeclamp.TC101C
+  parameters: {}
+  pose:
+    position_mm:
+    - 731.33141175
+    - -1093.3487092
+    - 206.11173372
+    rotation_deg:
+    - 88.87507655
+    - 1.5267515
+    - 90.25794148
+- id: tube-c-5
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 2726.035442
+  pose:
+    position_mm:
+    - -383.60082792
+    - 1627.72597395
+    - 2809.3487207
+    rotation_deg:
+    - -91.80270977
+    - 83.91291603
+    - -91.36279596
+- id: tube-c-6
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 3755.259811
+  pose:
+    position_mm:
+    - -1710.26442485
+    - 2927.70081306
+    - 1422.71960937
+    rotation_deg:
+    - 43.26981442
+    - -0.68256885
+    - 0.27945056
+- id: tube-c-6-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 3737.482991
+  pose:
+    position_mm:
+    - -1689.74213936
+    - 254.857374
+    - 1487.44416441
+    rotation_deg:
+    - 45.76115144
+    - 1.34569996
+    - 179.98095446
+- id: tube-c-7
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 2628.134972
+  pose:
+    position_mm:
+    - -373.30405061
+    - -1100.77005405
+    - 184.47803762
+    rotation_deg:
+    - -51.56014104
+    - 88.19516772
+    - -51.18905665
+- id: tube-c-7-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 2707.22151
+  pose:
+    position_mm:
+    - -451.03999397
+    - 4240.4707843
+    - 47.5189539
+    rotation_deg:
+    - -59.97637348
+    - 88.37442256
+    - -59.92238007
+- id: tube-c-8-copy
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 5266.034298
+  pose:
+    position_mm:
+    - 723.78669139
+    - 1574.2127149
+    - 135.10024956
+    rotation_deg:
+    - 88.47500405
+    - -0.81014588
+    - 0.18232495
+- id: tube-c-8-copy-3
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 5273.623944
+  pose:
+    position_mm:
+    - -1593.72933366
+    - 1562.55133618
+    - 93.45549985
+    rotation_deg:
+    - 88.55360834
+    - -0.80540485
+    - 0.37693574
+- id: tube-c-6-copy-2
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 3712.081919
+  pose:
+    position_mm:
+    - 810.88602862
+    - 2938.47456956
+    - 1436.29444915
+    rotation_deg:
+    - 43.55488891
+    - -0.55257724
+    - 0.27814717
+- id: tube-c-6-copy-3
+  catalog: tubeclamp.tube-C
+  parameters:
+    wall_mm: 3.2
+    length_mm: 3698.884444
+  pose:
+    position_mm:
+    - 827.76984383
+    - 272.88061258
+    - 1507.72171509
+    rotation_deg:
+    - 46.41728907
+    - 1.06783462
+    - 179.98116148
 joints:
 - id: chain-1-link-1-attachment
   type: spherical
@@ -1498,7 +1726,7 @@ joints:
   b:
     part: tube-c-1
     end: start
-  insertion_mm: 29.67999999196127
+  insertion_mm: 29.679999996474784
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1510,7 +1738,7 @@ joints:
   b:
     part: tube-c-1
     end: end
-  insertion_mm: 29.67999999264728
+  insertion_mm: 29.67999998913522
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1522,7 +1750,7 @@ joints:
   b:
     part: tube-c-2
     end: end
-  insertion_mm: 29.680000010833055
+  insertion_mm: 29.68000001781098
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1533,7 +1761,7 @@ joints:
     port: through
   b:
     part: tube-c-2
-    at_mm: 1539.9999999881177
+    at_mm: 1539.9999999813883
   insertion_mm: 0
   locked: true
   metadata:
@@ -1546,7 +1774,7 @@ joints:
   b:
     part: tube-c-2
     end: start
-  insertion_mm: 29.679999990848398
+  insertion_mm: 29.67999998781999
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1557,7 +1785,7 @@ joints:
     port: through
   b:
     part: tube-c-2
-    at_mm: 59.99999999190368
+    at_mm: 59.9999999886428
   insertion_mm: 0
   locked: true
   metadata:
@@ -1570,7 +1798,7 @@ joints:
   b:
     part: tube-c-3
     end: end
-  insertion_mm: 29.680000003427892
+  insertion_mm: 29.680000001855003
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1582,7 +1810,7 @@ joints:
   b:
     part: tube-c-3
     end: start
-  insertion_mm: 29.679999997917196
+  insertion_mm: 29.679999996311413
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1594,7 +1822,7 @@ joints:
   b:
     part: tube-c-2-mirror-mirror-3
     end: end
-  insertion_mm: 29.68000000084834
+  insertion_mm: 29.679999997820353
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1605,7 +1833,7 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-3
-    at_mm: 1539.999999998127
+    at_mm: 1540.0000000013977
   insertion_mm: 0
   locked: true
   metadata:
@@ -1618,7 +1846,7 @@ joints:
   b:
     part: tube-c-2-mirror-mirror-3
     end: start
-  insertion_mm: 29.680000010854343
+  insertion_mm: 29.68000000783273
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1629,7 +1857,7 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-3
-    at_mm: 59.99999999190686
+    at_mm: 59.999999988646096
   insertion_mm: 0
   locked: true
   metadata:
@@ -1642,7 +1870,7 @@ joints:
   b:
     part: tube-c-3-mirror-mirror-3
     end: end
-  insertion_mm: 29.680000009583985
+  insertion_mm: 29.680000007987072
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1654,7 +1882,7 @@ joints:
   b:
     part: tube-c-3-mirror-mirror-3
     end: start
-  insertion_mm: 29.68000000774703
+  insertion_mm: 29.680000006139228
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1666,7 +1894,7 @@ joints:
   b:
     part: tube-c-1-mirror-mirror-2
     end: start
-  insertion_mm: 29.680000009804285
+  insertion_mm: 29.680000016151027
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1678,7 +1906,7 @@ joints:
   b:
     part: tube-c-1-mirror-mirror-2
     end: end
-  insertion_mm: 29.67999999813768
+  insertion_mm: 29.679999992810046
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1690,7 +1918,7 @@ joints:
   b:
     part: tube-c-2-mirror-mirror-2
     end: end
-  insertion_mm: 29.67999999082989
+  insertion_mm: 29.67999999780784
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1701,7 +1929,7 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-2
-    at_mm: 1540.0000000081209
+    at_mm: 1540.0000000013915
   insertion_mm: 0
   locked: true
   metadata:
@@ -1714,7 +1942,7 @@ joints:
   b:
     part: tube-c-2-mirror-mirror-2
     end: start
-  insertion_mm: 29.68000001084218
+  insertion_mm: 29.68000000782013
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1725,7 +1953,7 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-2
-    at_mm: 60.000000001906756
+    at_mm: 59.99999999863678
   insertion_mm: 0
   locked: true
   metadata:
@@ -1738,7 +1966,7 @@ joints:
   b:
     part: tube-c-2-mirror-mirror-3-mirror-mirror-2
     end: end
-  insertion_mm: 29.679999990811545
+  insertion_mm: 29.67999998778914
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1749,7 +1977,7 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-3-mirror-mirror-2
-    at_mm: 1539.9999999981146
+    at_mm: 1540.0000000013758
   insertion_mm: 0
   locked: true
   metadata:
@@ -1762,7 +1990,7 @@ joints:
   b:
     part: tube-c-2-mirror-mirror-3-mirror-mirror-2
     end: start
-  insertion_mm: 29.68000000085763
+  insertion_mm: 29.68000000782945
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1773,7 +2001,7 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-3-mirror-mirror-2
-    at_mm: 60.000000001906756
+    at_mm: 60.00000000863679
   insertion_mm: 0
   locked: true
   metadata:
@@ -1786,7 +2014,7 @@ joints:
   b:
     part: tube-c-1-mirror-mirror-1
     end: start
-  insertion_mm: 29.679999991981568
+  insertion_mm: 29.679999998353704
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1798,7 +2026,7 @@ joints:
   b:
     part: tube-c-1-mirror-mirror-1
     end: end
-  insertion_mm: 29.68000000612038
+  insertion_mm: 29.680000000779565
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1810,7 +2038,7 @@ joints:
   b:
     part: tube-c-3-mirror-mirror-1
     end: end
-  insertion_mm: 29.68000001325773
+  insertion_mm: 29.680000021510693
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1822,7 +2050,7 @@ joints:
   b:
     part: tube-c-3-mirror-mirror-1
     end: start
-  insertion_mm: 29.679999989924358
+  insertion_mm: 29.679999988331485
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1834,7 +2062,7 @@ joints:
   b:
     part: tube-c-3-mirror-mirror-3-mirror-mirror-1
     end: end
-  insertion_mm: 29.68000000159536
+  insertion_mm: 29.680000000007166
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1846,7 +2074,7 @@ joints:
   b:
     part: tube-c-3-mirror-mirror-3-mirror-mirror-1
     end: start
-  insertion_mm: 29.680000011425257
+  insertion_mm: 29.680000009839343
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1858,7 +2086,7 @@ joints:
   b:
     part: tube-c-1-mirror-mirror-2-mirror-mirror-1
     end: start
-  insertion_mm: 29.67999999997451
+  insertion_mm: 29.67999999465798
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1870,7 +2098,7 @@ joints:
   b:
     part: tube-c-1-mirror-mirror-2-mirror-mirror-1
     end: end
-  insertion_mm: 29.679999999984503
+  insertion_mm: 29.680000004485848
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -1910,48 +2138,10 @@ joints:
   b:
     part: tube-c-4
     end: start
-  insertion_mm: 29.999999803930013
+  insertion_mm: 29.999999801487984
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
-- id: tc131c-1-socket-tube-c-5
-  type: socket
-  a:
-    part: tc131c-1
-    port: socket
-  b:
-    part: tube-c-5
-    end: end
-  insertion_mm: 30.00000000948617
-  locked: true
-  metadata:
-    snapshot_reference_coordinates: {}
-- id: tc131c-2-socket-tube-c-5
-  type: socket
-  a:
-    part: tc131c-2
-    port: socket
-  b:
-    part: tube-c-5
-    end: start
-  insertion_mm: 29.99999999944888
-  locked: true
-  metadata:
-    snapshot_reference_coordinates: {}
-- id: tc161c-1-cross-tube-c-5
-  type: socket
-  a:
-    part: tc161c-1
-    port: cross
-  b:
-    part: tube-c-5
-    at_mm: 688.6595715596511
-  insertion_mm: 0
-  locked: false
-  metadata:
-    snapshot_reference_coordinates:
-      slide_mm: 288.79042844470246
-      angle_deg: 0.2808213700000045
 - id: tc104c-1-through-tube-c-2-mirror-mirror-3-mirror-mirror-2
   type: socket
   a:
@@ -1959,12 +2149,14 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-3-mirror-mirror-2
-    at_mm: 1376.6885664640993
+    at_mm: 1369.8437722634742
   insertion_mm: 0
   locked: false
   fit_tolerance_mm: 2
   metadata:
-    snapshot_reference_coordinates: {}
+    snapshot_reference_coordinates:
+      slide_mm: -6.676317716454291
+      angle_deg: -1.1508180051927468
 - id: tc104c-1-branch-tube-c-4
   type: socket
   a:
@@ -1973,7 +2165,7 @@ joints:
   b:
     part: tube-c-4
     end: end
-  insertion_mm: 29.36000001741622
+  insertion_mm: 29.360000009260656
   locked: true
   fit_tolerance_mm: 2
   metadata:
@@ -1985,7 +2177,7 @@ joints:
     port: through
   b:
     part: tube-c-4
-    at_mm: 2329.9999999946886
+    at_mm: 2329.9999999945885
   insertion_mm: 0
   locked: true
   fit_tolerance_mm: 2
@@ -1999,7 +2191,7 @@ joints:
   b:
     part: tube-c-4-copy
     end: start
-  insertion_mm: 29.99999980819636
+  insertion_mm: 29.999999804336063
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -2010,7 +2202,7 @@ joints:
     port: through
   b:
     part: tube-c-4-copy
-    at_mm: 2329.999999997095
+    at_mm: 2329.999999989923
   insertion_mm: 0
   locked: true
   fit_tolerance_mm: 2
@@ -2024,7 +2216,7 @@ joints:
   b:
     part: tube-c-4-copy-2
     end: start
-  insertion_mm: 29.99999980819636
+  insertion_mm: 29.9999998003971
   locked: true
   metadata:
     snapshot_reference_coordinates: {}
@@ -2036,7 +2228,7 @@ joints:
   b:
     part: tube-c-4-copy-2
     end: end
-  insertion_mm: 29.36000001231062
+  insertion_mm: 29.36000002662043
   locked: true
   fit_tolerance_mm: 2
   metadata:
@@ -2048,7 +2240,7 @@ joints:
     port: through
   b:
     part: tube-c-4-copy-2
-    at_mm: 2329.999999997094
+    at_mm: 2329.9999999858883
   insertion_mm: 0
   locked: true
   fit_tolerance_mm: 2
@@ -2061,12 +2253,80 @@ joints:
     port: through
   b:
     part: tube-c-2-mirror-mirror-3-mirror-mirror-2
-    at_mm: 752.3795887585477
+    at_mm: 1140.2410539869027
   insertion_mm: 0
   locked: false
   fit_tolerance_mm: 2
   metadata:
+    snapshot_reference_coordinates:
+      slide_mm: 48.750461803511236
+      angle_deg: -1.171788121262286
+- id: tc104c-1-copy-branch-tube-c-4-copy
+  type: socket
+  a:
+    part: tc104c-1-copy
+    port: branch
+  b:
+    part: tube-c-4-copy
+    end: end
+  insertion_mm: 29.4517389773643
+  locked: true
+  fit_tolerance_mm: 10
+  metadata:
     snapshot_reference_coordinates: {}
+- id: joint-2
+  type: fixed
+  a:
+    part: tc132c-1-copy
+    frame:
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - 1
+  b:
+    part: box-1-copy
+    frame:
+      position_mm:
+      - -6.31565450188112
+      - 41.69105799780871
+      - -199.6293065530628
+      axis:
+      - -2.595418997715555e-05
+      - -0.6051616233610233
+      - -0.7961026371878381
+  metadata:
+    abstract_load_attachment: true
+    hardware: Abstract load applied at the host attachment frame
+    snapshot_reference_coordinates: {}
+- id: tc104c-1-copy-2-through-tube-c-2-mirror-mirror-3-mirror-mirror-2
+  type: socket
+  a:
+    part: tc104c-1-copy-2
+    port: through
+  b:
+    part: tube-c-2-mirror-mirror-3-mirror-mirror-2
+    at_mm: 900
+  insertion_mm: 0
+  locked: true
+  fit_tolerance_mm: 2
+- id: tc161c-1-cross-tube-c-5
+  type: socket
+  a:
+    part: tc161c-1
+    port: cross
+  b:
+    part: tube-c-5
+    at_mm: 1928.888208
+  insertion_mm: 0
+  locked: false
+  metadata:
+    snapshot_reference_coordinates:
+      slide_mm: 6.457833652004689
+      angle_deg: 0.3792796249417187
 - id: tc161c-1-copy-cross-tube-c-5
   type: socket
   a:
@@ -2074,16 +2334,299 @@ joints:
     port: cross
   b:
     part: tube-c-5
-    at_mm: 400.00000000233246
+    at_mm: 1699.311548
+  insertion_mm: 0
+  locked: false
+  fit_tolerance_mm: 2
+  metadata:
+    snapshot_reference_coordinates:
+      slide_mm: -48.97112388493796
+      angle_deg: 0.4002489168710993
+- id: tc161c-1-copy-2-cross-tube-c-5
+  type: socket
+  a:
+    part: tc161c-1-copy-2
+    port: cross
+  b:
+    part: tube-c-5
+    at_mm: 1459.063039
+  insertion_mm: 0
+  locked: false
+  fit_tolerance_mm: 2
+  metadata:
+    snapshot_reference_coordinates:
+      slide_mm: -58.1135257181294
+      angle_deg: -9.404017705026318
+- id: tc116c-1-copy-through-tube-c-5
+  type: socket
+  a:
+    part: tc116c-1-copy
+    port: through
+  b:
+    part: tube-c-5
+    at_mm: 2550.846484
   insertion_mm: 0
   locked: true
   fit_tolerance_mm: 2
   metadata:
     snapshot_reference_coordinates: {}
+- id: tc116c-1-through-tube-c-5
+  type: socket
+  a:
+    part: tc116c-1
+    port: through
+  b:
+    part: tube-c-5
+    at_mm: 26.33823
+  insertion_mm: 0
+  locked: true
+- id: tc116c-1-y-tube-c-6
+  type: socket
+  a:
+    part: tc116c-1
+    port: y
+  b:
+    part: tube-c-6
+    end: end
+  insertion_mm: 30.00000018246712
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-copy-branch-tube-c-6
+  type: socket
+  a:
+    part: tc101c-1-copy
+    port: branch
+  b:
+    part: tube-c-6
+    end: start
+  insertion_mm: 24.000000190348104
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc116c-1-x-tube-c-6-copy
+  type: socket
+  a:
+    part: tc116c-1
+    port: x
+  b:
+    part: tube-c-6-copy
+    end: end
+  insertion_mm: 29.999999959867324
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-branch-tube-c-6-copy
+  type: socket
+  a:
+    part: tc101c-1
+    port: branch
+  b:
+    part: tube-c-6-copy
+    end: start
+  insertion_mm: 23.999999973948235
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-through-tube-c-7
+  type: socket
+  a:
+    part: tc101c-1
+    port: through
+  b:
+    part: tube-c-7
+    at_mm: 28.1
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-copy-2-through-tube-c-7
+  type: socket
+  a:
+    part: tc101c-1-copy-2
+    port: through
+  b:
+    part: tube-c-7
+    at_mm: 2539.172427
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-2-copy-4-through-tube-c-7
+  type: socket
+  a:
+    part: tc101c-2-copy-4
+    port: through
+  b:
+    part: tube-c-7
+    at_mm: 110.010862
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-2-copy-6-through-tube-c-7
+  type: socket
+  a:
+    part: tc101c-2-copy-6
+    port: through
+  b:
+    part: tube-c-7
+    at_mm: 2418.939695
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-copy-through-tube-c-7-copy
+  type: socket
+  a:
+    part: tc101c-1-copy
+    port: through
+  b:
+    part: tube-c-7-copy
+    at_mm: 104.458797
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-copy-3-through-tube-c-7-copy
+  type: socket
+  a:
+    part: tc101c-1-copy-3
+    port: through
+  b:
+    part: tube-c-7-copy
+    at_mm: 2622.558591
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-2-copy-2-through-tube-c-7-copy
+  type: socket
+  a:
+    part: tc101c-2-copy-2
+    port: through
+  b:
+    part: tube-c-7-copy
+    at_mm: 2521.071277
+  insertion_mm: 0
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-2-copy-6-branch-tube-c-8-copy
+  type: socket
+  a:
+    part: tc101c-2-copy-6
+    port: branch
+  b:
+    part: tube-c-8-copy
+    end: end
+  insertion_mm: 23.999999969875702
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-2-copy-2-branch-tube-c-8-copy
+  type: socket
+  a:
+    part: tc101c-2-copy-2
+    port: branch
+  b:
+    part: tube-c-8-copy
+    end: start
+  insertion_mm: 23.999999981531356
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-2-copy-4-branch-tube-c-8-copy-3
+  type: socket
+  a:
+    part: tc101c-2-copy-4
+    port: branch
+  b:
+    part: tube-c-8-copy-3
+    end: end
+  insertion_mm: 24.000000123061625
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc116c-1-copy-y-tube-c-6-copy-2
+  type: socket
+  a:
+    part: tc116c-1-copy
+    port: y
+  b:
+    part: tube-c-6-copy-2
+    end: end
+  insertion_mm: 29.999999929538223
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-copy-3-branch-tube-c-6-copy-2
+  type: socket
+  a:
+    part: tc101c-1-copy-3
+    port: branch
+  b:
+    part: tube-c-6-copy-2
+    end: start
+  insertion_mm: 23.99999994270653
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc116c-1-copy-x-tube-c-6-copy-3
+  type: socket
+  a:
+    part: tc116c-1-copy
+    port: x
+  b:
+    part: tube-c-6-copy-3
+    end: end
+  insertion_mm: 30.00000007496291
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: tc101c-1-copy-2-branch-tube-c-6-copy-3
+  type: socket
+  a:
+    part: tc101c-1-copy-2
+    port: branch
+  b:
+    part: tube-c-6-copy-3
+    end: start
+  insertion_mm: 24.00000008356707
+  locked: true
+  metadata:
+    snapshot_reference_coordinates: {}
+- id: joint-3
+  type: fixed
+  a:
+    part: tc132c-1-copy-2
+    frame:
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - 1
+  b:
+    part: box-1-copy-2
+    frame:
+      position_mm:
+      - -4.325558378994141
+      - -56.34518120274051
+      - -112.73164047953017
+      axis:
+      - -2.598376182142857e-05
+      - -0.6051616763762449
+      - -0.7961025968870703
+  metadata:
+    abstract_load_attachment: true
+    hardware: Abstract load applied at the host attachment frame
 anchors:
-- part: tc131c-1
+- part: tc116c-1
   surface: fixture
-- part: tc131c-2
+- part: tc116c-1-copy
   surface: fixture
 metadata:
   detached_attachments:
@@ -2128,13 +2671,13 @@ objects:
     hold_pose: false
   pose:
     position_mm:
-    - -379.87210999
-    - 18.28165947
-    - 978.09891237
+    - -379.8763236
+    - 19.78829374
+    - 1035.86458251
     rotation_deg:
-    - -10.58479711
-    - 0.05250277
-    - -0.03538522
+    - -10.64870981
+    - 0.05335307
+    - -0.03588226
   components:
     parts:
     - id: pelvis
@@ -3738,6 +4281,591 @@ objects:
       strength_scale: 1
       joint_damping_nms_rad: 0.08
       hold_pose: false
+  render_model:
+    file: ../.pipesim/human-models/535d9c45c84fc57dd6edb5049f5a96d063c43433a19103e345ba63b696242b20.glb
+    name: rigged_female.glb
+    enabled: true
+    bone_map:
+      neck: 13
+      right_clavicle: 34
+      right_forearm: 36
+      left_clavicle: 15
+      left_forearm: 17
+      right_thigh: 57
+      right_foot: 59
+      left_thigh: 53
+      right_upper_arm: 35
+      right_shin: 58
+      left_foot: 55
+      left_upper_arm: 16
+      left_shin: 54
+      thorax: 12
+      lumbar: 11
+      pelvis: 9
+      head: 14
+      left_hand: 18
+      right_hand: 37
+    extra_bones: {}
+    default_extra_mode: fixed_to_parent
+    metadata:
+      format: glTF 2.0
+      bones:
+      - name: GLTF_created_0_rootJoint
+        named: true
+        index: 5
+        parent: 4
+        parent_name: GLTF_created_0
+        parent_bone: null
+        position:
+        - 0
+        - 0.9596073627471924
+        - 0
+      - name: mixamorig:Hips_51
+        named: true
+        index: 9
+        parent: 5
+        parent_name: GLTF_created_0_rootJoint
+        parent_bone: 5
+        position:
+        - -4.17232504101861e-09
+        - 0.9596072864532411
+        - 2.384166240146762e-09
+      - name: mixamorig:Spine_42
+        named: true
+        index: 10
+        parent: 9
+        parent_name: mixamorig:Hips_51
+        parent_bone: 9
+        position:
+        - -0.0008511014703285622
+        - 1.049089329394099
+        - 0.0001876670247460324
+      - name: mixamorig:Spine1_41
+        named: true
+        index: 11
+        parent: 10
+        parent_name: mixamorig:Spine_42
+        parent_bone: 10
+        position:
+        - -0.0004662415993885694
+        - 1.148267637752523
+        - 0.000817789996100364
+      - name: mixamorig:Spine2_40
+        named: true
+        index: 12
+        parent: 11
+        parent_name: mixamorig:Spine1_41
+        parent_bone: 11
+        position:
+        - 0.0035550533539229633
+        - 1.2601653344838213
+        - -0.0001973668418296402
+      - name: mixamorig:Neck_1
+        named: true
+        index: 13
+        parent: 12
+        parent_name: mixamorig:Spine2_40
+        parent_bone: 12
+        position:
+        - 0.0059863931840413555
+        - 1.3776328503713038
+        - -0.012667442667966211
+      - name: mixamorig:Head_0
+        named: true
+        index: 14
+        parent: 13
+        parent_name: mixamorig:Neck_1
+        parent_bone: 13
+        position:
+        - 0.006399344310551055
+        - 1.4571401726786979
+        - 0.002368805359238556
+      - name: mixamorig:LeftShoulder_20
+        named: true
+        index: 15
+        parent: 12
+        parent_name: mixamorig:Spine2_40
+        parent_bone: 12
+        position:
+        - 0.052010709370756525
+        - 1.352494084707134
+        - -0.006438018760444747
+      - name: mixamorig:LeftArm_19
+        named: true
+        index: 16
+        parent: 15
+        parent_name: mixamorig:LeftShoulder_20
+        parent_bone: 15
+        position:
+        - 0.15318305931067866
+        - 1.3243500017615935
+        - -0.004813972797802758
+      - name: mixamorig:LeftForeArm_18
+        named: true
+        index: 17
+        parent: 16
+        parent_name: mixamorig:LeftArm_19
+        parent_bone: 16
+        position:
+        - 0.3941911656953512
+        - 1.309630779856389
+        - -0.01185172732995758
+      - name: mixamorig:LeftHand_17
+        named: true
+        index: 18
+        parent: 17
+        parent_name: mixamorig:LeftForeArm_18
+        parent_bone: 17
+        position:
+        - 0.6277695196199363
+        - 1.308433706899566
+        - 0.005591496100013139
+      - name: mixamorig:LeftHandThumb1_4
+        named: true
+        index: 19
+        parent: 18
+        parent_name: mixamorig:LeftHand_17
+        parent_bone: 18
+        position:
+        - 0.6497882876606387
+        - 1.2845506177988388
+        - 0.03049158064479285
+      - name: mixamorig:LeftHandThumb2_3
+        named: true
+        index: 20
+        parent: 19
+        parent_name: mixamorig:LeftHandThumb1_4
+        parent_bone: 19
+        position:
+        - 0.6727603786866695
+        - 1.2704774674855646
+        - 0.0528123640175507
+      - name: mixamorig:LeftHandThumb3_2
+        named: true
+        index: 21
+        parent: 20
+        parent_name: mixamorig:LeftHandThumb2_3
+        parent_bone: 20
+        position:
+        - 0.6948481061462188
+        - 1.2570058917359581
+        - 0.06929834005506984
+      - name: mixamorig:LeftHandIndex1_7
+        named: true
+        index: 22
+        parent: 18
+        parent_name: mixamorig:LeftHand_17
+        parent_bone: 18
+        position:
+        - 0.7125246347913933
+        - 1.299343135406632
+        - 0.03371500303609758
+      - name: mixamorig:LeftHandIndex2_6
+        named: true
+        index: 23
+        parent: 22
+        parent_name: mixamorig:LeftHandIndex1_7
+        parent_bone: 22
+        position:
+        - 0.7430430854848674
+        - 1.2948161406460186
+        - 0.03809998569139472
+      - name: mixamorig:LeftHandIndex3_5
+        named: true
+        index: 24
+        parent: 23
+        parent_name: mixamorig:LeftHandIndex2_6
+        parent_bone: 23
+        position:
+        - 0.7694111026792291
+        - 1.2876757832812606
+        - 0.041787200549451176
+      - name: mixamorig:LeftHandMiddle1_10
+        named: true
+        index: 25
+        parent: 18
+        parent_name: mixamorig:LeftHand_17
+        parent_bone: 18
+        position:
+        - 0.7169662325072083
+        - 1.298731248065872
+        - 0.00952816740562209
+      - name: mixamorig:LeftHandMiddle2_9
+        named: true
+        index: 26
+        parent: 25
+        parent_name: mixamorig:LeftHandMiddle1_10
+        parent_bone: 25
+        position:
+        - 0.7482080313105303
+        - 1.2940942037955285
+        - 0.01269572350721445
+      - name: mixamorig:LeftHandMiddle3_8
+        named: true
+        index: 27
+        parent: 26
+        parent_name: mixamorig:LeftHandMiddle2_9
+        parent_bone: 26
+        position:
+        - 0.773650358106602
+        - 1.2870874589321009
+        - 0.014962601825125911
+      - name: mixamorig:LeftHandRing1_13
+        named: true
+        index: 28
+        parent: 18
+        parent_name: mixamorig:LeftHand_17
+        parent_bone: 18
+        position:
+        - 0.7167965036793104
+        - 1.2957556017070304
+        - -0.012811885595926597
+      - name: mixamorig:LeftHandRing2_12
+        named: true
+        index: 29
+        parent: 28
+        parent_name: mixamorig:LeftHandRing1_13
+        parent_bone: 28
+        position:
+        - 0.7442985715751415
+        - 1.2913876208244537
+        - -0.012273743814206258
+      - name: mixamorig:LeftHandRing3_11
+        named: true
+        index: 30
+        parent: 29
+        parent_name: mixamorig:LeftHandRing2_12
+        parent_bone: 29
+        position:
+        - 0.7643235930409086
+        - 1.28530971036109
+        - -0.011579881320646142
+      - name: mixamorig:LeftHandPinky1_16
+        named: true
+        index: 31
+        parent: 18
+        parent_name: mixamorig:LeftHand_17
+        parent_bone: 18
+        position:
+        - 0.7105720227120973
+        - 1.2918135291819337
+        - -0.032181624598700206
+      - name: mixamorig:LeftHandPinky2_15
+        named: true
+        index: 32
+        parent: 31
+        parent_name: mixamorig:LeftHandPinky1_16
+        parent_bone: 31
+        position:
+        - 0.7326303681189358
+        - 1.2864617709217945
+        - -0.033163627831335134
+      - name: mixamorig:LeftHandPinky3_14
+        named: true
+        index: 33
+        parent: 32
+        parent_name: mixamorig:LeftHandPinky2_15
+        parent_bone: 32
+        position:
+        - 0.7463293425426905
+        - 1.280893148054661
+        - -0.03432052651993457
+      - name: mixamorig:RightShoulder_39
+        named: true
+        index: 34
+        parent: 12
+        parent_name: mixamorig:Spine2_40
+        parent_bone: 12
+        position:
+        - -0.039746883512060766
+        - 1.3582386659114085
+        - -0.007330314189702432
+      - name: mixamorig:RightArm_38
+        named: true
+        index: 35
+        parent: 34
+        parent_name: mixamorig:RightShoulder_39
+        parent_bone: 34
+        position:
+        - -0.14178579749267253
+        - 1.3288453890764227
+        - -0.000732859674381123
+      - name: mixamorig:RightForeArm_37
+        named: true
+        index: 36
+        parent: 35
+        parent_name: mixamorig:RightArm_38
+        parent_bone: 35
+        position:
+        - -0.3856889874954278
+        - 1.3222711041437818
+        - -0.007687297627186385
+      - name: mixamorig:RightHand_36
+        named: true
+        index: 37
+        parent: 36
+        parent_name: mixamorig:RightForeArm_37
+        parent_bone: 36
+        position:
+        - -0.622692639713484
+        - 1.3224848253709705
+        - -0.001142493509721906
+      - name: mixamorig:RightHandThumb1_23
+        named: true
+        index: 38
+        parent: 37
+        parent_name: mixamorig:RightHand_36
+        parent_bone: 37
+        position:
+        - -0.6493987663745393
+        - 1.3019475980412538
+        - 0.02425079493307345
+      - name: mixamorig:RightHandThumb2_22
+        named: true
+        index: 39
+        parent: 38
+        parent_name: mixamorig:RightHandThumb1_23
+        parent_bone: 38
+        position:
+        - -0.6727996961338198
+        - 1.2872364893726385
+        - 0.043004764586924274
+      - name: mixamorig:RightHandThumb3_21
+        named: true
+        index: 40
+        parent: 39
+        parent_name: mixamorig:RightHandThumb2_22
+        parent_bone: 39
+        position:
+        - -0.6973280513339221
+        - 1.2756630735404537
+        - 0.05665152314537537
+      - name: mixamorig:RightHandIndex1_26
+        named: true
+        index: 41
+        parent: 37
+        parent_name: mixamorig:RightHand_36
+        parent_bone: 37
+        position:
+        - -0.7127164752029219
+        - 1.3168049617742836
+        - 0.022838225088132644
+      - name: mixamorig:RightHandIndex2_25
+        named: true
+        index: 42
+        parent: 41
+        parent_name: mixamorig:RightHandIndex1_26
+        parent_bone: 41
+        position:
+        - -0.7440443833080284
+        - 1.3130501158063532
+        - 0.02442743607841607
+      - name: mixamorig:RightHandIndex3_24
+        named: true
+        index: 43
+        parent: 42
+        parent_name: mixamorig:RightHandIndex2_25
+        parent_bone: 42
+        position:
+        - -0.7707069693244853
+        - 1.3074676100002967
+        - 0.027788809557077784
+      - name: mixamorig:RightHandMiddle1_29
+        named: true
+        index: 44
+        parent: 37
+        parent_name: mixamorig:RightHand_36
+        parent_bone: 37
+        position:
+        - -0.7156673984181134
+        - 1.3177191533012251
+        - 0.0004979874560814199
+      - name: mixamorig:RightHandMiddle2_28
+        named: true
+        index: 45
+        parent: 44
+        parent_name: mixamorig:RightHandMiddle1_29
+        parent_bone: 44
+        position:
+        - -0.7484127137399336
+        - 1.3141470542273073
+        - 0.0002708312764314996
+      - name: mixamorig:RightHandMiddle3_27
+        named: true
+        index: 46
+        parent: 45
+        parent_name: mixamorig:RightHandMiddle2_28
+        parent_bone: 45
+        position:
+        - -0.7756347948144872
+        - 1.3085125023700444
+        - 0.0013605607177176278
+      - name: mixamorig:RightHandRing1_32
+        named: true
+        index: 47
+        parent: 37
+        parent_name: mixamorig:RightHand_36
+        parent_bone: 37
+        position:
+        - -0.7140137798126622
+        - 1.3155079423899363
+        - -0.01916913028574394
+      - name: mixamorig:RightHandRing2_31
+        named: true
+        index: 48
+        parent: 47
+        parent_name: mixamorig:RightHandRing1_32
+        parent_bone: 47
+        position:
+        - -0.74396587065327
+        - 1.3132735911505893
+        - -0.020957837287596984
+      - name: mixamorig:RightHandRing3_30
+        named: true
+        index: 49
+        parent: 48
+        parent_name: mixamorig:RightHandRing2_31
+        parent_bone: 48
+        position:
+        - -0.7668103626178944
+        - 1.3079506999572712
+        - -0.02153683478717642
+      - name: mixamorig:RightHandPinky1_35
+        named: true
+        index: 50
+        parent: 37
+        parent_name: mixamorig:RightHand_36
+        parent_bone: 37
+        position:
+        - -0.7078743941353034
+        - 1.3118244995554316
+        - -0.03831781438796156
+      - name: mixamorig:RightHandPinky2_34
+        named: true
+        index: 51
+        parent: 50
+        parent_name: mixamorig:RightHandPinky1_35
+        parent_bone: 50
+        position:
+        - -0.7317150320042735
+        - 1.3072718340055345
+        - -0.04155455690723129
+      - name: mixamorig:RightHandPinky3_33
+        named: true
+        index: 52
+        parent: 51
+        parent_name: mixamorig:RightHandPinky2_34
+        parent_bone: 51
+        position:
+        - -0.7495329128327062
+        - 1.301610966362802
+        - -0.043913132496321915
+      - name: mixamorig:LeftUpLeg_46
+        named: true
+        index: 53
+        parent: 9
+        parent_name: mixamorig:Hips_51
+        parent_bone: 9
+        position:
+        - 0.08430968714474815
+        - 0.9211848315637641
+        - 0.001761559347585225
+      - name: mixamorig:LeftLeg_45
+        named: true
+        index: 54
+        parent: 53
+        parent_name: mixamorig:LeftUpLeg_46
+        parent_bone: 53
+        position:
+        - 0.08530877073494485
+        - 0.5148100025208876
+        - 0.0055821257871640564
+      - name: mixamorig:LeftFoot_44
+        named: true
+        index: 55
+        parent: 54
+        parent_name: mixamorig:LeftLeg_45
+        parent_bone: 54
+        position:
+        - 0.08587223694608533
+        - 0.13232937723229732
+        - 0.006535749927395302
+      - name: mixamorig:LeftToeBase_43
+        named: true
+        index: 56
+        parent: 55
+        parent_name: mixamorig:LeftFoot_44
+        parent_bone: 55
+        position:
+        - 0.08540883993170925
+        - 0.04770180262624669
+        - 0.13203580062236453
+      - name: mixamorig:RightUpLeg_50
+        named: true
+        index: 57
+        parent: 9
+        parent_name: mixamorig:Hips_51
+        parent_bone: 9
+        position:
+        - -0.08592336928670076
+        - 0.9200434234993984
+        - 0.0017544137265082288
+      - name: mixamorig:RightLeg_49
+        named: true
+        index: 58
+        parent: 57
+        parent_name: mixamorig:RightUpLeg_50
+        parent_bone: 57
+        position:
+        - -0.08707544025214853
+        - 0.5113613756219698
+        - 0.006390819075426006
+      - name: mixamorig:RightFoot_48
+        named: true
+        index: 59
+        parent: 58
+        parent_name: mixamorig:RightLeg_49
+        parent_bone: 58
+        position:
+        - -0.08611075565284719
+        - 0.12663205182116685
+        - 0.005692739856391841
+      - name: mixamorig:RightToeBase_47
+        named: true
+        index: 60
+        parent: 59
+        parent_name: mixamorig:RightFoot_48
+        parent_bone: 59
+        position:
+        - -0.08370105083348497
+        - 0.04114942933980385
+        - 0.129195502437336
+      bone_map:
+        neck: 13
+        right_clavicle: 34
+        right_forearm: 36
+        left_clavicle: 15
+        left_forearm: 17
+        right_thigh: 57
+        right_foot: 59
+        left_thigh: 53
+        right_upper_arm: 35
+        right_shin: 58
+        left_foot: 55
+        left_upper_arm: 16
+        left_shin: 54
+        thorax: 12
+        lumbar: 11
+        pelvis: 9
+        head: 14
+        left_hand: 18
+        right_hand: 37
+      vertex_count: 29921
+      mesh_count: 2
+      skin_count: 1
+      texture_count: 3
+      uv_sets:
+      - TEXCOORD_0
 - id: chain-1
   template: chain
   parameters:
@@ -3745,13 +4873,13 @@ objects:
     link_catalog: generic.rope-nylon-10
   pose:
     position_mm:
-    - 351.22072193
-    - 938.45043974
-    - 1551.25281494
+    - 351.2324405
+    - 940.59024632
+    - 1607.98034744
     rotation_deg:
-    - -8.04985811
-    - 4.4959207
-    - -6.9153545
+    - -8.113608
+    - 4.48910605
+    - -6.92078595
   layout_mode: posable
   components:
     parts:
@@ -5080,13 +6208,13 @@ objects:
     link_catalog: generic.rope-nylon-10
   pose:
     position_mm:
-    - -1131.61277295
-    - 939.5404874
-    - 1577.4483677
+    - -1131.60063878
+    - 941.7208622
+    - 1634.19769636
     rotation_deg:
-    - -0.43062126
-    - -6.50850644
-    - 0.22339467
+    - -0.49494386
+    - -6.50736339
+    - 0.23024705
   layout_mode: posable
   components:
     parts:
@@ -6403,13 +7531,13 @@ objects:
     link_catalog: generic.rope-nylon-10
   pose:
     position_mm:
-    - -1129.47284818
-    - -618.99869931
-    - 1843.82119698
+    - -1129.46847569
+    - -616.52023848
+    - 1902.30884136
     rotation_deg:
-    - -18.78692785
-    - -43.53372943
-    - 9.93725436
+    - -18.87353475
+    - -43.521791
+    - 9.99646305
   layout_mode: posable
   components:
     parts:
@@ -7722,13 +8850,13 @@ objects:
     link_catalog: generic.rope-nylon-10
   pose:
     position_mm:
-    - 350.52624763
-    - -619.9119046
-    - 1842.46381869
+    - 350.53059185
+    - -617.44628396
+    - 1900.92949819
     rotation_deg:
-    - -17.04792754
-    - 43.13692424
-    - -10.01418577
+    - -17.13437496
+    - 43.12665414
+    - -10.07372604
   layout_mode: posable
   components:
     parts:

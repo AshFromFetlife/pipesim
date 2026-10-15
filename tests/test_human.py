@@ -22,6 +22,17 @@ def test_nineteen_segments_total_mass_and_anatomical_pivots(load):
         assert np.linalg.norm(left-right)<.001
 
 
+def test_default_neck_and_head_keep_crown_at_stature_without_long_gap():
+    body = humanoid()
+    parts = {part['id']: part for part in body['parts']}
+    head = parts['head']; neck = parts['neck']; thorax = parts['thorax']
+    head_shape = head['body']['geometry'][0]
+    crown = head['pose']['position_mm'][2] + head_shape['length_mm']/2 + head_shape['radius_mm']
+    assert crown == pytest.approx(1750, abs=1)
+    assert head['pose']['position_mm'][2] - neck['pose']['position_mm'][2] < 140
+    assert neck['pose']['position_mm'][2] - thorax['pose']['position_mm'][2] < 200
+
+
 def test_mass_changes_body_envelope_without_changing_skeleton(blank,factory):
     bodies={}
     for mass in (50,100):

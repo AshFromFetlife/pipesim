@@ -26,6 +26,26 @@ for(const side of ['left','right']){
 for(const [segment] of HUMAN_BONE_SEGMENTS)ALIASES[segment].push(segment.replaceAll('_',''));
 const NEXT = {pelvis:'lumbar',lumbar:'thorax',thorax:'neck',neck:'head'};
 for(const side of ['left','right'])Object.assign(NEXT,{[side+'_clavicle']:side+'_upper_arm',[side+'_upper_arm']:side+'_forearm',[side+'_forearm']:side+'_hand',[side+'_thigh']:side+'_shin',[side+'_shin']:side+'_foot'});
+const FIT_PARENT={lumbar:'pelvis',thorax:'lumbar',neck:'thorax',head:'neck'};
+for(const side of ['left','right'])Object.assign(FIT_PARENT,{[side+'_clavicle']:'thorax',[side+'_upper_arm']:side+'_clavicle',[side+'_forearm']:side+'_upper_arm',[side+'_hand']:side+'_forearm',[side+'_thigh']:'pelvis',[side+'_shin']:side+'_thigh',[side+'_foot']:side+'_shin'});
+export const HUMAN_FIT_CONTROLS=[['torso','Torso height'],['neck','Neck length'],['shoulders','Shoulder span'],['upper_arms','Upper arms'],['forearms','Forearms'],['legs','Legs']];
+function fitGroup(segment){if(segment==='lumbar'||segment==='thorax')return 'torso';if(segment==='neck'||segment==='head')return 'neck';if(segment.endsWith('_clavicle')||segment.endsWith('_upper_arm'))return 'shoulders';if(segment.endsWith('_forearm'))return 'upper_arms';if(segment.endsWith('_hand'))return 'forearms';return 'legs';}
+export function fittedHumanAnchors(source,target,proportions={}){
+  const fitted=new Map();
+  for(const [segment] of HUMAN_BONE_SEGMENTS){
+    const fallback=target.get(segment);
+    if(segment==='pelvis'){fitted.set(segment,fallback.clone());continue;}
+    if(!source.has(segment)){fitted.set(segment,fallback?.clone());continue;}
+    let parent=FIT_PARENT[segment];while(parent&&!source.has(parent))parent=FIT_PARENT[parent];
+    const sourceStart=source.get(parent),sourceEnd=source.get(segment),targetStart=target.get(parent),targetEnd=fallback;
+    if(!sourceStart||!targetStart||!targetEnd){fitted.set(segment,fallback?.clone());continue;}
+    const direction=targetEnd.clone().sub(targetStart),length=sourceEnd.distanceTo(sourceStart);
+    const factor=Number(proportions[fitGroup(segment)]??1);
+    if(!Number.isFinite(factor)||factor<.5||factor>1.5)throw new Error('Body proportion controls must be between 50% and 150%.');
+    fitted.set(segment,direction.lengthSq()>1e-8?fitted.get(parent).clone().add(direction.normalize().multiplyScalar(length*factor)):fitted.get(parent).clone());
+  }
+  return fitted;
+}
 const REQUIRED = ['pelvis','head',...['left','right'].flatMap(side=>['upper_arm','forearm','hand','thigh','shin','foot'].map(part=>side+'_'+part))];
 const Y = new THREE.Vector3(0,1,0), Z = new THREE.Vector3(0,0,1);
 const radians=THREE.MathUtils.degToRad;
@@ -85,7 +105,7 @@ export function boneDiagramSvg(inventory,mapping={}){
     const bone=typeof value==='number'?byIndex.get(value):bones.find(b=>b.name===value||canonical(b.name)===canonical(value));
     if(bone)mapped.set(bone.index,segment);
   }
-  const width=720,height=Math.max(340,Math.min(720,140+bones.length*8)),margin=34,points=new Map();
+  const width=360,height=400,margin=24,points=new Map();
   const positioned=bones.every(b=>Array.isArray(b.position)&&b.position.length===3&&b.position.every(Number.isFinite));
   if(positioned){
     const pairs=[[0,1],[0,2],[2,1]],ranges=axis=>Math.max(...bones.map(b=>b.position[axis]))-Math.min(...bones.map(b=>b.position[axis]));
@@ -100,8 +120,9 @@ export function boneDiagramSvg(inventory,mapping={}){
   }
   const parentOf=bone=>byIndex.get(bone.parent_bone??bone.parent);
   const lines=bones.map(bone=>{const parent=parentOf(bone),a=parent&&points.get(parent.index),b=points.get(bone.index);return a?`<line x1="${a[0]}" y1="${a[1]}" x2="${b[0]}" y2="${b[1]}"/>`:'';}).join('');
-  const nodes=bones.map((bone,i)=>{const [x,y]=points.get(bone.index),label=bone.named===false||!bone.name?`Bone ${bone.index}`:bone.name,segment=mapped.get(bone.index);return `<g class="bone-node${segment?' mapped':''}" data-bone-index="${bone.index}" transform="translate(${x} ${y})"><circle r="4"/><text x="${x>width*.62?-7:7}" y="${i%2?-6:12}" text-anchor="${x>width*.62?'end':'start'}">${xml(label)}${segment?` <tspan>→ ${xml(segment.replaceAll('_',' '))}</tspan>`:''}</text><title>${xml(label)} · node ${bone.index}${segment?' · '+xml(segment):''}</title></g>`;}).join('');
-  return `<svg class="bone-diagram" viewBox="0 0 ${width} ${height}" role="img" aria-label="Imported bone hierarchy with node labels"><g class="bone-links">${lines}</g>${nodes}</svg>`;
+  // Names live in the searchable list. Even coincident joints must never pile up text.
+  const nodes=bones.map(bone=>{const [x,y]=points.get(bone.index),label=bone.named===false||!bone.name?`Bone ${bone.index}`:bone.name,segment=mapped.get(bone.index);return `<g class="bone-node${segment?' mapped':''}" data-bone-index="${bone.index}" transform="translate(${x} ${y})"><circle r="4"/><title>${xml(label)} · node ${bone.index}${segment?' → '+xml(segment.replaceAll('_',' ')):''}</title></g>`;}).join('');
+  return `<svg class="bone-diagram" viewBox="0 0 ${width} ${height}" role="img" aria-label="Imported bone hierarchy. Choose bones using the searchable list."><g class="bone-links">${lines}</g>${nodes}</svg>`;
 }
 function matrixOf(pose={}){return new THREE.Matrix4().compose(new THREE.Vector3(...(pose.position_mm||[0,0,0])),new THREE.Quaternion().setFromEuler(new THREE.Euler(...(pose.rotation_deg||[0,0,0]).map(radians),'ZYX')),new THREE.Vector3(1,1,1));}
 function safeNumber(value,fallback,min,max){return Number.isFinite(Number(value))?THREE.MathUtils.clamp(Number(value),min,max):fallback;}
@@ -161,15 +182,36 @@ function disposeTree(root){
 
 export class RetargetedHuman {
   constructor(gltf,human,partObjects,{deferVisibility=false}={}){
-    this.human=human;this.partObjects=partObjects;this.config=human.render_model||{};
-    const {mapping,inventory,missing}=mapHumanoidBones(gltf,this.config.bone_map||{});
-    if(missing.length)throw new Error('Map these humanoid bones before enabling the imported model: '+missing.join(', '));
-    this.mapping=mapping;this.inventory=inventory;this.segmentByBone=new Map(Object.entries(mapping).map(([segment,bone])=>[bone,segment]));this.root=new THREE.Group();this.root.name=human.id+' imported appearance';this.root.add(gltf.scene);
+    this.human=human;this.partObjects=partObjects;this.config=human.render_model||{};this.gltf=gltf;
+    this.root=new THREE.Group();this.root.name=human.id+' imported appearance';this.root.add(gltf.scene);
     this.root.userData.humanModel=human.id;
     const meshes=[];gltf.scene.traverse(node=>{if(node.isSkinnedMesh)meshes.push(node);});
     if(!meshes.length)throw new Error('This model has no vertex-weighted skin. Export a rigged glTF / GLB or VRM character.');
-    // Restore the actual skin bind pose, not frame zero of an authored animation.
-    for(const mesh of meshes)mesh.skeleton.pose();
+    // Retargeting moves joints. Keep their authored bind transforms so a bone
+    // selection can be recalibrated immediately without fetching the GLB again.
+    this.bindPose=new Map();gltf.scene.traverse(node=>{if(node.isBone)this.bindPose.set(node,{position:node.position.clone(),quaternion:node.quaternion.clone(),scale:node.scale.clone()});});
+    this.recalibrate(this.config);
+    this.simpleMeshes=[];
+    for(const [segment] of HUMAN_BONE_SEGMENTS){
+      const part=partObjects.get(human.id+'/'+segment);
+      part?.traverse(mesh=>{if(mesh.isMesh){if(mesh.userData.humanSimpleVisible===undefined)mesh.userData.humanSimpleVisible=mesh.visible;this.simpleMeshes.push({mesh,visible:mesh.userData.humanSimpleVisible});}});
+    }
+    this.root.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;node.frustumCulled=false;node.userData.part=human.id+'/pelvis';node.userData.humanModel=human.id;}});
+    this.lastTime=null;this.enabled=false;this.controlsSimpleMeshes=!deferVisibility;this.update(0);this.setEnabled(this.config.enabled!==false);
+  }
+  recalibrate(config){
+    const gltf=this.gltf,human=this.human;
+    this.config={...config};
+    this.root.position.set(0,0,0);this.root.quaternion.identity();this.root.scale.setScalar(1);
+    for(const [node,pose] of this.bindPose){node.position.copy(pose.position);node.quaternion.copy(pose.quaternion);node.scale.copy(pose.scale);node.updateMatrix();}
+    const {mapping,inventory,missing}=mapHumanoidBones(gltf,this.config.bone_map||{});
+    if(missing.length)throw new Error('Map these humanoid bones before enabling the imported model: '+missing.join(', '));
+    this.mapping=mapping;this.inventory=inventory;this.segmentByBone=new Map(Object.entries(mapping).map(([segment,bone])=>[bone,segment]));
+    // Calibrate from the authored node transforms loaded from glTF. Inverse
+    // binds are skinning transforms, not a replacement skeleton: valid exports
+    // can use identity matrices for joints or bake a bind-shape transform into
+    // them. Skeleton.pose() collapses those joints and reapplies rig-root axes.
+    // Keep the inverse binds unchanged for vertex deformation.
     this.root.updateMatrixWorld(true);
     const rests=new Map(human.rest_parts.map(p=>[p.id,matrixOf(p.pose)])),joints=human.joints||[];
     for(const [segment] of HUMAN_BONE_SEGMENTS)if(mapping[segment]&&!rests.has(segment))throw new Error('Missing neutral body geometry for '+segment);
@@ -191,15 +233,18 @@ export class RetargetedHuman {
     this.root.quaternion.copy(alignment);this.root.scale.setScalar(scale);
     this.root.position.copy(anchors.get('pelvis')).sub(hips.clone().applyQuaternion(alignment).multiplyScalar(scale));
     this.root.updateMatrixWorld(true);
+    this.sourceAnchors=new Map(Object.entries(mapping).map(([segment,bone])=>[segment,bone.getWorldPosition(new THREE.Vector3())]));
+    this.targetAnchors=anchors;this.rests=rests;
+    const fitted=fittedHumanAnchors(this.sourceAnchors,anchors,this.config.body_proportions);
     this.bindings=[];
     for(const [segment,bone] of Object.entries(mapping)){
-      const rest=rests.get(segment),anchor=anchors.get(segment),position=bone.getWorldPosition(new THREE.Vector3());
+      const rest=rests.get(segment),anchor=fitted.get(segment),position=bone.getWorldPosition(new THREE.Vector3());
       const quaternion=bone.getWorldQuaternion(new THREE.Quaternion());
       let next=NEXT[segment];
       // A chest-only or spine-only rig remains usable; helpers keep their binds.
       while(next&&!mapping[next])next=NEXT[next];
       let sourceDirection,targetDirection;
-      if(next){sourceDirection=mapping[next].getWorldPosition(new THREE.Vector3()).sub(position);targetDirection=anchors.get(next).clone().sub(anchor);}
+      if(next){sourceDirection=mapping[next].getWorldPosition(new THREE.Vector3()).sub(position);targetDirection=fitted.get(next).clone().sub(anchor);}
       else if(segment.endsWith('_hand')){
         const finger=bone.children.find(b=>b.isBone&&/middle/i.test(b.name))||bone.children.find(b=>b.isBone&&/index/i.test(b.name))||bone.children.find(b=>b.isBone);
         if(finger)sourceDirection=finger.getWorldPosition(new THREE.Vector3()).sub(position);
@@ -232,18 +277,34 @@ export class RetargetedHuman {
       let isAncestor=false;bone.traverse(child=>{if(child!==bone&&mapped.has(child))isAncestor=true;});
       const child=bone.children.find(n=>n.isBone);
       const tail=child?child.position.clone():new THREE.Vector3(0,80/scale,0);
-      this.extras.push({bone,settings,mode:isAncestor?'fixed_to_parent':mode,bind:bone.quaternion.clone(),tail,angle:new THREE.Vector3(),velocity:new THREE.Vector3(),previousPosition:null,previousVelocity:new THREE.Vector3(),isAncestor});
+      this.extras.push({bone,settings,keys:[nodeIndex===undefined?null:String(nodeIndex),originalName,bone.name].filter(Boolean),mode:isAncestor?'fixed_to_parent':mode,bind:bone.quaternion.clone(),tail,angle:new THREE.Vector3(),velocity:new THREE.Vector3(),previousPosition:null,previousVelocity:new THREE.Vector3(),isAncestor});
     });
     this.extras.sort((a,b)=>depth(a.bone)-depth(b.bone));
-    this.simpleMeshes=[];
-    for(const [segment] of HUMAN_BONE_SEGMENTS){
-      const part=partObjects.get(human.id+'/'+segment);
-      part?.traverse(mesh=>{if(mesh.isMesh){if(mesh.userData.humanSimpleVisible===undefined)mesh.userData.humanSimpleVisible=mesh.visible;this.simpleMeshes.push({mesh,visible:mesh.userData.humanSimpleVisible});}});
-    }
-    this.root.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;node.frustumCulled=false;node.userData.part=human.id+'/pelvis';node.userData.humanModel=human.id;}});
-    this.lastTime=null;this.enabled=false;this.controlsSimpleMeshes=!deferVisibility;this.update(0);this.setEnabled(this.config.enabled!==false);
   }
   setEnabled(enabled){this.enabled=!!enabled;this.root.visible=this.enabled;if(this.controlsSimpleMeshes)for(const {mesh,visible} of this.simpleMeshes)mesh.visible=this.enabled?false:visible;}
+  setBodyProportions(proportions,timeSeconds=this.lastTime??0){
+    const fitted=fittedHumanAnchors(this.sourceAnchors,this.targetAnchors,proportions);
+    this.config.body_proportions={...proportions};
+    for(const binding of this.bindings)binding.offset.copy(fitted.get(binding.segment)).applyMatrix4(this.rests.get(binding.segment).clone().invert());
+    this.update(timeSeconds);
+  }
+  setPreviewSettings(config,timeSeconds=this.lastTime??0){
+    if(JSON.stringify(this.config.bone_map||{})!==JSON.stringify(config.bone_map||{})){
+      const previous=this.config;
+      try{this.recalibrate({...this.config,...config,enabled:true});}
+      catch(error){this.recalibrate(previous);this.update(timeSeconds);throw error;}
+      this.lastTime=null;this.update(timeSeconds);return;
+    }
+    this.config={...this.config,...config,enabled:true};
+    const fitted=fittedHumanAnchors(this.sourceAnchors,this.targetAnchors,this.config.body_proportions);
+    for(const binding of this.bindings)binding.offset.copy(fitted.get(binding.segment)).applyMatrix4(this.rests.get(binding.segment).clone().invert());
+    for(const extra of this.extras){
+      extra.settings=extra.keys.map(key=>this.config.extra_bones?.[key]).find(Boolean)||{};
+      extra.mode=extra.isAncestor?'fixed_to_parent':extra.settings.mode||this.config.default_extra_mode||'fixed_to_parent';
+      extra.angle.set(0,0,0);extra.velocity.set(0,0,0);extra.previousPosition=null;
+    }
+    this.lastTime=null;this.update(timeSeconds);
+  }
   partForHit(hit){
     const mesh=hit.object,scores=new Map();
     const ancestorSegment=bone=>{for(let node=bone;node;node=node.parent){const segment=this.segmentByBone.get(node);if(segment)return segment;}return null;};
@@ -332,7 +393,7 @@ export class RetargetedHuman {
 
 /** A failed/late import never hides the editable collision mannequin. */
 export class HumanModelLayer {
-  constructor({scene,loader=new GLTFLoader(),onError=()=>{}}){this.scene=scene;this.loader=loader;this.onError=onError;this.models=new Map();this.generation=0;this.previewTokens=new Map();}
+  constructor({scene,loader=new GLTFLoader(),onError=()=>{}}){this.scene=scene;this.loader=loader;this.onError=onError;this.models=new Map();this.previewOriginals=new Map();this.previewInstances=new Set();this.generation=0;this.previewTokens=new Map();}
   async rebuild(humans=[],partObjects){
     this.dispose();const generation=this.generation,result={loaded:[],errors:[]};
     for(const human of humans)if(human.render_model?.enabled!==false&&human.render_model?.load_error){const error=human.render_model.load_error;result.errors.push({id:human.id,error});this.onError(`${human.id}: ${error}`);}
@@ -347,6 +408,12 @@ export class HumanModelLayer {
     return result;
   }
   update(timeSeconds=0){for(const model of this.models.values())if(model.enabled)model.update(timeSeconds);}
+  previewFit(id,proportions,timeSeconds=0){const model=this.models.get(id);if(!model||!this.previewInstances.has(id))return false;model.setBodyProportions(proportions,timeSeconds);return true;}
+  previewSettings(id,config,timeSeconds=0){
+    const model=this.models.get(id);
+    if(!model||!this.previewInstances.has(id)||model.config.url!==config.url)return false;
+    model.setPreviewSettings(config,timeSeconds);return true;
+  }
   async preview(human,renderModel,partObjects){
     if(!renderModel?.url)return null;
     const id=human.id,token=(this.previewTokens.get(id)||0)+1;this.previewTokens.set(id,token);
@@ -356,9 +423,22 @@ export class HumanModelLayer {
       if(this.previewTokens.get(id)!==token){disposeTree(gltf.scene);return null;}
       model=new RetargetedHuman(gltf,{...human,render_model:{...renderModel,enabled:true}},partObjects,{deferVisibility:true});
       if(this.previewTokens.get(id)!==token){model.dispose();return null;}
-      this.scene.add(model.root);const previous=this.models.get(id);this.models.set(id,model);previous?.dispose();model.controlsSimpleMeshes=true;model.setEnabled(true);model.update(0);return model;
+      this.scene.add(model.root);const previous=this.models.get(id);this.models.set(id,model);
+      if(previous&&!this.previewOriginals.has(id)){previous.enabled=false;previous.root.visible=false;this.previewOriginals.set(id,previous);}else if(previous)previous.dispose();
+      this.previewInstances.add(id);
+      model.controlsSimpleMeshes=true;model.setEnabled(true);model.update(0);return model;
     }catch(error){if(model)model.dispose();else if(gltf)disposeTree(gltf.scene);throw error;}
   }
+  removePreview(id){
+    this.previewTokens.set(id,(this.previewTokens.get(id)||0)+1);
+    if(!this.previewInstances.has(id))return false;
+    this.previewInstances.delete(id);
+    const original=this.previewOriginals.get(id),current=this.models.get(id);
+    if(current&&current!==original)current.dispose();
+    this.previewOriginals.delete(id);
+    if(original){this.models.set(id,original);original.setEnabled(original.config.enabled!==false);return true;}
+    this.models.delete(id);return false;
+  }
   partForHit(hit){const id=hit?.object?.userData?.humanModel;return id?this.models.get(id)?.partForHit(hit)||null:null;}
-  dispose(){this.generation++;this.previewTokens.clear();for(const model of this.models.values())model.dispose();this.models.clear();}
+  dispose(){this.generation++;this.previewTokens.clear();for(const model of new Set([...this.models.values(),...this.previewOriginals.values()]))model.dispose();this.models.clear();this.previewOriginals.clear();this.previewInstances.clear();}
 }

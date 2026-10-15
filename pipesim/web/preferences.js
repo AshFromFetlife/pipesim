@@ -4,8 +4,8 @@ export const DEFAULT_PREFERENCES=Object.freeze({
   gridVisible:true,floorVisible:true,portsVisible:false,theme:'system',undoLimit:80,defaultTool:'select',fitOnOpen:true,fitAfterDuplicate:true,
   cameraFovDeg:38,defaultDuplicateCount:2,defaultHumanHeightMm:1750,defaultHumanMassKg:75,defaultChainLengthMm:1000,
   renderWidth:1600,renderHeight:1000,renderLighting:'studio',renderBackground:'#edf1f3',
-  simulationSeconds:3,simulationMode:'preview',simulationChainLinks:8,previewStepsPerSecond:1000,
-  previewSolverIterations:240,previewBeamSegmentMm:800,deflectionWarningMm:10,connectionLocked:true,connectionToleranceMm:2,
+  simulationSeconds:3,simulationMode:'preview',simulationChainLinks:1000,previewStepsPerSecond:60,
+  previewSolverIterations:60,previewBeamSegmentMm:800,deflectionWarningMm:10,connectionLocked:true,connectionToleranceMm:2,
   resizeConnectorMode:'follow',resizeShiftMode:'detach',resizeAutoConnect:true,
   resizeCaptureMm:40,resizeCaptureDeg:15,resizeKeyStepMm:10,
   resizeHandle1GrowKey:'y',resizeHandle1ShrinkKey:'h',resizeHandle2GrowKey:'u',resizeHandle2ShrinkKey:'j'
@@ -19,7 +19,7 @@ const choices={startup:['workspace','autosave','empty','example'],lengthUnit:['m
 const ranges={autosaveMinutes:[1,120],autosaveKeep:[1,100],undoLimit:[10,500],cameraFovDeg:[20,90],
   defaultDuplicateCount:[1,100],defaultHumanHeightMm:[500,2500],defaultHumanMassKg:[10,250],defaultChainLengthMm:[1,100000],
   renderWidth:[320,4096],renderHeight:[240,4096],simulationSeconds:[.1,30],
-  simulationChainLinks:[1,1000],previewStepsPerSecond:[240,4000],previewSolverIterations:[40,1000],previewBeamSegmentMm:[400,2000],
+  simulationChainLinks:[1,1000],previewStepsPerSecond:[30,240],previewSolverIterations:[10,120],previewBeamSegmentMm:[400,2000],
   deflectionWarningMm:[.01,100000],connectionToleranceMm:[.01,20],
   resizeCaptureMm:[0,100],resizeCaptureDeg:[0,45],resizeKeyStepMm:[.1,1000]};
 const scales={length:{mm:1,cm:10,m:1000,in:25.4,ft:304.8},
@@ -64,6 +64,10 @@ export function loadPreferences(storage){
     // record. Do not let that silently disable grouping in the new Preview mode.
     if(saved.simulationMode===undefined&&Number(saved.simulationChainLinks)===1)
       saved.simulationChainLinks=DEFAULT_PREFERENCES.simulationChainLinks;
+    // Old Preview used thousands of steps and automatic Full retries. Migrate
+    // only its incompatible solver settings; keep unrelated user preferences.
+    if(Number(saved.previewStepsPerSecond)>240)saved.previewStepsPerSecond=DEFAULT_PREFERENCES.previewStepsPerSecond;
+    if(Number(saved.previewSolverIterations)>120)saved.previewSolverIterations=DEFAULT_PREFERENCES.previewSolverIterations;
     return validatePreferences({...DEFAULT_PREFERENCES,...saved});
   }
   catch{return {...DEFAULT_PREFERENCES};}

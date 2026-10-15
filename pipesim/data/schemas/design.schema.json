@@ -130,6 +130,9 @@
                       "at_mm": {
                         "type": "number",
                         "minimum": 0
+                      },
+                      "joint": {
+                        "$ref": "#/properties/joints/items"
                       }
                     },
                     "required": [
@@ -894,6 +897,9 @@
               "posable"
             ]
           },
+          "pose_preset": {
+            "type": "string"
+          },
           "render_model": {
             "type": "object"
           }
@@ -1513,6 +1519,9 @@
                   "rigid",
                   "posable"
                 ]
+              },
+              "pose_preset": {
+                "type": "string"
               },
               "render_model": {
                 "type": "object"

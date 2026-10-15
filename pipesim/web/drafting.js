@@ -5,6 +5,15 @@ const THROUGH_AXIS_TOLERANCE_DEG=THREE.MathUtils.radToDeg(Math.acos(.999));
 export const draftRuns=doc=>(doc.draft_subassemblies||[]).flatMap(group=>group.runs);
 export const draftRun=(doc,id)=>draftRuns(doc).find(run=>run.id===id);
 
+export function mirrorModeForSpan(start,end,plane,tolerance=.05){
+  const length=start.distanceTo(end);if(length<=1e-6)return 'free';
+  const axis={x:0,y:1,z:2}[plane.axis],first=start.getComponent(axis)-plane.offset_mm;
+  const last=end.getComponent(axis)-plane.offset_mm;
+  if(Math.abs((first+last)/2)<=tolerance&&Math.abs(Math.abs(last-first)-length)<=tolerance)return 'centered';
+  if(Math.abs(first)<=tolerance&&Math.abs(last)<=tolerance)return 'in_plane';
+  return 'free';
+}
+
 function substitute(value,parameters){
   if(typeof value==='string'&&value.startsWith('$'))return structuredClone(parameters[value.slice(1)]);
   if(Array.isArray(value))return value.map(v=>substitute(v,parameters));
@@ -12,12 +21,12 @@ function substitute(value,parameters){
   return value;
 }
 
-export function draftPreview(run,scene,library){
+export function draftPreview(run,scene,library,mirrorPlanes=[]){
   const originalStart=new THREE.Vector3(...run.start_mm),originalEnd=new THREE.Vector3(...run.end_mm);
   const workingLength=originalStart.distanceTo(originalEnd);
   if(!(workingLength>0))throw new Error('Draft span must be positive');
   const displayLength=run.locked_length_mm??workingLength;
-  const bound={};const through=[];const conflicts=[];
+  const bound={};const through=[];const conflicts=[];const warnings=[];
   function socketFrame(attachment){
     const fitting=scene.parts.find(p=>p.id===attachment.connector),socket=fitting?.ports?.[attachment.port];
     if(!socket||socket.type!=='socket')throw new Error(`Unknown socket ${attachment.connector}/${attachment.port}`);
@@ -61,6 +70,15 @@ export function draftPreview(run,scene,library){
       conflicts.push({code:'THROUGH_FIT',connector:a.connector,port:a.port,residual_mm:+Math.max(gap,short).toFixed(3),residual_deg:+angle.toFixed(3),message});
     }
   }
+  for(const plane of mirrorPlanes){
+    if(plane.run_modes?.[run.id]&&plane.run_modes[run.id]!=='free')continue;
+    const axis={x:0,y:1,z:2}[plane.axis],first=start.getComponent(axis)-plane.offset_mm;
+    const last=end.getComponent(axis)-plane.offset_mm;
+    if(first*last<0&&Math.abs(last-first)>=.05&&
+      new THREE.Vector3().subVectors(end,start).setComponent(axis,0).length()>length*Math.sin(THREE.MathUtils.degToRad(5)))
+      warnings.push({code:'MIRROR_SELF_INTERSECTION',plane:plane.id,
+        message:'Pipe crosses the mirror plane obliquely; its reflected copy intersects it.'});
+  }
   const reference=Math.abs(direction.y)<.95?new THREE.Vector3(0,1,0):new THREE.Vector3(1,0,0);
   const x=reference.clone().cross(direction).normalize(),y=direction.clone().cross(x);
   const quaternion=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,y,direction));
@@ -71,5 +89,5 @@ export function draftPreview(run,scene,library){
   return {id:run.id,label:run.id+' · draft',catalog:run.catalog,kind:'member',draft:true,
     pose:{position_mm:start.clone().add(end).multiplyScalar(.5).toArray(),rotation_deg:[euler.x,euler.y,euler.z].map(THREE.MathUtils.radToDeg)},
     geometry:resolved.geometry,ports:{},section:resolved.section||{},length_mm:length,mass_kg:0,
-    color:conflicts.length?'#cf815d':'#5ba9b5',conflicts,attachments:run.attachments||[]};
+    color:conflicts.length||warnings.length?'#cf815d':'#5ba9b5',conflicts,warnings,attachments:run.attachments||[]};
 }

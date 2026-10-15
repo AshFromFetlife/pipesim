@@ -24,6 +24,23 @@ def post(server, route, doc, **extra):
     return json.loads(request(server, '/api/'+route, {'document':doc, **extra})[1])
 
 
+def test_mirrored_chain_attachment_reuses_resolved_scene(editor,monkeypatch):
+    fixture=Path(__file__).parent/'fixtures'/'chain_semi_circle_attachment.json'
+    doc=json.loads(fixture.read_text())
+    post(editor,'resolve',doc)
+    attachment={'object':'chain-1','part':'chain-1/link-1','part_port':'b',
+                'target':{'part':'tc173mc-1-mirror-mirror-1','port':'hinge'},
+                'type':'spherical','preview':True}
+    with monkeypatch.context() as patch:
+        patch.setattr(Handler,'assembly',lambda *args,**kwargs:pytest.fail('Attachment rebuilt the open scene'))
+        result=post(editor,'attach-part',doc,**attachment)
+        again=post(editor,'attach-part',doc,**attachment)
+    assert len(result['moved'])==30
+    assert again==result
+    assert result['joint']['id']=='chain-1-link-1-attachment'
+    assert len(doc['joints'])==1
+
+
 def target_for(assembly, selected='person/left_shin', distance=30):
     pose=pose_of(assembly.parts[selected].matrix); pose['position_mm'][1]+=distance
     return pose

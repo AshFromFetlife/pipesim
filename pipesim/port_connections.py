@@ -9,6 +9,18 @@ from .math3d import align_axis, pose_of
 from .snapping import move_document
 
 
+def shackle_pin_hole(a, b):
+    """An 8 mm shackle pin fits a compatible eye or bolt hole with clearance."""
+    for pin, hole in ((a, b), (b, a)):
+        if (pin.get('snap_role') == 'shackle' and pin.get('type') == 'clevis'
+                and pin.get('assembly') == hole.get('assembly') == 'bolt'
+                and hole.get('type') in ('eye', 'bolt')):
+            pin_mm = pin.get('diameter_mm', 0)
+            hole_mm = hole.get('diameter_mm', 0)
+            return pin_mm > 0 and pin_mm <= hole_mm <= pin_mm + 3
+    return False
+
+
 def _connect_load(assembly, a, b, kind, poses):
     """Preserve the load's pose and express the host pivot in its local frame."""
     before=assembly
@@ -74,16 +86,27 @@ def connect_ports(assembly, a, b, kind='revolute', move='auto', poses=None,
         definition = assembly.parts[pid].ports[port]
         if definition.get('type') == 'socket':
             raise DocumentError('Use Connect to a socket for a pipe socket')
-        if any(j[end].get('part') == pid and j[end].get('port') == port
+        excluded={port,*definition.get('excludes',[])}
+        if any(j[end].get('part') == pid and
+               (j[end].get('port') in excluded or
+                port in assembly.parts[pid].ports.get(j[end].get('port'),{}).get('excludes',[]))
                for j in assembly.joints for end in ('a', 'b')):
             raise DocumentError(f'{pid} / {port} is already connected')
     port_a = assembly.parts[a['part']].ports[a['port']]
     port_b = assembly.parts[b['part']].ports[b['port']]
-    hinge = {port_a['type'], port_b['type']} == {'eye', 'clevis'}
+    pin_hole = shackle_pin_hole(port_a, port_b)
+    ordinary_hinge = ({port_a['type'], port_b['type']} == {'eye', 'clevis'} and
+                      not any(port.get('type') == 'clevis' and port.get('snap_role') == 'shackle'
+                              for port in (port_a, port_b)))
+    hinge = ordinary_hinge or pin_hole
+    hook = (port_a['type'] == port_b['type'] == 'eye' and
+            port_a.get('assembly') == port_b.get('assembly') == 'hook')
     if 'eye' in (port_a['type'], port_b['type']) or 'clevis' in (port_a['type'], port_b['type']):
-        if not hinge or port_a.get('assembly') != 'bolt' or port_b.get('assembly') != 'bolt':
+        if not hook and (not hinge or port_a.get('assembly') != 'bolt' or port_b.get('assembly') != 'bolt'):
             raise DocumentError('A hinge needs one bolt eye and one matching clevis')
-    if hinge and abs(port_a.get('diameter_mm', 0)-port_b.get('diameter_mm', 0)) > 1:
+    if hook and kind != 'spherical':
+        raise DocumentError('Hook eyes use a ball joint')
+    if hinge and not pin_hole and abs(port_a.get('diameter_mm', 0)-port_b.get('diameter_mm', 0)) > 1:
         raise DocumentError('The hinge bolt-hole diameters do not match')
     if a['part'] == b['part']:
         raise DocumentError('Choose ports on two different parts')
@@ -135,8 +158,10 @@ def connect_ports(assembly, a, b, kind='revolute', move='auto', poses=None,
         number += 1
     joint = {'id': f'joint-{number}', 'type': kind,
              'a': copy.deepcopy(a), 'b': copy.deepcopy(b),
-             'metadata': {'hardware': 'Bolt through matched hinge eye and clevis'
-                          if hinge else 'Specify the fastener and its installation method'}}
+             'metadata': {'hardware': 'D-shackle pin through a compatible eye or bolt hole'
+                          if pin_hole else 'Bolt through matched hinge eye and clevis'
+                          if hinge else 'Hook eyes coupled through a shackle or chain link'
+                          if hook else 'Specify the fastener and its installation method'}}
     doc.setdefault('joints', []).append(joint)
     doc.pop('results', None)
     doc.pop('build_plan', None)

@@ -43,7 +43,29 @@ export function makeRig({variant='mixamo',tPose=true,extra=true,rootRotation=fal
   const json={extensions:variant==='vrm'?{VRMC_vrm:{specVersion:'1.0',humanoid:{humanBones:Object.fromEntries(SEGMENTS.map((s,i)=>[vrm[s],{node:i}]))}}}:{}};
   return {scene,parser:{associations,json},bones,mesh};
 }
-export async function exportRig(gltf){
+// Equivalent single-weight skin encoding: selected vertices are stored in
+// joint-local space, so their inverse bind matrices are legitimately identity.
+// Real exporters also use identity binds on unweighted anatomical helpers.
+export function encodeIdentityInverseBinds(rig,segments=Object.keys(rig.bones)){
+  const {mesh}=rig,selected=new Set(segments.map(segment=>mesh.skeleton.bones.indexOf(rig.bones[segment])));
+  const positions=mesh.geometry.attributes.position,normals=mesh.geometry.attributes.normal;
+  const transforms=mesh.skeleton.boneInverses.map(inverse=>mesh.bindMatrix.clone().invert().multiply(inverse).multiply(mesh.bindMatrix));
+  for(let i=0;i<positions.count;i++){
+    const bone=mesh.geometry.attributes.skinIndex.getX(i);if(!selected.has(bone))continue;
+    const position=new THREE.Vector3().fromBufferAttribute(positions,i).applyMatrix4(transforms[bone]);positions.setXYZ(i,...position.toArray());
+    const normal=new THREE.Vector3().fromBufferAttribute(normals,i).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(transforms[bone]));normals.setXYZ(i,...normal.toArray());
+  }
+  for(const index of selected)mesh.skeleton.boneInverses[index].identity();
+  return rig;
+}
+export async function exportRig(gltf,{omitInverseBinds=false}={}){
   const old=globalThis.FileReader;if(!old)globalThis.FileReader=class{readAsArrayBuffer(blob){blob.arrayBuffer().then(v=>{this.result=v;this.onloadend?.();});}readAsDataURL(blob){blob.arrayBuffer().then(v=>{this.result='data:'+blob.type+';base64,'+Buffer.from(v).toString('base64');this.onloadend?.();});}};
-  try{return await new GLTFExporter().parseAsync(gltf.scene,{binary:true});}finally{if(!old)delete globalThis.FileReader;}
+  try{
+    const result=await new GLTFExporter().parseAsync(gltf.scene,{binary:true});if(!omitInverseBinds)return result;
+    const original=Buffer.from(result),jsonSize=original.readUInt32LE(12),data=JSON.parse(original.subarray(20,20+jsonSize).toString());
+    for(const skin of data.skins)delete skin.inverseBindMatrices;
+    let json=Buffer.from(JSON.stringify(data));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
+    const header=Buffer.from(original.subarray(0,20)),tail=original.subarray(20+jsonSize);header.writeUInt32LE(20+json.length+tail.length,8);header.writeUInt32LE(json.length,12);
+    const output=Buffer.concat([header,json,tail]);return output.buffer.slice(output.byteOffset,output.byteOffset+output.byteLength);
+  }finally{if(!old)delete globalThis.FileReader;}
 }

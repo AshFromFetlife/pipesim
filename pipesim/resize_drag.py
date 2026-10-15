@@ -192,7 +192,7 @@ def _automatic_through(doc,assembly,identifier,old_start,old_end,new_start,new_e
     """Capture compatible sockets reached by an extending free pipe end."""
     direction=(new_end-new_start)/np.linalg.norm(new_end-new_start)
     length=np.linalg.norm(new_end-new_start);old_length=np.linalg.norm(old_end-old_start)
-    if length<=old_length+1e-6:return
+    if length<=old_length+1e-6:return False
     old_tip=old_start if side=='start' else old_end
     new_tip=new_start if side=='start' else new_end
     outward=-direction if side=='start' else direction
@@ -204,6 +204,7 @@ def _automatic_through(doc,assembly,identifier,old_start,old_end,new_start,new_e
     profile='round' if section.get('type') in ('tube','round','circle') else section.get('profile',section.get('type'))
     used={a['connector'] for a in draft.get('attachments',[])} if draft else {
         j['a']['part'] for j in doc.get('joints',[]) if j.get('type')=='socket' and j['b']['part']==identifier}
+    captured_end=False
     for fitting in assembly.parts.values():
         if fitting.id==identifier or fitting.id in used or fitting.kind=='member':continue
         spec=next((p for p in doc['parts'] if p['id']==fitting.id),None)
@@ -255,6 +256,20 @@ def _automatic_through(doc,assembly,identifier,old_start,old_end,new_start,new_e
                 spec['pose']=pose_of(matrix)
             if draft:
                 draft.setdefault('attachments',[]).append(attachment)
+                if not through:
+                    captured_end=True
+                    # A socket may require more insertion than the cursor gave
+                    # it. Refit an unlocked centered run around its mirror so
+                    # both cut ends grow together after the socket snaps.
+                    # A loose fitting instead moves to the requested cut face;
+                    # its old frame must not be used to resize the pipe.
+                    if attached:
+                        from .symmetry import fit_moved_centered_runs
+                        locked_length=draft.pop('locked_length_mm',None)
+                        fit_moved_centered_runs(assembly,doc,{fitting.id})
+                        if locked_length is not None:
+                            draft['locked_length_mm']=float(np.linalg.norm(
+                                np.array(draft['end_mm'])-draft['start_mm']))
             else:
                 joint_id=f'{fitting.id}-{port_name}-{identifier}'
                 if any(j['id']==joint_id for j in doc.get('joints',[])):joint_id+='-resize'
@@ -264,6 +279,7 @@ def _automatic_through(doc,assembly,identifier,old_start,old_end,new_start,new_e
                     'insertion_mm':0 if through else depth,'locked':locked,'fit_tolerance_mm':2})
             used.add(fitting.id)
             break
+    return captured_end
 
 
 def _stretch(assembly,identifier,length,side,behavior,capture_mm,capture_deg,locked,auto_connect,*,
@@ -368,16 +384,17 @@ def _stretch(assembly,identifier,length,side,behavior,capture_mm,capture_deg,loc
                     endpoint['at_mm']=float((mouth-member.matrix[:3,3])@member.matrix[:3,2]+member.length/2)
                 else:endpoint['at_mm']=float((endpoint['at_mm']-assembly.parts[pid].length/2)*resized[pid]/assembly.parts[pid].length+resized[pid]/2)
     candidate=Assembly.from_doc(doc,assembly.base,assembly.library,validate_mirror_geometry=False)
-    if auto_connect:
-        _automatic_through(doc,candidate,identifier,first,last,new_first,new_last,side,capture_mm,capture_deg,locked)
+    captured_end=(_automatic_through(doc,candidate,identifier,first,last,new_first,new_last,
+                                    side,capture_mm,capture_deg,locked) if auto_connect else False)
     after=Assembly.from_doc(doc,assembly.base,assembly.library,validate_mirror_geometry=False)
     _valid_against(assembly,after,members,ignore_draft_runs={identifier} if draft else ())
     actual_first,actual_last,_=_frame(after,identifier)
-    if (np.linalg.norm(actual_first-new_first)>1e-3 or
-            np.linalg.norm(actual_last-new_last)>1e-3):
+    if not captured_end and (np.linalg.norm(actual_first-new_first)>1e-3 or
+                             np.linalg.norm(actual_last-new_last)>1e-3):
         raise DocumentError('The connected structure cannot keep the pipe handle at the requested position')
+    actual_length=float(np.linalg.norm(actual_last-actual_first))
     doc.pop('results',None);doc.pop('build_plan',None)
-    return {'status':'resized','document':doc,'member':identifier,'length_mm':length,
+    return {'status':'resized','document':doc,'member':identifier,'length_mm':actual_length,
             'moved':sorted(members-{identifier}),'endpoint':side}
 
 

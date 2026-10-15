@@ -17,7 +17,7 @@ connections and other references. You can rename a member inside a grouped objec
 without expanding it. A named Body follows its exact set of member parts; changing
 which parts belong to the Body may give it a new default name.
 
-**Drop to floor**, beneath **Position** in Properties, places the lowest point of the selected part or moving assembly on **Z = 0**. It lowers floating parts and lifts parts that intersect or sit below the plane. Rotated geometry, local mesh offsets and connected rigid parts are included. In whole-object mode it places the entire person or chain while preserving its pose. In limb/part mode it follows the same available joint motion as Position edits; a fixing or travel limit that prevents reaching the floor leaves the design unchanged. Each successful placement is one Undo step, and clicking again on an already resting part adds no edit. This positions the model on the plane; use simulation to check whether it balances there.
+**Drop to floor**, beneath **Position** in Properties, places the lowest point of the moving assembly on **Z = 0**. It lowers floating parts and lifts parts that intersect or sit below the plane. With no world fixing, it translates the complete connected assembly, including loose sockets, attached people/chains and free draft attachments, preserving its angles, cut lengths and joint settings. Selecting another part of that assembly gives the same placement. Rotated geometry and local mesh offsets are included. If the connected assembly has a world fixing, the selected body follows its available joint motion; an unreachable floor leaves the design unchanged and names the fixing and remaining gap. Each successful placement is one Undo step, and clicking again on an already resting assembly adds no edit. This positions the model on the plane; use simulation to check whether it balances there.
 
 In **Validate → Findings**, single-click a finding to highlight its part. **Double-click**, or focus the finding and press **Enter**, to open its **Design → Properties**. The relevant connection or setting is brought into view: loose screws focus their Locked checkbox, and unsupported components lead to Position and Drop to floor. Grouped-part findings open the part's controls while keeping the object grouped. Design-wide findings without an editable part open Source instead. Navigation itself does not alter the design or add an Undo step.
 
@@ -171,9 +171,13 @@ Choose **Add chain, rope or strap** in the library, or click or drop a flexible 
 
 **Move whole chain** preserves the current shape during translation and rotation. A flexible line contributes one group to layout solvers and one collapsed tree entry. **Pose links** enables shaping by dragging or rotating a segment; use **Select start**, **Select end**, or the numbered **Select segment** field without expanding the tree. **Individual links** opens the list on demand. Switch back to whole-object movement to hold the edited shape for layout. Long lines use the chain's dedicated segment projection solver; custom edited mechanisms can fall back to general joint solving.
 
+The **Shape** menu in Properties offers straight lines, touching or overlapping circles, a rounded square, deep and wide U shapes, a teardrop, a hanging arc, an S curve, flat spirals and a helix. Select a shape to pose all segments in one undoable edit. Existing attachments and fixed links remain in place; the free spans fit the requested shape as far as their joint travel permits. **Move whole chain** then translates or rotates the result without changing its shape. Manual link posing or a length change clears the menu's preset label while retaining the edited geometry.
+
 **Attach start** and **Attach end** open a preview for connecting a link eye to a hook, shackle, bar station or other part. The second attachment can pose the chain while retaining the first attachment. Cancel leaves the design alone. Detach and reconnect controls work as they do for grouped humans. Shortening preserves retained links, their poses and connections; if it would remove an attached or loaded link, the error names the attachment, anchor or load to release first. Links added at the end follow its existing direction.
 
 Simulation uses the individual articulated segments, including when the editor holds the line's shape. Two-ended lines can transfer tension directly between their attachments; joints with a break threshold can detach under tension. **Capture frame** keeps the line grouped and retains its length controls. Expand/regroup and duplication of the entire subassembly also preserve the grouped object. Each length change or pose is one undoable edit.
+
+Wide nylon webbing keeps spherical segment joints in simulation, but its catalogue bending response favours folding across the broad face over bending edgewise. Twisting and edgewise bending remain possible, so a diagonally mounted belt can turn and hang under gravity. The directional stiffness and damping values are illustrative rather than measured material data.
 
 Try **Examples → chain** for a tilted chain with its first link fixed to the ceiling. Release that anchor to move the whole chain. The bundled link remains a generic ring proxy with assumed joint limits and no load rating. The new rope, webbing and large-chain profiles carry illustrative simulation break thresholds, not certified working loads. Replace them with the actual product's tested rating and account for termination hardware, knots, bends, wear and load direction before using results for a real design. OSHA guidance calls for manufacturer or qualified-person ratings for synthetic slings and notes that capacity depends on material, hitch and fabrication: https://www.osha.gov/safe-sling-use/synth-web
 
@@ -257,3 +261,24 @@ python -m pipesim build examples/workbench.pipe.yaml --engineering -o output/bui
 Camera options also include yaw, pitch and distance. Lighting modes are `studio`, `flat` and `technical`. Video uses the same options. GIF needs no external encoder; MP4 uses FFmpeg/libx264 with even image dimensions. A suffix-free animation destination produces numbered PNG frames.
 
 Build export refuses an invalid design or an unproven assembly sequence. A failed search writes `planning-report.json`; inspect blocking parts, introduce a real split connector, change the sequence or declare a physical temporary support. The planner never silently undoes a previously completed joint.
+
+
+### Fast motion preview
+
+Preview defaults to 60 physics steps per second with four internal substeps and
+60 solver iterations. It keeps structural beams rigid and targets four groups
+per flexible line, retaining extra groups at bends and attachments. It never
+restarts in Full physics automatically. Preferences accept 30–240 Hz and a fixed
+10–120 iteration budget. Old settings above those ranges migrate to the new
+defaults without resetting unrelated preferences.
+
+Expand **Extra Preview detail** in the simulation panel to select individual
+lines or beams. Selected lines retain individual segments, and selected beams
+use the configured beam segment length. Other objects remain coarse. All use
+the same bounded Preview solver budget.
+
+Preview is a motion approximation: flexible-line inertia, tension and constraint
+closure are stabilized for larger timesteps. Detailed wrapping, contact forces,
+bending, yielding and rupture require an explicit Full physics run. Preview keeps
+overloaded lines and joints connected; it does not predict overload breakage. The original
+design's geometry, masses and connections remain unchanged.

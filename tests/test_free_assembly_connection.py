@@ -71,7 +71,9 @@ def test_swing_connection_carries_every_attachment_without_solving_joints(librar
         assert after.doc['joints'][:-1]==original['joints']
         for old,new in zip(original['objects'],after.doc['objects']):
             assert {k:v for k,v in old.items() if k!='pose'}=={k:v for k,v in new.items() if k!='pose'}
-        a,b,_=after.joint_frames(after.joints[-1]);assert np.linalg.norm(a-b)<.001
+        # A whole-mm rigid translation may use the declared socket allowance
+        # to preserve the authored geometry; the assembly must still fit.
+        a,b,_=after.joint_frames(after.joints[-1]);assert np.linalg.norm(a-b)<=option['tolerance_mm']+1e-7
     assert before.doc==original
 
 

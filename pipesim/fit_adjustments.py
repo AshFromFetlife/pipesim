@@ -111,6 +111,8 @@ def _materialize(working,proxy,joint,fit,released,stretch,controls):
     for pid,virtual in stretch.items():
         start,end=matrices[pid],matrices[virtual]
         change=float((end[:3,3]-start[:3,3])@start[:3,2]);length=working.parts[pid].length+change
+        if abs(working.parts[pid].length-round(working.parts[pid].length))<1e-6 and abs(length-round(length))<1e-6:
+            length=float(round(length));change=length-working.parts[pid].length
         if abs(change)>controls['max_length_change_mm']+1e-5 or length<=0: raise DocumentError('Requested cut-length limit exceeded')
         matrices[pid]=start.copy();matrices[pid][:3,3]+=start[:3,2]*(change/2)
         if abs(change)>1e-6:
@@ -157,22 +159,12 @@ def adjust_connection(assembly,joint,placed,controls,*,cancelled=None):
     check_cancelled(cancelled)
     from .snapping import move_document
     deadline=float('inf') if cancelled else time.monotonic()+30
-    fallback=None;best_gap=float('inf')
-    def gap(result):
-        poses,fitted,*_=result['fit']
-        candidate=Assembly.from_doc(result['document'],assembly.base,assembly.library)
-        for pid,pose in poses.items(): candidate.parts[pid].matrix=transform(pose)
-        pa,pb,_=candidate.joint_frames(fitted)
-        return float(np.linalg.norm(pb-pa))
-    # Prefer an exact fit. A permitted residual is a fallback, not a reason to
-    # skip screw/length adjustments that the user explicitly requested.
+    # The controls permit edits when needed; they do not request recutting a
+    # standard member just to remove a gap inside the chosen assembly allowance.
     try:
         fit=fit_connection(assembly,joint,placed,True,tolerance_mm=controls['tolerance_mm'],deadline=None if cancelled else min(deadline,time.monotonic()+4),cancelled=cancelled)
-        fallback={'document':move_document(assembly,fit[0]),'fit':fit,'adjustments':{'unlocked':[],'resized':[]}}
-        best_gap=gap(fallback)
-        if best_gap<=.03: return fallback
+        return {'document':move_document(assembly,fit[0]),'fit':fit,'adjustments':{'unlocked':[],'resized':[]}}
     except DocumentError as exc: failure=str(exc)
-    else: failure=f'Closest unadjusted fit leaves {best_gap:.2f} mm.'
     connectors,members=_candidates(assembly,joint)
     attempts=0
     for unlocked,resized in _plans(connectors,members,controls):
@@ -184,11 +176,8 @@ def adjust_connection(assembly,joint,placed,controls,*,cancelled=None):
             fit=fit_connection(proxy,adapted,intent,True,tolerance_mm=controls['tolerance_mm'],
                                deadline=None if cancelled else min(deadline,time.monotonic()+4),check_collisions=not stretch,cancelled=cancelled)
             result=_materialize(working,proxy,joint,fit,released,stretch,controls)
-            remaining=gap(result)
-            if remaining<=.03: return result
-            if remaining<best_gap: fallback=result;best_gap=remaining
+            return result
         except DocumentError as exc: failure=str(exc)
-    if fallback is not None: return fallback
     raise DocumentError(f'No fit found within the allowed edits ({controls["unlock_connectors"]} connectors to loosen/retighten; '
                         f'{controls["resize_members"]} pipes to resize by at most {controls["max_length_change_mm"]:g} mm each). '
                         f'Tried {attempts} combinations. {failure}')

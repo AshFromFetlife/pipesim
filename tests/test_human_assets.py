@@ -6,7 +6,15 @@ from pathlib import Path
 import pytest
 from pipesim.document import Assembly, DocumentError
 from pipesim.human_assets import (MAX_ASSET_BYTES, import_human_model,
-                                  prepare_import, validate_stored_asset, _auto_bone_map)
+                                  prepare_import, validate_stored_asset, validate_render_model, _auto_bone_map)
+
+
+def test_imported_body_proportion_controls_are_bounded():
+    config = {'file': 'person.glb', 'body_proportions': {'neck': .75, 'shoulders': 1.2}}
+    validate_render_model(config)
+    for invalid in ({'neck': 0}, {'neck': 1.6}, {'neck': float('nan')}, {'unknown': 1}):
+        with pytest.raises(DocumentError):
+            validate_render_model({**config, 'body_proportions': invalid})
 
 
 def encoded(value):
@@ -157,13 +165,48 @@ def test_import_rejects_invalid_and_unsupported_assets(mutation, match):
     with pytest.raises(DocumentError, match=match): prepare_import('avatar.gltf', encoded(json.dumps(data).encode()))
 
 
-def test_missing_sidecar_and_corrupt_or_oversized_upload_fail_before_writing(tmp_path):
+def test_missing_sidecar_and_corrupt_or_oversized_upload_fail_before_writing(tmp_path,monkeypatch):
     data, _ = skinned_fixture(external=True)
     with pytest.raises(DocumentError, match='companion'): prepare_import('avatar.gltf', encoded(json.dumps(data).encode()))
     for filename, raw in [('x.glb', b'glTF'), ('x.gltf', b'{'), ('x.obj', b'hello')]:
         with pytest.raises(DocumentError): import_human_model(tmp_path / 'assets', tmp_path, filename, encoded(raw))
-    with pytest.raises(DocumentError, match='20 MiB'): prepare_import('x.glb', 'A' * (MAX_ASSET_BYTES * 2))
+    assert MAX_ASSET_BYTES==200*1024*1024
+    monkeypatch.setattr('pipesim.human_assets.MAX_ASSET_BYTES',1024*1024)
+    with pytest.raises(DocumentError, match='1 MiB'): prepare_import('x.glb', 'A' * (2*1024*1024))
     assert not (tmp_path / 'assets').exists()
+
+
+@pytest.mark.parametrize('suffix',['.glb','.vrm','.gltf'])
+def test_large_rig_keeps_skeleton_textures_and_reopens(tmp_path,suffix):
+    data,binary=skinned_fixture(external=True)
+    binary=binary.ljust(25*1024*1024,b'\0')
+    data['buffers'][0]['byteLength']=len(binary)
+    companions=[{'name':'albedo.png','content_base64':encoded(PNG)}]
+    if suffix=='.gltf':
+        raw=json.dumps(data).encode()
+        companions.append({'name':'body.bin','content_base64':encoded(binary)})
+    else:
+        data['buffers'][0].pop('uri')
+        raw=glb(data,binary)
+    result=import_human_model(tmp_path/'assets',tmp_path,'large'+suffix,encoded(raw),companions)
+    metadata=validate_stored_asset(result['asset'])
+    assert metadata['vertex_count']==3 and metadata['texture_count']==1
+    assert metadata['bone_map']==result['render_model']['bone_map']
+
+
+def test_import_limits_include_all_selected_files_and_accept_exact_boundary(tmp_path,monkeypatch):
+    import pipesim.human_assets as assets
+    data,binary=skinned_fixture(external=True)
+    raw=json.dumps(data).encode()
+    companions=[{'name':'body.bin','content_base64':encoded(binary)},
+                {'name':'albedo.png','content_base64':encoded(PNG)}]
+    total=len(raw)+len(binary)+len(PNG)
+    monkeypatch.setattr(assets,'MAX_ASSET_BYTES',total)
+    result=import_human_model(tmp_path/'assets',tmp_path,'rig.gltf',encoded(raw),companions)
+    assert validate_stored_asset(result['asset'])['vertex_count']==3
+    monkeypatch.setattr(assets,'MAX_ASSET_BYTES',total-1)
+    with pytest.raises(DocumentError,match='selected files exceed'):
+        prepare_import('rig.gltf',encoded(raw),companions)
 
 
 def test_render_config_does_not_change_physics_and_follows_save_as_and_expand(blank, tmp_path):

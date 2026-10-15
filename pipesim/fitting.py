@@ -84,10 +84,14 @@ def fit_connection(assembly, joint, placed, force=False, *, tolerance_mm=2., dea
             upper.append(socket['engagement_mm']/100)
             initial.append(joint['insertion_mm']/100)
     lower, upper, initial = np.array(lower), np.array(upper), np.array(initial)
-    active=[]
+    active=[];rotational=set()
     for mechanism,coordinates,root in layouts:
         active.extend(coordinates.start+index for index in _connection_variables(mechanism,{aid,bid}))
-        if root is not None: active.extend(range(root.start,root.stop))
+        rotational.update(coordinates.start+index for entries in mechanism.variables.values()
+                          for name,index,_,_,_ in entries if index is not None and name!='slide_mm')
+        if root is not None:
+            active.extend(range(root.start,root.stop))
+            rotational.update(range(root.start+3,root.stop))
     if adjustable is not None: active.append(adjustable)
     variable = np.array([i for i in active if upper[i]-lower[i]>1e-12],dtype=int)
     if not len(variable):
@@ -159,14 +163,60 @@ def fit_connection(assembly, joint, placed, force=False, *, tolerance_mm=2., dea
             errors.append(np.array([10*max(0., .25-gap)]))
         return np.concatenate(errors)
 
-    def full(values):
-        q = initial.copy(); q[variable] = values
+    def full(values, indices):
+        q = initial.copy(); q[indices] = values
         return q
+
+    def preferred_coordinates(q):
+        # Round mechanism coordinates, then independently check the complete
+        # pose. Rounding saved XYZ poses independently would shear rigid groups
+        # or break loop closures. Invalid lattice candidates simply fall back.
+        seen=[]
+        for angle_step in (15.,1.,None):
+            candidate=q.copy()
+            if angle_step is not None:
+                for index in variable:
+                    if index in rotational:
+                        candidate[index]=np.deg2rad(np.round(np.rad2deg(q[index])/angle_step)*angle_step)
+                    elif index!=adjustable or abs(initial[index]*100-round(initial[index]*100))<1e-6:
+                        candidate[index]=np.round(q[index]*100)/100
+            if np.any(candidate<lower-1e-10) or np.any(candidate>upper+1e-10): continue
+            if any(np.array_equal(candidate,old) for old in seen): continue
+            seen.append(candidate)
+            yield candidate
 
     from .validation import SOCKET_AXIS_MIN_DOT
     allowed_alignment = np.sqrt(2*(1-SOCKET_AXIS_MIN_DOT))
     _, initial_alignment = socket_error(initial, forward(initial)[0])
     angular_allowance = allowed_alignment*.99 if np.linalg.norm(initial_alignment)<allowed_alignment else 0.
+    def fitted_at(q):
+        result = copy.deepcopy(joint)
+        if adjustable is not None:
+            if socket.get('through'): result['b']['at_mm'] = float(q[adjustable]*100)
+            else: result['insertion_mm'] = float(q[adjustable]*100)
+        return result
+
+    # A detached through fitting can already surround its pipe. The station in
+    # the dialog may be a rounded midpoint, while the physical bore is a little
+    # farther along. Use that actual station before changing any joint pose.
+    unchanged_intent=all(
+        np.allclose(placed.parts[pid].matrix[:3, 3], matrices[pid][:3, 3], atol=.002, rtol=0) and
+        np.allclose(placed.parts[pid].matrix[:3, :3], matrices[pid][:3, :3], atol=2e-6, rtol=0)
+        for pid in moving)
+    if force and socket.get('through') and unchanged_intent:
+        mouth = point(matrices[aid], a_local)
+        pipe_axis = matrices[bid][:3, :3]@b_axis
+        station = (mouth-matrices[bid][:3, 3])@pipe_axis + assembly.parts[bid].length/2
+        q = initial.copy()
+        q[adjustable] = np.clip(station/100, lower[adjustable], upper[adjustable])
+        actual, _ = forward(q)
+        gap, alignment = socket_error(q, actual)
+        if np.linalg.norm(gap) <= tolerance_mm+1e-7 and np.linalg.norm(alignment) <= max(1e-4, angular_allowance+1e-5):
+            candidate = copy.copy(assembly)
+            candidate.joints = [*assembly.joints, fitted_at(q)]
+            from .snapping import connection_collisions
+            if not check_collisions or not connection_collisions(assembly, candidate, {aid, bid}, {aid, bid}, cancelled=cancelled):
+                return {}, fitted_at(q), [], sorted({aid, bid}), 0.
     rng = np.random.default_rng(48291)
     best = None; best_coordinates = None; failure = None; attempts = 0
     seeds = [initial.copy()]
@@ -174,53 +224,68 @@ def fit_connection(assembly, joint, placed, force=False, *, tolerance_mm=2., dea
         seed = initial+rng.normal(0, .3 if n < 3 else 1., len(initial))
         if adjustable is not None: seed[adjustable] = initial[adjustable]
         seeds.append(np.clip(seed, lower, upper))
-    for seed in seeds:
+    translations=np.array([i for i in variable if i not in rotational],dtype=int)
+    attempts_to_solve=([(initial.copy(),translations)] if len(translations) and len(translations)<len(variable) else [])
+    attempts_to_solve.extend((seed,variable) for seed in seeds)
+    for seed,indices in attempts_to_solve:
         check_cancelled(cancelled)
         contacts.clear()
         for contact_pass in range(5 if force else 2):
             if attempts and time.monotonic() > deadline: break
             attempts += 1
             try:
-                solved = least_squares(lambda values: residual(full(values)), seed[variable],
-                                       bounds=(lower[variable], upper[variable]), max_nfev=180 if force else 80,
+                solved = least_squares(lambda values: residual(full(values,indices)), seed[indices],
+                                       bounds=(lower[indices], upper[indices]), max_nfev=180 if force else 80,
                                        ftol=1e-10, xtol=1e-10, gtol=1e-9)
             except TimeoutError:
                 if not failure: failure='The search time budget expired before a fit could be verified.'
                 break
-            q = full(solved.x); actual, _ = forward(q)
+            q = full(solved.x,indices); actual, _ = forward(q)
             gap, alignment = socket_error(q, actual)
             metric = float(np.linalg.norm(gap)+100*np.linalg.norm(alignment))
             if best is None or metric < best[0]:
                 best = (metric, float(np.linalg.norm(gap)), float(np.rad2deg(2*np.arcsin(np.clip(np.linalg.norm(alignment)/2, 0, 1)))))
                 best_coordinates=q.copy()
-            if np.linalg.norm(gap) > tolerance_mm+1e-7 or np.linalg.norm(alignment) > max(1e-4,angular_allowance+1e-5):
-                break
-            posed = copy.copy(assembly); posed.parts = {pid: copy.copy(p) for pid, p in assembly.parts.items()}
-            for pid, matrix in actual.items(): posed.parts[pid].matrix = matrix
-            try:
-                coordinates = _movement_coordinates(assembly, posed)
-            except DocumentError as exc:
-                failure = str(exc); break
-            from .snapping import connection_collisions
-            check_cancelled(cancelled)
-            collisions = connection_collisions(assembly, posed, moving, {aid, bid},cancelled=cancelled) if check_collisions else []
-            if collisions:
-                failure = 'Parts still intersect: '+', '.join(dict.fromkeys(f'{a} / {b}' for a, b, _ in collisions))
-                for a, b, contact in collisions:
-                    contacts.append((a, b, point(np.linalg.inv(posed.parts[a].matrix), np.array(contact[5])*1000),
-                                     point(np.linalg.inv(posed.parts[b].matrix), np.array(contact[6])*1000), np.array(contact[7])))
-                seed = q
-                continue
-            check_cancelled(cancelled)
-            fitted_joint = copy.deepcopy(joint)
-            if adjustable is not None:
-                if socket.get('through'): fitted_joint['b']['at_mm'] = float(q[adjustable]*100)
-                else: fitted_joint['insertion_mm'] = float(q[adjustable]*100)
-            poses = {pid: pose_of(matrix) for pid, matrix in actual.items() if not np.allclose(matrix, matrices[pid], atol=1e-7, rtol=0)}
-            changes = [{'joint': jid, **values} for jid, values in coordinates.items()]
-            angles = [float(np.rad2deg(Rotation.from_matrix(actual[pid][:3, :3]@matrices[pid][:3, :3].T).magnitude())) for pid in poses]
-            context = sorted(moving-set(poses))
-            return poses, fitted_joint, changes, context, max(angles, default=0)
+            rejected_contacts=[]
+            for candidate_q in preferred_coordinates(q):
+                actual, _ = forward(candidate_q)
+                gap, alignment = socket_error(candidate_q, actual)
+                if np.linalg.norm(gap) > tolerance_mm+1e-7 or np.linalg.norm(alignment) > max(1e-4,angular_allowance+1e-5):
+                    continue
+                posed = copy.copy(assembly); posed.parts = {pid: copy.copy(p) for pid, p in assembly.parts.items()}
+                for pid, matrix in actual.items(): posed.parts[pid].matrix = matrix
+                fitted_joint = fitted_at(candidate_q)
+                posed.joints = [*assembly.joints, fitted_joint]
+                try:
+                    coordinates = _movement_coordinates(assembly, posed)
+                except DocumentError as exc:
+                    failure = str(exc); continue
+                # A rounded station/depth must still engage the real socket.
+                # Check before accepting it, so a failed preference can fall
+                # through to the continuous solution instead of ending search.
+                from .validation import validate
+                socket_errors=[issue for issue in validate(posed,collisions=False,geometry=False,support_checks=False)['issues']
+                               if issue['severity']=='error' and issue.get('joint')==fitted_joint['id']]
+                if socket_errors:
+                    failure=socket_errors[0]['message'];continue
+                from .snapping import connection_collisions
+                check_cancelled(cancelled)
+                collisions = connection_collisions(assembly, posed, moving, {aid, bid},cancelled=cancelled) if check_collisions else []
+                if collisions:
+                    failure = 'Parts still intersect: '+', '.join(dict.fromkeys(f'{a} / {b}' for a, b, _ in collisions))
+                    rejected_contacts=[(a, b, point(np.linalg.inv(posed.parts[a].matrix), np.array(contact[5])*1000),
+                                        point(np.linalg.inv(posed.parts[b].matrix), np.array(contact[6])*1000), np.array(contact[7]))
+                                       for a,b,contact in collisions]
+                    continue
+                check_cancelled(cancelled)
+                poses = {pid: pose_of(matrix) for pid, matrix in actual.items() if not np.allclose(matrix, matrices[pid], atol=1e-7, rtol=0)}
+                changes = [{'joint': jid, **values} for jid, values in coordinates.items()]
+                angles = [float(np.rad2deg(Rotation.from_matrix(actual[pid][:3, :3]@matrices[pid][:3, :3].T).magnitude())) for pid in poses]
+                context = sorted(moving-set(poses))
+                return poses, fitted_joint, changes, context, max(angles, default=0)
+            if not rejected_contacts: break
+            contacts.extend(rejected_contacts)
+            seed = q
         if time.monotonic() > deadline: break
     detail = failure or (f'Closest fit leaves {best[1]:.2f} mm and {best[2]:.3f}° of misalignment.' if best else '')
     constraints=[]

@@ -9,6 +9,7 @@ from pipesim.geometry import lowest_z,mesh_for_part
 from pipesim.math3d import pose_of
 from pipesim.posing import drop_to_floor
 from pipesim.snapping import _movement_coordinates
+from floor_cases import check_free_floor
 
 
 def box(pid,position,size=(100,80,60)):
@@ -106,3 +107,59 @@ def test_hinged_part_corrects_its_changed_extent_when_lowered(blank,factory):
     before=factory(blank);after=factory(drop_to_floor(before,'part')['document'])
     assert mesh_for_part(after.parts['part'],True).bounds[0,2]==pytest.approx(0,abs=.01)
     _movement_coordinates(before,after)
+
+
+@pytest.mark.parametrize('seed',[0,1,2,3])
+@pytest.mark.parametrize('selected',['rail','foot-1','sleeve-2'])
+def test_free_closed_frame_drops_independently_of_selected_body(factory,seed,selected):
+    from pipesim.preview import PreparedAssembly
+    check_free_floor(factory,seed,selected=selected,prepared=PreparedAssembly)
+
+
+def test_free_floor_placement_does_not_search_joint_travel(factory,monkeypatch):
+    def unexpected(*args,**kwargs):
+        raise AssertionError('Free floor placement must not run inverse kinematics')
+    monkeypatch.setattr('pipesim.posing.Mechanism',unexpected)
+    monkeypatch.setattr('pipesim.posing.least_squares',unexpected)
+    check_free_floor(factory,1)
+
+
+def test_drop_free_draft_attachment_uses_lowest_run_and_carries_other_body(blank,factory):
+    from pipesim.drafting import preview
+    for pid,z in [('lower',500),('upper',800)]:
+        blank['parts'].append({'id':pid,'body':{'kind':'connector','mass_kg':1,
+            'geometry':[{'type':'box','size_mm':[60,60,60]}],
+            'ports':{'bore':{'type':'socket','profile':'round','diameter_mm':42.4,
+                            'through':True,'engagement_mm':60,'axis':[0,0,1],
+                            'position_mm':[0,0,0]}}},'pose':{'position_mm':[0,0,z]}})
+    blank['draft_subassemblies']=[{'id':'draft','runs':[{'id':'run','catalog':'tubeclamp.tube-C',
+        'start_mm':[0,0,100],'end_mm':[0,0,1000],
+        'attachments':[{'connector':p,'port':'bore'} for p in ('lower','upper')]}]}]
+    before=factory(blank);result=drop_to_floor(before,'lower');after=factory(result['document'])
+    assert set(result['moved'])=={'lower','upper'}
+    run=after.doc['draft_subassemblies'][0]['runs'][0]
+    assert np.allclose(run['start_mm'],[0,0,0],atol=1e-7)
+    assert np.allclose(run['end_mm'],[0,0,900],atol=1e-7)
+    assert not preview(after)[0]['conflicts']
+    assert after.parts['lower'].matrix[2,3]==pytest.approx(400)
+    assert after.parts['upper'].matrix[2,3]==pytest.approx(700)
+    assert not drop_to_floor(after,'upper')['moved']
+
+
+def test_drop_whole_object_uses_attached_lower_body(blank,factory):
+    blank['objects']=[{'id':'object','template':'custom','pose':{'position_mm':[0,0,500]},
+        'components':{'parts':[box('body',[0,0,0])],'joints':[]}}]
+    blank['parts']=[box('foot',[0,0,200],(40,40,40))]
+    blank['joints']=[{'id':'attachment','type':'spherical',
+        'a':{'part':'object/body','frame':{'position_mm':[0,0,-300]}},'b':{'part':'foot'}}]
+    before=factory(blank);result=drop_to_floor(before,'object/body','object');after=factory(result['document'])
+    assert set(result['moved'])=={'object/body','foot'}
+    assert min(lowest_z(p) for p in after.parts.values())==pytest.approx(0,abs=1e-7)
+    assert after.parts['object/body'].matrix[2,3]==pytest.approx(320)
+    assert after.doc['objects'][0]['components']==before.doc['objects'][0]['components']
+
+
+def test_unreachable_anchored_drop_names_external_fixing_and_remaining_gap(blank,factory):
+    before=slider(blank,factory,travel=100)
+    with pytest.raises(DocumentError,match=r'support is fixed to the world.*250.00 mm above Z = 0'):
+        drop_to_floor(before,'part')

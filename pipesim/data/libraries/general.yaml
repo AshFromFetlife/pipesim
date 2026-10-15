@@ -533,6 +533,11 @@ parts:
     mass_kg: 0.0035
     break_force_n: 8000
     axial_rigidity_n: 200000
+    # Local X is across the 65 mm width, Y is through the 2.2 mm thickness,
+    # and Z follows the strap. Bending about X is easy; edgewise bending and
+    # twisting remain possible but resist the crumpled ball-joint shape.
+    bend_stiffness_nm_rad: [0.0003, 0.03, 0.002]
+    bend_damping_nm_s_rad: [0.00012, 0.0012, 0.00035]
     geometry:
     - {type: box, size_mm: [65, 2.2, 25]}
     ports:
@@ -541,37 +546,46 @@ parts:
     source:
       geometry_status: flat webbing segment proxy
       strength_status: illustrative simulation threshold; replace with a verified strap rating
-  generic.d-link:
-    name: "D shackle \xB7 generic"
+      bending_status: illustrative directional response; not measured nylon-webbing stiffness
+  generic.d-shackle:
+    name: "D shackle · generic"
     kind: connector
     material: steel-assumed
-    geometry:
-    - type: tube
-      diameter_mm: 40
-      wall_mm: 8.0
-      length_mm: 8
-      position_mm:
-      - 0
-      - 0
-      - 0
-      axis:
-      - 0
-      - 1
-      - 0
+    color: '#a4afb5'
+    geometry: &d_shackle_geometry
+    - {type: cylinder, diameter_mm: 8, length_mm: 28, position_mm: [-14, 0, -1], axis: [0, 0, 1], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 28, position_mm: [14, 0, -1], axis: [0, 0, 1], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [13.6574, 0, 14.1631], axis: [-0.1564, 0, 0.9877], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [12.3205, 0, 18.2776], axis: [-0.454, 0, 0.891], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [9.7776, 0, 21.7776], axis: [-0.7071, 0, 0.7071], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [6.2776, 0, 24.3205], axis: [-0.891, 0, 0.454], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [2.1631, 0, 25.6574], axis: [-0.9877, 0, 0.1564], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [-2.1631, 0, 25.6574], axis: [-0.9877, 0, -0.1564], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [-6.2776, 0, 24.3205], axis: [-0.891, 0, -0.454], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [-9.7776, 0, 21.7776], axis: [-0.7071, 0, -0.7071], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [-12.3205, 0, 18.2776], axis: [-0.454, 0, -0.891], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 5.3802, position_mm: [-13.6574, 0, 14.1631], axis: [-0.1564, 0, -0.9877], segments: 10}
+    - {type: cylinder, diameter_mm: 8, length_mm: 42, position_mm: [0, 0, -15], axis: [1, 0, 0], segments: 12, color: '#879299'}
+    - {type: cylinder, diameter_mm: 14, length_mm: 3, position_mm: [-22, 0, -15], axis: [1, 0, 0], segments: 12, color: '#879299'}
+    - {type: cylinder, diameter_mm: 12, length_mm: 3, position_mm: [22, 0, -15], axis: [1, 0, 0], segments: 12, color: '#879299'}
     ports:
-      eye:
-        type: eye
-        position_mm:
-        - 0
-        - 0
-        - 0
-        axis:
-        - 0
-        - 1
-        - 0
-        assembly: hook
+      eye: {type: eye, position_mm: [0, 0, 10], axis: [1, 0, 0], assembly: hook, snap_role: shackle}
+      pin_hook: {type: eye, position_mm: [0, 0, -15], axis: [1, 0, 0], assembly: hook, snap_role: shackle, excludes: [pin_bolt]}
+      pin_bolt: {type: clevis, position_mm: [0, 0, -15], axis: [1, 0, 0], diameter_mm: 8, assembly: bolt, snap_role: shackle, excludes: [pin_hook]}
     source:
-      geometry_status: generic ring proxy; no load rating
+      geometry_status: low-poly generic D-shackle and removable pin approximation; no load rating
+  generic.d-link:
+    name: "D shackle · legacy ID"
+    kind: connector
+    material: steel-assumed
+    color: '#a4afb5'
+    geometry: *d_shackle_geometry
+    ports:
+      eye: {type: eye, position_mm: [0, 0, 0], axis: [0, 1, 0], assembly: hook, snap_role: shackle}
+      pin_hook: {type: eye, position_mm: [0, 0, -15], axis: [1, 0, 0], assembly: hook, snap_role: shackle, excludes: [pin_bolt]}
+      pin_bolt: {type: clevis, position_mm: [0, 0, -15], axis: [1, 0, 0], diameter_mm: 8, assembly: bolt, snap_role: shackle, excludes: [pin_hook]}
+    source:
+      geometry_status: legacy D-link ID; original eye frame retained for saved designs
   adafruit.GT2-20T-5:
     name: "GT2 pulley \xB7 20 teeth \xB7 5 mm bore"
     kind: rigid

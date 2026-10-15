@@ -18,7 +18,7 @@ import * as preferences from '../pipesim/web/preferences.js';
 import {nextFlexibleShortcutLength} from '../pipesim/web/resize-shortcuts.js';
 import * as drafting from '../pipesim/web/drafting.js';
 import {HUMAN_POSES} from '../pipesim/web/human-poses.js';
-import {HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg} from '../pipesim/web/human-model.js';
+import {HumanModelLayer,HUMAN_BONE_SEGMENTS,HUMAN_FIT_CONTROLS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg} from '../pipesim/web/human-model.js';
 import {makeRig,exportRig} from './helpers/human-rig-fixtures.mjs';
 import {registerGeometryWorkflows} from './helpers/geometry-workflow-fuzz.mjs';
 import {registerAnchoredResizeWorkflows} from './helpers/anchored-resize-workflows.mjs';
@@ -110,6 +110,141 @@ const largeDraftFixture=()=>{
   }
   return doc;
 };
+
+test('port display distinguishes free, locked and movable connections on every port type',async()=>{
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',name:'Port status',parts:[
+    {id:'hub',body:{kind:'connector',mass_kg:.2,geometry:[{type:'sphere',radius_mm:15}],ports:{
+      socket:{type:'socket',position_mm:[0,0,0],axis:[0,0,1]},
+      eye:{type:'eye',position_mm:[30,0,0],axis:[1,0,0]},
+      pin:{type:'pin',position_mm:[-30,0,0],axis:[-1,0,0]},
+      bolt:{type:'bolt',position_mm:[0,30,0],axis:[0,1,0]}}},pose:{position_mm:[0,0,100]}},
+    {id:'fixed',body:{kind:'rigid',mass_kg:.2,geometry:[{type:'sphere',radius_mm:5}]}},
+    {id:'moving',body:{kind:'rigid',mass_kg:.2,geometry:[{type:'sphere',radius_mm:5}]}}
+  ],joints:[
+    {id:'fixed-joint',type:'fixed',locked:false,a:{part:'hub',port:'eye'},b:{part:'fixed'}},
+    {id:'moving-joint',type:'revolute',a:{part:'hub',port:'pin'},b:{part:'moving'}}]};
+  const ui=await editor(doc);try{
+    ui.document.querySelector('#ports-button').click();
+    const marker=name=>ui.ports.children.find(node=>node.userData.part==='hub'&&node.userData.port===name);
+    for(const [name,status,color] of [['socket','free','ed514b'],['bolt','free','ed514b'],
+      ['eye','locked','3c9c85'],['pin','movable','71ce51']]){
+      assert.equal(marker(name).userData.connection,status,name);
+      assert.equal(marker(name).material.color.getHexString(),color,name);
+    }
+    ui.select('hub');
+    ui.document.querySelector('[data-lock="moving-joint"]').click();
+    await ui.wait(()=>marker('pin')?.userData.connection==='locked');
+    assert.equal(marker('pin').material.color.getHexString(),'3c9c85');
+  }finally{await ui.close();}
+});
+
+test('draft socket marker changes when its run is detached without finalizing',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'frame',runs:[
+    {id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],
+      attachments:[{connector:'left',port:'socket',end:'start',insertion_mm:20},
+        {connector:'right',port:'socket',end:'end',insertion_mm:20,joint:{id:'right-socket-run',type:'socket',
+          a:{part:'right',port:'socket'},b:{part:'run',end:'end'},locked:false}}]}
+  ]}];
+  const ui=await editor(doc);try{
+    ui.document.querySelector('#ports-button').click();
+    const marker=()=>ui.ports.children.find(node=>node.userData.part==='left'&&node.userData.port==='socket');
+    assert.equal(marker().userData.connection,'locked');
+    assert.equal(ui.ports.children.find(node=>node.userData.part==='right'&&node.userData.port==='socket').userData.connection,'movable');
+    ui.select('run');ui.document.querySelector('[data-draft-detach="0"]').click();
+    assert.equal(marker().userData.connection,'free');
+    assert.equal(marker().material.color.getHexString(),'ed514b');
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>marker()?.userData.connection==='locked');
+  }finally{await ui.close();}
+});
+
+test('nearby attach toast offers one click for matching open sockets and one Undo',async()=>{
+  const doc=largeDraftFixture();
+  doc.parts=doc.parts.filter(part=>Number(part.id.split('-').at(-1))<4);
+  doc.draft_subassemblies[0].runs=doc.draft_subassemblies[0].runs.slice(0,4);
+  const ui=await editor(doc);try{
+    const runs=()=>ui.state.doc.draft_subassemblies[0].runs;
+    ui.select('left-0');
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',
+      {key:'J',ctrlKey:true,altKey:true,shiftKey:true,bubbles:true}));
+    await ui.wait(()=>runs()[0].attachments?.length===1&&!ui.state.placementPending);
+    await ui.wait(()=>ui.document.querySelector('#toast .toast-action'));
+    const action=ui.document.querySelector('#toast .toast-action');
+    assert.match(action.textContent,/Attach all 3 similar connections/);
+    await pause(4700);
+    assert.equal(ui.document.querySelector('#toast').classList.contains('hidden'),false);
+    action.click();
+    await ui.wait(()=>runs().every(run=>run.attachments?.length===1)&&!ui.state.placementPending);
+    assert.deepEqual(runs().map(run=>run.attachments[0].connector),
+      ['left-0','left-1','left-2','left-3']);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>runs()[0].attachments?.length===1&&runs().slice(1).every(run=>!run.attachments?.length));
+  }finally{await ui.close();}
+});
+
+test('draft connection toast offers matching sockets',async()=>{
+  const doc=largeDraftFixture();
+  doc.parts=doc.parts.filter(part=>Number(part.id.split('-').at(-1))<3);
+  doc.draft_subassemblies[0].runs=doc.draft_subassemblies[0].runs.slice(0,3);
+  const ui=await editor(doc);try{
+    ui.draftConnect({member:'run-0',connector:'left-0',port:'socket',end:'start'});
+    await ui.wait(()=>ui.document.querySelector('#toast .toast-action'));
+    assert.match(ui.document.querySelector('#toast').textContent,
+      /1 draft connection added.*Attach all 2 similar connections/);
+  }finally{await ui.close();}
+});
+
+test('closing the editor while a similar-connection preview returns leaves no toast error',async()=>{
+  const doc=largeDraftFixture();
+  doc.parts=doc.parts.filter(part=>Number(part.id.split('-').at(-1))<2);
+  doc.draft_subassemblies[0].runs=doc.draft_subassemblies[0].runs.slice(0,2);
+  let held=false,release;
+  const gate=new Promise(resolve=>release=resolve),errors=[];
+  const ui=await editor(doc,null,{onError:error=>errors.push(error),
+    beforeResponse:async path=>{if(path==='/api/quick-connections'){held=true;await gate;}}});
+  try{
+    ui.draftConnect({member:'run-0',connector:'left-0',port:'socket',end:'start'});
+    await ui.wait(()=>held);
+    ui.window.close();release();
+    await pause(100);
+    assert.deepEqual(errors,[]);
+  }finally{release();await ui.close();}
+});
+
+test('connection shortcuts detach a draft length, move it, and reattach nearby sockets with separate Undo steps',async()=>{
+  const doc=draftFixture();doc.draft_subassemblies=[{id:'frame',runs:[
+    {id:'run',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[1000,0,100],
+      attachments:[
+        {connector:'left',port:'socket',end:'start',insertion_mm:20},
+        {connector:'right',port:'socket',end:'end',insertion_mm:20}]}
+  ]}];
+  const ui=await editor(doc);try{
+    const run=()=>ui.state.doc.draft_subassemblies[0].runs[0];
+    const key=(key,options={})=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',
+      {key,bubbles:true,...options}));
+    ui.select('run');
+    key('j',{ctrlKey:true,altKey:true});
+    await ui.wait(()=>run().attachments.length===0&&!ui.state.placementPending);
+    const start=run().start_mm[0];
+    key('D',{shiftKey:true});
+    await ui.wait(()=>run().start_mm[0]>start&&!ui.state.placementPending);
+    const moved=run().start_mm[0];
+    key('J',{ctrlKey:true,altKey:true,shiftKey:true});
+    await ui.wait(()=>run().attachments.length===2&&!ui.state.placementPending);
+    assert.equal(run().start_mm[0],moved,'reattaching keeps the edited draft coordinates');
+    const undoCount=ui.state.undo.length;
+    key('J',{ctrlKey:true,altKey:true,shiftKey:true});
+    await ui.wait(()=>!ui.state.placementPending);
+    assert.equal(ui.state.undo.length,undoCount,'an already connected selection adds no Undo step');
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>run().attachments.length===0);
+    assert.equal(run().start_mm[0],moved);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>run().start_mm[0]===start);
+    ui.document.querySelector('#undo').click();
+    await ui.wait(()=>run().attachments.length===2);
+  }finally{await ui.close();}
+});
 
 test('draft connections appear on both the pipe and connector and detach from either side',async()=>{
   const doc=draftFixture();doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
@@ -216,6 +351,20 @@ test('draft mirror previews pipes and connectors, then discards or keeps the cop
     assert.equal(ui.state.doc.draft_subassemblies[0].runs.length,2);
     assert.ok(ui.state.doc.parts.some(part=>part.id.startsWith('left-mirror-')&&part.body.geometry[0].type==='mesh'));
     assert.equal(ui.state.undo.length,4);
+  }finally{await ui.close();}
+});
+
+test('scene mirror does not preview a second chain across its own plane',async()=>{
+  const saved=JSON.parse(await readFile('tests/fixtures/chain_semi_circle_attachment.json','utf8'));
+  const doc={format:saved.format,units:saved.units,name:'Crossing chain preview',parts:[],joints:[],
+    objects:[saved.objects[0],{id:'side-chain',template:'chain',
+      parameters:{length_mm:80,link_catalog:'generic.chain-link'},pose:{position_mm:[300,0,700]}}],
+    draft_subassemblies:[{id:'scene',runs:[],mirrors:[{id:'plane',axis:'x',offset_mm:0,scope:'scene'}]}]};
+  const ui=await editor(doc);try{
+    ui.tick();
+    const sources=[...ui.mirrorCopies.values()].map(record=>record.source.userData.part);
+    assert.equal(sources.filter(id=>id?.startsWith('chain-1/link-')).length,0);
+    assert.equal(sources.filter(id=>id?.startsWith('side-chain/link-')).length,4);
   }finally{await ui.close();}
 });
 
@@ -342,6 +491,8 @@ test('simulation playback shows bent beam elements with the deflection warning c
   const stored=JSON.stringify({...preferences.DEFAULT_PREFERENCES,deflectionWarningMm:2.5});
   const ui=await editor(doc,null,{storedPreferences:stored});try{
     ui.document.querySelector('[data-mode="simulate"]').click();
+    const detail=ui.document.querySelector('[data-preview-detail="beam"]');
+    detail.checked=true;detail.dispatchEvent(new ui.window.Event('change'));
     ui.document.querySelector('#sim-duration').value='.5';
     ui.document.querySelector('[data-run="simulate"]').click();
     await ui.wait(()=>ui.state.recording&&!ui.state.busy,60000);
@@ -451,6 +602,39 @@ test('adding a mirror automatically centers a perpendicular pipe, including late
     const freeLength=ui.document.querySelector('#draft-length');freeLength.value='1400';freeLength.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
     assert.deepEqual(run.start_mm,[-600,0,100]);assert.deepEqual(run.end_mm,[800,0,100]);
     assert.equal(ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run,'free');
+  }finally{await ui.close();}
+});
+
+test('dragging a centered pipe into a supported socket snaps both ends',async()=>{
+  const doc=draftFixture();
+  doc.parts=[{id:'socket',pose:{position_mm:[-700,0,100]},body:{kind:'connector',mass_kg:.2,
+    geometry:[{type:'sphere',radius_mm:12}],ports:{
+      branch:{type:'socket',profile:'round',diameter_mm:42.4,position_mm:[0,0,0],
+        axis:[1,0,0],engagement_mm:40,min_engagement_mm:15},
+      vertical:{type:'socket',profile:'round',diameter_mm:42.4,position_mm:[0,0,0],
+        axis:[0,0,1],through:true,engagement_mm:40,min_engagement_mm:15}}}}];
+  doc.draft_subassemblies=[{id:'frame',runs:[
+    {id:'pipe',catalog:'tubeclamp.tube-C',start_mm:[-500,0,100],end_mm:[500,0,100],attachments:[]},
+    {id:'leg',catalog:'tubeclamp.tube-C',start_mm:[-700,0,-400],end_mm:[-700,0,600],
+      attachments:[{connector:'socket',port:'vertical'}]}],
+    mirrors:[{id:'midplane',axis:'x',offset_mm:0,scope:'scene',
+      run_modes:{pipe:'centered',leg:'free'}}]}];
+  const requests=[],toasts=[];
+  const ui=await editor(doc,null,{onRequest:(path,body)=>{if(path==='/api/resize-drag')requests.push(body);},
+    onToast:(message,error)=>toasts.push({message,error})});try{
+    ui.select('pipe');ui.document.querySelector('[data-tool="resize"]').click();ui.tick();
+    const from=ui.pixel(ui.resizeHandles.children[0].position);
+    const to=ui.pixel(ui.resizeHandles.children[0].position.clone().add(new Three.Vector3(-344,0,0)));
+    ui.drag(from,to);
+    await ui.drain();
+    assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].attachments.length,1,
+      JSON.stringify({from,to,requests,toasts,run:ui.state.doc.draft_subassemblies[0].runs[0]}));
+    const run=ui.state.doc.draft_subassemblies[0].runs[0];
+    assert.equal(run.attachments[0].connector,'socket');
+    assert.equal(run.attachments[0].end,'start');
+    assert.ok(Math.abs(run.start_mm[0]+run.end_mm[0])<.01);
+    assert.ok(run.start_mm[0]<-700&&run.end_mm[0]>700);
+    assert.equal(ui.state.undo.length,1);
   }finally{await ui.close();}
 });
 
@@ -736,18 +920,19 @@ async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},onRequest=n
   assert.ok(source.includes('function toast(text,error=false){onToast(text,error);'),
     'The editor toast observer must be updated when the toast function changes');
   class MeshLoader {load(path,success,progress,failure){fetchEditor(path).then(response=>response.arrayBuffer()).then(bytes=>success(new ThreeSTLLoader().parse(bytes))).catch(failure);}}
+  class EditorHumanModelLayer extends HumanModelLayer {constructor(options){super({...options,loader:{loadAsync:async()=>makeRig()}});}}
   const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-  const evaluate=new AsyncFunction('THREE','OrbitControls','TransformControls','GLTFLoader','STLLoader','OBJLoader','connectionCandidates','hingeCandidates','clearConnectionIntent','alignmentDelta','socketOccupied','rotationAlignment',
+  const evaluate=new AsyncFunction('THREE','OrbitControls','TransformControls','GLTFLoader','STLLoader','OBJLoader','connectionCandidates','hingeCandidates','clearConnectionIntent','alignmentDelta','socketOccupied','rotationAlignment','mountedThroughStation',
     'DEFAULT_SNAP_SETTINGS','loadSnapDefaults','saveSnapDefaults','validateSnapSettings',
     'DEFAULT_PREFERENCES','loadPreferences','savePreferences','validatePreferences','displayValue','storedValue',
-    'draftRuns','draftRun','draftPreview','HUMAN_POSES','nextFlexibleShortcutLength','HumanModelLayer','HUMAN_BONE_SEGMENTS','EXTRA_BONE_MODES','suggestBoneMappings','boneDiagramSvg',
+    'draftRuns','draftRun','draftPreview','mirrorModeForSpan','HUMAN_POSES','nextFlexibleShortcutLength','HumanModelLayer','HUMAN_BONE_SEGMENTS','HUMAN_FIT_CONTROLS','EXTRA_BONE_MODES','suggestBoneMappings','boneDiagramSvg',
     'window','document','devicePixelRatio','getComputedStyle','ResizeObserver','requestAnimationFrame','fetch','setTimeout','clearTimeout','onToast',
-    source+'\nreturn {state, camera, orbit, scene, partObjects, ports, resizeHandles, viewport, gizmo, snapGhost, mirrorGhost, mirrorCopies, draftConnect, performAutosave, offerConnection, connectionReview};');
+    source+'\nreturn {state, camera, orbit, scene, partObjects, ports, resizeHandles, viewport, gizmo, humanModels, snapGhost, mirrorGhost, mirrorCopies, draftConnect, performAutosave, offerConnection, connectionReview};');
   const app=await evaluate({...Three,WebGLRenderer:Renderer},Controls,realGizmo?ThreeTransformControls:Gizmo,class{},MeshLoader,class{},
-    snapping.connectionCandidates,snapping.hingeCandidates,snapping.clearConnectionIntent,snapping.alignmentDelta,snapping.socketOccupied,snapping.rotationAlignment,
+    snapping.connectionCandidates,snapping.hingeCandidates,snapping.clearConnectionIntent,snapping.alignmentDelta,snapping.socketOccupied,snapping.rotationAlignment,snapping.mountedThroughStation,
     settings.DEFAULT_SNAP_SETTINGS,settings.loadSnapDefaults,settings.saveSnapDefaults,settings.validateSnapSettings,
     preferences.DEFAULT_PREFERENCES,preferences.loadPreferences,preferences.savePreferences,preferences.validatePreferences,preferences.displayValue,preferences.storedValue,
-    drafting.draftRuns,drafting.draftRun,drafting.draftPreview,HUMAN_POSES,nextFlexibleShortcutLength,HumanModelLayer,HUMAN_BONE_SEGMENTS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg,
+    drafting.draftRuns,drafting.draftRun,drafting.draftPreview,drafting.mirrorModeForSpan,HUMAN_POSES,nextFlexibleShortcutLength,EditorHumanModelLayer,HUMAN_BONE_SEGMENTS,HUMAN_FIT_CONTROLS,EXTRA_BONE_MODES,suggestBoneMappings,boneDiagramSvg,
     window,document,1,()=>({getPropertyValue:()=> '#dce5e9'}),class{constructor(callback){this.callback=callback;}observe(){this.callback();}},callback=>{frame=callback;},fetchEditor,
     // Background editor timers must not keep an otherwise completed test
     // worker alive. Tests awaiting UI effects keep their own polling timers.
@@ -919,7 +1104,11 @@ test('connected lattice free-end resize commits and undoes',async()=>{
       {key:'u',bubbles:true,cancelable:true}));
     await ui.wait(()=>!ui.state.placementPending&&
       ui.state.scene.parts.find(part=>part.id===id).length_mm>original+9,30000);
-    assert.ok(ui.state.scene.parts.filter(part=>part.draft).every(part=>!part.conflicts.length));
+    assert.ok(ui.state.scene.parts.filter(part=>part.draft).every(part=>!part.conflicts.length),
+      JSON.stringify(ui.state.scene.parts.filter(part=>part.draft&&part.conflicts.length)
+        .map(part=>({id:part.id,pose:part.pose,length:part.length_mm,
+          run:ui.state.doc.draft_subassemblies.flatMap(group=>group.runs).find(run=>run.id===part.id),
+          conflicts:part.conflicts}))));
     assert.equal(ui.state.undo.length,1);
     ui.document.querySelector('#undo').click();
     await ui.wait(()=>Math.abs(ui.state.scene.parts.find(part=>part.id===id).length_mm-original)<.001);
@@ -1806,6 +1995,24 @@ test('100 draft graph connections in a 300-part scene avoid the exact connection
     assert.equal(requests,0);
     assert.ok(timings[94]<150,`p95 draft connection took ${timings[94].toFixed(1)} ms`);
   }finally{await ui.close();}
+});
+
+test('seeded bursts of draft connections preview only the latest toast',async()=>{
+  for(const seed of [3,6,9,12]){
+    const count=4+seed;
+    const doc=largeDraftFixture();
+    doc.parts=doc.parts.filter(part=>Number(part.id.split('-').at(-1))<count);
+    doc.draft_subassemblies[0].runs=doc.draft_subassemblies[0].runs.slice(0,count);
+    const requests=[];
+    const ui=await editor(doc,null,{onRequest:path=>requests.push(path)});
+    try{
+      for(let index=0;index<count;index++)
+        ui.draftConnect({member:`run-${index}`,connector:`left-${index}`,port:'socket',end:'start'});
+      assert.equal(requests.filter(path=>path==='/api/quick-connections').length,0,`seed ${seed}`);
+      await pause(220);
+      assert.equal(requests.filter(path=>path==='/api/quick-connections').length,1,`seed ${seed}`);
+    }finally{await ui.close();}
+  }
 });
 
 test('dragging a draft run into a through socket commits the shown snap and clears its ghost',async()=>{
@@ -2833,13 +3040,21 @@ test('struggle inspector change succeeds after simulation with over one million 
   }finally{await ui.close();}
 });
 
-test('add human file picker imports an actual weighted GLB and stores its configuration',async()=>{
-  const ui=await editor(blankDesign('Imported human'));try{
+test('add human file picker imports a 31 MiB weighted GLB without uploading the current document',async()=>{
+  let uploaded;
+  const ui=await editor(blankDesign('Imported human'),null,{interceptFetch(path,options){if(path==='/api/import-human-model')uploaded=JSON.parse(options.body);}});try{
     ui.document.querySelector('#human-button').click();
-    const file=new File([await exportRig(makeRig())],'avatar.glb',{type:'model/gltf-binary'}),input=ui.document.querySelector('#human-model-file');
+    const original=Buffer.from(await exportRig(makeRig())),jsonSize=original.readUInt32LE(12);
+    const data=JSON.parse(original.subarray(20,20+jsonSize).toString());
+    const binary=Buffer.alloc(31*1024*1024);original.copy(binary,0,28+jsonSize);data.buffers[0].byteLength=binary.length;
+    let json=Buffer.from(JSON.stringify(data));json=Buffer.concat([json,Buffer.alloc((4-json.length%4)%4,32)]);
+    const header=Buffer.alloc(20);header.write('glTF');header.writeUInt32LE(2,4);header.writeUInt32LE(28+json.length+binary.length,8);header.writeUInt32LE(json.length,12);header.writeUInt32LE(0x4e4f534a,16);
+    const binHeader=Buffer.alloc(8);binHeader.writeUInt32LE(binary.length);binHeader.writeUInt32LE(0x004e4942,4);
+    const file=new File([header,json,binHeader,binary],'avatar.glb',{type:'model/gltf-binary'}),input=ui.document.querySelector('#human-model-file');
     Object.defineProperty(input,'files',{configurable:true,value:[file]});input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
     await ui.wait(()=>ui.document.querySelector('#human-model-status').textContent.includes('avatar.glb imported'));
     assert.equal(ui.document.querySelector('#modal-actions .primary').disabled,false);
+    assert.equal('document' in uploaded,false);assert.ok(uploaded.content_base64.length>32*1024*1024);
     modalAction(ui,'Add human');await ui.wait(()=>ui.state.doc.objects?.[0]?.render_model);await ui.drain();
     const model=ui.state.doc.objects[0].render_model;assert.equal(model.name,'avatar.glb');assert.equal(model.enabled,true);
     assert.ok(model.metadata.bones.length>=19);assert.ok(model.metadata.vertex_count>0);assert.ok(model.metadata.uv_sets.includes('TEXCOORD_0'));
@@ -2849,7 +3064,7 @@ test('add human file picker imports an actual weighted GLB and stores its config
 });
 
 test('human import toggle and bone settings preserve the model and simulation recording',async()=>{
-  const doc=blankDesign('Human appearance');const payload=await exportRig(makeRig());const imported=await post('import-human-model',doc,{filename:'fixture.glb',content_base64:Buffer.from(payload).toString('base64')});doc.objects=[{id:'person',template:'human',render_model:{...imported.render_model,enabled:false,bone_map:{pelvis:'mixamorig:Hips'},extra_bones:{Hair:{mode:'damped_spring',mass:.05}},metadata:{bones:[{name:'mixamorig:Hips',named:true,index:0},{name:'Hair',named:true,index:1,parent_bone:0},{name:'Bone 23',named:false,index:23,parent_bone:0}]}}}];
+  const doc=blankDesign('Human appearance');const payload=await exportRig(makeRig());const imported=await post('import-human-model',doc,{filename:'fixture.glb',content_base64:Buffer.from(payload).toString('base64')});doc.objects=[{id:'person',template:'human',render_model:{...imported.render_model,enabled:false,bone_map:{pelvis:'mixamorig:Hips'},extra_bones:{Hair:{mode:'damped_spring',mass:.05}},metadata:{bones:[{name:'mixamorig:Hips',named:true,index:0},{name:'Hair',named:true,index:19,parent_bone:4},{name:'Bone 23',named:false,index:23,parent_bone:0}]}}}];
   // The rendering module has separate real GLB tests. This harness exercises saved controls
   // without depending on WebGL or a texture decoder in jsdom.
   const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
@@ -2864,19 +3079,65 @@ test('human import toggle and bone settings preserve the model and simulation re
     assert.equal(ui.state.recording,recording);assert.deepEqual(ui.state.doc.objects[0].render_model.extra_bones,{Hair:{mode:'damped_spring',mass:.05}});
     ui.document.querySelector('#object-model-configure').click();
     assert.ok(ui.document.querySelector('.bone-diagram'));assert.match(ui.document.querySelector('#bone-diagram').textContent,/Bone 23/);
-    ui.document.querySelector('#bone-map-head').focus();ui.document.querySelector('[data-bone-index="23"]').dispatchEvent(new ui.window.MouseEvent('click',{bubbles:true}));assert.equal(ui.document.querySelector('#bone-map-head').value,'node:23');
+    assert.ok(ui.state.scene.humans?.[0]?.render_model?.url,JSON.stringify(ui.state.scene.humans?.[0]?.render_model));
+    await ui.wait(()=>ui.humanModels.models.has('person')||ui.document.querySelector('#bone-preview-status').textContent!=='Updating preview…');
+    assert.equal(ui.humanModels.models.has('person'),true,'the mapping panel renders a live GLB preview: '+ui.document.querySelector('#bone-preview-status').textContent);
+    const liveModel=ui.humanModels.models.get('person'),neckLength=()=>liveModel.mapping.head.getWorldPosition(new Three.Vector3()).distanceTo(liveModel.mapping.neck.getWorldPosition(new Three.Vector3())),beforeFit=neckLength();
+    const neckFit=ui.document.querySelector('#bone-fit-neck');neckFit.value='75';neckFit.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(ui.humanModels.models.get('person'),liveModel,'slider editing reuses the loaded appearance');
+    assert.ok(Math.abs(neckLength()/beforeFit-.75)<1e-5,'the viewport preview changes before Apply');
+    const bone=ui.document.querySelector('#extra-bone');assert.equal(bone.value,'node:19');
+    const mode=ui.document.querySelector('#extra-mode');mode.value='weighted_ball_joint';mode.dispatchEvent(new ui.window.Event('change'));
+    await ui.wait(()=>liveModel.extras.find(extra=>extra.bone.name==='Hair')?.mode==='weighted_ball_joint');
+    assert.equal(ui.humanModels.models.get('person'),liveModel,'extra-bone settings update the loaded preview');
+    ui.document.querySelector('#bone-map-head').focus();ui.document.querySelector('[data-bone-index="19"]').dispatchEvent(new ui.window.MouseEvent('click',{bubbles:true}));ui.document.querySelector('#bone-assign').click();assert.equal(ui.document.querySelector('#bone-map-head').value,'node:19');
+    await ui.wait(()=>liveModel.mapping.head.name==='Hair');assert.equal(ui.humanModels.models.get('person'),liveModel,'bone assignment updates the viewport before Apply');
     const offsetSegment=ui.document.querySelector('#bone-offset-segment');offsetSegment.value='left_clavicle';offsetSegment.dispatchEvent(new ui.window.Event('change'));
     const offset=ui.document.querySelector('#bone-offset-2');offset.value='18';offset.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
-    const bone=ui.document.querySelector('#extra-bone');assert.equal(bone.value,'node:1');
-    const mode=ui.document.querySelector('#extra-mode');mode.value='weighted_ball_joint';mode.dispatchEvent(new ui.window.Event('change'));
-    ui.document.querySelector('#bone-map-pelvis').value='node:0';modalAction(ui,'Apply settings');
+    assert.equal(ui.document.querySelector('#bone-fit-value-neck').textContent,'75%');
+    ui.document.querySelector('#bone-map-pelvis').value='node:0';const modalContent=ui.document.querySelector('#modal-content');modalContent.scrollTop=456;modalAction(ui,'Apply settings');
     await ui.wait(()=>ui.state.doc.objects[0].render_model.extra_bones.Hair.mode==='weighted_ball_joint');await ui.drain();
+    assert.equal(ui.document.querySelector('#modal').open,true,'Apply keeps the editor open');assert.equal(modalContent.scrollTop,456,'Apply preserves the editor scroll position');
     assert.equal(ui.state.recording,recording);assert.equal(ui.state.doc.objects[0].render_model.bone_map.pelvis,0);assert.deepEqual(ui.state.doc.objects[0].render_model.bone_offsets.left_clavicle,[0,0,18]);
-    ui.document.querySelector('#object-model-configure').click();assert.equal(ui.document.querySelector('#extra-bone').value,'node:1');assert.equal(ui.document.querySelector('#extra-mode').value,'weighted_ball_joint');
-    assert.equal(ui.document.querySelector('#bone-offset-segment').value,'left_clavicle');assert.equal(ui.document.querySelector('#bone-offset-2').value,'18');modalAction(ui,'Cancel');
+    assert.equal(ui.state.doc.objects[0].render_model.body_proportions.neck,.75);
+    modalAction(ui,'Done');await ui.drain();assert.equal(ui.document.querySelector('#modal').open,false);
+    ui.document.querySelector('#object-model-configure').click();assert.equal(ui.document.querySelector('#extra-bone').value,'node:19');assert.equal(ui.document.querySelector('#extra-mode').value,'weighted_ball_joint');
+    assert.equal(ui.document.querySelector('#bone-offset-segment').value,'left_clavicle');assert.equal(ui.document.querySelector('#bone-offset-2').value,'18');
+    assert.equal(ui.document.querySelector('#bone-fit-neck').value,'75');ui.document.querySelector('#bone-fit-reset').click();assert.equal(ui.document.querySelector('#bone-fit-neck').value,'100');modalAction(ui,'Cancel');
+    assert.equal(ui.state.doc.objects[0].render_model.body_proportions.neck,.75);
     const off=ui.document.querySelector('#object-model-enabled');off.checked=false;off.dispatchEvent(new ui.window.Event('change'));
     await ui.wait(()=>ui.state.doc.objects[0].render_model.enabled===false);await ui.drain();
     assert.equal(ui.state.recording,recording);assert.equal(ui.state.doc.objects[0].render_model.extra_bones.Hair.mode,'weighted_ball_joint');
+  }finally{await ui.close();}
+});
+
+test('dense bone picker keeps names in searchable rows and requires explicit assignment',async()=>{
+  const doc=blankDesign('Dense imported rig');
+  const bones=Array.from({length:677},(_,index)=>({index,name:index===676?'Bone 676':index===674||index===675?'mixamorig:RightHandPinky3':`CC_Base_Control_${index}`,named:index!==676,parent_bone:index?0:null,position:[index%3,Math.floor(index/30),0]}));
+  doc.objects=[{id:'person',template:'human',render_model:{enabled:false,name:'Dense rig',file:'unused.glb',bone_map:{pelvis:0},metadata:{bones}}}];
+  const ui=await editor(doc);try{
+    ui.select('person/pelvis');ui.document.querySelector('#object-model-configure').click();
+    const $=selector=>ui.document.querySelector(selector),rows=()=>[...ui.document.querySelectorAll('.bone-result')];
+    assert.equal(rows().length,677);assert.equal($('#bone-diagram').querySelectorAll('text').length,0);
+    const original=structuredClone(ui.state.doc.objects[0].render_model);
+    const target=$('#bone-map-target');target.value='head';target.dispatchEvent(new ui.window.Event('change'));
+    assert.equal($('#bone-assign').disabled,true);
+    const search=$('#bone-search'),filter=value=>{search.value=value;search.dispatchEvent(new ui.window.Event('input'));};
+    filter('RIGHTHandPinky3');assert.equal(rows().length,2);assert.match(rows()[0].textContent,/#674/);assert.match(rows()[1].textContent,/#675/);
+    search.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true}));assert.equal(ui.document.activeElement,rows()[0]);
+    rows()[1].click();assert.match($('#bone-selection-detail').textContent,/Node #675.*Parent: CC_Base_Control_0/);
+    assert.equal($('#bone-map-head').value,'');assert.equal($('#bone-map-target').value,'head');assert.equal($('#bone-assign').textContent,'Assign to Head');
+    assert.equal($('#bone-diagram .selected').dataset.boneIndex,'675');
+    $('#bone-assign').click();assert.equal($('#bone-map-head').value,'node:675');assert.match($('#bone-current-mapping').textContent,/#675/);
+    filter('head #675');assert.equal(rows().length,1);assert.equal(rows()[0].getAttribute('aria-pressed'),'true');
+    filter('#676');assert.equal(rows().length,1);assert.match(rows()[0].textContent,/Bone 676/);
+    filter('does not exist');assert.equal(rows().length,0);assert.match($('#bone-search-results').textContent,/No matching bones/);
+    $('#bone-diagram [data-bone-index="674"]').dispatchEvent(new ui.window.MouseEvent('click',{bubbles:true}));
+    assert.equal(search.value,'');assert.equal(rows().length,677);assert.equal($('#bone-map-head').value,'node:675');
+    assert.match($('#bone-selection-detail').textContent,/Node #674/);
+    $('#bone-map-head').value='node:0';$('#bone-map-head').dispatchEvent(new ui.window.Event('change'));
+    assert.equal($('#bone-map-pelvis').value,'node:675','assigning an occupied joint swaps the previous assignments');
+    modalAction(ui,'Cancel');assert.deepEqual(ui.state.doc.objects[0].render_model,original);
   }finally{await ui.close();}
 });
 
@@ -3138,7 +3399,7 @@ test('threading the final pipe solves a hinged triangle despite 15 degree rotati
       ui.select('top-bar');ui.document.querySelector('#connect-selected').click();ui.select(connector);
       await ui.wait(()=>ui.document.querySelector('#modal-actions .primary')?.disabled===false,20000);
       assert.equal(ui.document.querySelector('#snap-move').value,'fit');assert.ok(ui.document.querySelector('#snap-preview-view canvas[data-rendered]'));
-      assert.match(ui.document.querySelector('#snap-review-status').textContent,/joints adjusted continuously/);
+      assert.match(ui.document.querySelector('#snap-review-status').textContent,/joints adjusted/);
       assert.equal(ui.document.querySelector('#snap-force').disabled,false);
       const lock=ui.document.querySelector('#snap-lock');lock.checked=false;lock.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
       await ui.wait(()=>!ui.document.querySelector('#snap-force').disabled&&ui.document.querySelector('#modal-actions .primary').disabled===false,20000);
@@ -3213,6 +3474,10 @@ for(const adjustment of ['unlock','resize'])test(`Force previews bounded ${adjus
   try{
     ui.select('bottom-arm');ui.document.querySelector('#connect-selected').click();ui.select('elbow');
     await ui.wait(()=>ui.document.querySelector('#modal-actions .primary')?.disabled===false);
+    // The default 2 mm allowance already fits this 1 mm gap. Require a tighter
+    // fit here to exercise genuinely necessary edits, rather than recutting a
+    // valid frame simply because the controls permit it.
+    changeInput(ui,'#snap-tolerance',.03);await ui.wait(()=>!ui.document.querySelector('#snap-force').disabled);
     ui.document.querySelector('#snap-force-options summary').click();
     changeInput(ui,adjustment==='unlock'?'#snap-unlock-count':'#snap-resize-count',1);
     await ui.wait(()=>!ui.document.querySelector('#snap-force').disabled);
@@ -3362,6 +3627,340 @@ test('a chain can move whole, pose links, hold that shape and keep hundreds of l
     const reopened=ui.document.querySelector('[data-object-tree]');reopened.open=false;reopened.dispatchEvent(new ui.window.Event('toggle'));
     assert.equal(ui.document.querySelectorAll('#outline-list [data-select]').length,0);
     ui.document.querySelector('[data-mode="simulate"]').click();assert.equal(ui.document.querySelectorAll('#inspector .joint-card').length,1);
+  }finally{await ui.close();}
+});
+
+test('rotating a draft pipe follows its mirror mode and warns on oblique crossings',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,-500,100],end_mm:[0,500,100],attachments:[]}],
+    mirrors:[{id:'middle',axis:'x',offset_mm:0,run_modes:{run:'in_plane'}}]}];
+  const ui=await editor(doc);try{
+    ui.select('run');ui.state.snapSettings.keyboardRotateDeg=45;
+    const rotate=()=>ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',
+      {key:'c',bubbles:true,cancelable:true}));
+    const mode=()=>ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run;
+    rotate();await ui.wait(()=>mode()==='free');
+    assert.equal(ui.document.querySelector('[data-mirror-mode]').value,'free');
+    let preview=ui.state.scene.parts.find(part=>part.id==='run');
+    assert.equal(preview.color,'#cf815d');
+    assert.ok(preview.warnings.some(warning=>warning.code==='MIRROR_SELF_INTERSECTION'));
+    assert.deepEqual(preview.conflicts,[]);
+    rotate();await ui.wait(()=>mode()==='centered');
+    preview=ui.state.scene.parts.find(part=>part.id==='run');
+    assert.equal(preview.color,'#5ba9b5');
+    assert.equal(ui.document.querySelector('[data-mirror-mode]').value,'centered');
+    ui.state.snapSettings.keyboardRotateDeg=90;
+    rotate();await ui.wait(()=>mode()==='in_plane');
+    assert.equal(ui.document.querySelector('[data-mirror-mode]').value,'in_plane');
+    rotate();await ui.wait(()=>mode()==='centered');
+    assert.equal(ui.document.querySelector('[data-mirror-mode]').value,'centered');
+  }finally{await ui.close();}
+});
+
+test('seeded mirror rotation matrix classifies every axis and oblique angle',()=>{
+  let seed=0x4d495252;const random=()=>((seed=(1664525*seed+1013904223)>>>0)/2**32);
+  for(const [index,axis] of ['x','y','z'].entries())for(const angle of [0,30,45,60,90,120,135,180,270])
+    for(const shift of [0,.01,.2]){
+      const offset=1000*random()-500,length=200+1800*random();
+      const normal=new Three.Vector3().setComponent(index,1);
+      const tangent=new Three.Vector3().setComponent((index+1)%3,1);
+      const direction=tangent.multiplyScalar(Math.cos(Three.MathUtils.degToRad(angle)))
+        .addScaledVector(normal,Math.sin(Three.MathUtils.degToRad(angle)));
+      const center=normal.clone().multiplyScalar(offset+shift);
+      const start=center.clone().addScaledVector(direction,-length/2);
+      const end=center.clone().addScaledVector(direction,length/2);
+      const expected=shift>.05?'free':angle%180===90?'centered':angle%180===0?'in_plane':'free';
+      assert.equal(drafting.mirrorModeForSpan(start,end,{axis,offset_mm:offset}),expected,
+        `${axis} ${angle}° shift ${shift} seed ${seed}`);
+    }
+});
+
+test('seeded draft rotation updates mirror modes through the editor on all axes',async()=>{
+  let seed=0x50495045;const random=()=>((seed=(1664525*seed+1013904223)>>>0)/2**32);
+  for(const [axis,key,vector] of [
+    ['x','c',[0,1,0]],['y','c',[1,0,0]],['z','x',[1,0,0]]]){
+    const length=300+1000*random(),offset=200*random()-100;
+    const center=[0,0,200];center[{x:0,y:1,z:2}[axis]]=offset;
+    const half=vector.map(value=>value*length/2);
+    const start=center.map((value,i)=>value-half[i]),end=center.map((value,i)=>value+half[i]);
+    const doc=draftFixture();doc.parts=[];
+    doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+      start_mm:start,end_mm:end,attachments:[]}],
+      mirrors:[{id:'mirror',axis,offset_mm:offset,run_modes:{run:'in_plane'}}]}];
+    const ui=await editor(doc);try{
+      ui.select('run');const mode=()=>ui.state.doc.draft_subassemblies[0].mirrors[0].run_modes.run;
+      const rotate=async angle=>{
+        ui.state.snapSettings.keyboardRotateDeg=angle;
+        ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',
+          {key,bubbles:true,cancelable:true}));
+      };
+      for(const oblique of [25+20*random(),25+20*random()]){
+        await rotate(oblique);await ui.wait(()=>mode()==='free');
+        assert.equal(ui.state.scene.parts.find(part=>part.id==='run').color,'#cf815d',axis);
+        await rotate(90-oblique);await ui.wait(()=>mode()==='centered');
+        await rotate(90);await ui.wait(()=>mode()==='in_plane');
+      }
+    }finally{await ui.close();}
+  }
+});
+
+function jointTargetOrderDesign(near=45,middle=120,far=270){
+  const doc=blankDesign('Joint target ordering');
+  doc.parts=[
+    {id:'selected',catalog:'generic.d-shackle',pose:{position_mm:[0,0,1000]}},
+    {id:'pipe-near',catalog:'tubeclamp.tube-C',parameters:{length_mm:100},pose:{position_mm:[10,0,1000]}},
+    {id:'pipe-indirect',catalog:'tubeclamp.tube-C',parameters:{length_mm:100},pose:{position_mm:[20,0,1000]}},
+    {id:'chain-far',catalog:'generic.chain-link',pose:{position_mm:[far,0,1000]}},
+    {id:'chain-middle',catalog:'generic.chain-link',pose:{position_mm:[middle,0,1000]}},
+    {id:'chain-near',catalog:'generic.chain-link',pose:{position_mm:[near,0,1000]}}
+  ];
+  const frame=x=>({position_mm:[x,0,0],axis:[0,0,1]});
+  doc.joints=[
+    {id:'loose-direct',type:'spherical',a:{part:'selected',frame:frame(0)},b:{part:'pipe-near',frame:frame(-10)}},
+    {id:'loose-indirect',type:'spherical',a:{part:'pipe-near',frame:frame(0)},b:{part:'pipe-indirect',frame:frame(-10)}}
+  ];
+  return doc;
+}
+
+test('joint target dropdown puts the closest free chain first and the entire connected component last',async()=>{
+  const ui=await editor(jointTargetOrderDesign());try{
+    ui.select('selected');ui.document.querySelector('#new-joint').click();
+    const first=ui.document.querySelector('#joint-part-a'),second=ui.document.querySelector('#joint-part-b');
+    const ids=()=>[...second.options].map(option=>option.value);
+    assert.deepEqual(ids(),['chain-near','chain-middle','chain-far','pipe-near','pipe-indirect']);
+    assert.equal(second.value,'chain-near');
+    assert.ok(!(ui.state.scene.groups.find(group=>group.includes('selected'))||[]).includes('pipe-indirect'),
+      'indirect loose connections must be found through the joint graph');
+    first.value='pipe-near';first.dispatchEvent(new ui.window.Event('change'));
+    assert.deepEqual(ids(),['chain-near','chain-middle','chain-far','pipe-indirect','selected']);
+    first.value='chain-far';first.dispatchEvent(new ui.window.Event('change'));
+    assert.ok(!ids().includes('chain-far'),'the current first part must not be offered as its own target');
+    assert.ok(ids().includes('selected'));
+  }finally{await ui.close();}
+});
+
+test('seeded joint target ordering survives scene permutations and different distances',async()=>{
+  const rootSeed=Number(process.env.PIPESIM_JOINT_TARGET_SEED??randomBytes(4).readUInt32LE());
+  assert.ok(Number.isInteger(rootSeed)&&rootSeed>=0&&rootSeed<=0xffffffff);
+  let sequence=rootSeed;const random=()=>((sequence=(Math.imul(sequence,1664525)+1013904223)>>>0)/0x100000000);
+  console.log(`Joint target ordering fuzz root_seed=${rootSeed}, cases=8`);
+  for(let index=0;index<8;index++){
+    const doc=jointTargetOrderDesign(35+random()*25,110+random()*40,250+random()*100);
+    for(let n=doc.parts.length-1;n>0;n--){const k=Math.floor(random()*(n+1));[doc.parts[n],doc.parts[k]]=[doc.parts[k],doc.parts[n]];}
+    const ui=await editor(doc);try{
+      ui.select('selected');ui.document.querySelector('#new-joint').click();
+      const ids=[...ui.document.querySelector('#joint-part-b').options].map(option=>option.value);
+      assert.deepEqual(ids,['chain-near','chain-middle','chain-far','pipe-near','pipe-indirect'],
+        `root_seed=${rootSeed} case=${index}`);
+    }finally{await ui.close();}
+  }
+});
+
+test('G mode gives a hovered move axis priority over an overlapping chain resize handle',async()=>{
+  const ui=await editor(chainDesign(8));try{
+    selectChain(ui);
+    ui.document.dispatchEvent(new ui.window.KeyboardEvent('keydown',{key:'g',bubbles:true,cancelable:true}));
+    assert.equal(ui.state.tool,'translate');
+    const canvas=ui.document.querySelector('#viewport canvas');let presses=0;
+    canvas.addEventListener('pointerdown',()=>presses++);
+    const handle=ui.pixel(ui.resizeHandles.children[1].position);
+    ui.gizmo.axis='Z';ui.pointer('pointermove',handle);
+    assert.notEqual(canvas.style.cursor,'grab','resize cursor must not contradict the highlighted move axis');
+    ui.pointer('pointerdown',handle);
+    assert.equal(presses,1,'the move gizmo must receive pointer-down');
+    assert.equal(ui.orbit.enabled,true,'resize must not capture the pointer');
+    ui.pointer('pointerup',handle);
+    assert.equal(ui.state.doc.objects[0].parameters.length_mm,160);
+    ui.gizmo.axis=null;ui.pointer('pointerdown',handle);
+    assert.equal(presses,1,'the same handle remains available when no move axis is hovered');
+    assert.equal(ui.orbit.enabled,false);
+    ui.pointer('pointerup',handle);
+    assert.equal(ui.orbit.enabled,true);
+  }finally{await ui.close();}
+});
+
+test('seeded chain handle overlap matrix preserves G move priority at both ends',async()=>{
+  const axes=['X','Y','Z'];
+  for(const count of [5,12]){
+    const ui=await editor(chainDesign(count));try{
+      const canvas=ui.document.querySelector('#viewport canvas');let presses=0;
+      canvas.addEventListener('pointerdown',()=>presses++);
+      ui.document.querySelector('[data-tool="translate"]').click();
+      for(let side=0;side<2;side++)for(const axis of axes){
+        selectChain(ui,side?'end':'start');
+        const handle=ui.pixel(ui.resizeHandles.children[side].position);
+        ui.gizmo.axis=axis;ui.pointer('pointermove',handle);
+        const before=presses;ui.pointer('pointerdown',handle);
+        assert.equal(presses,before+1,`chain ${count}, ${side?'end':'start'}, ${axis}`);
+        assert.equal(ui.orbit.enabled,true);
+        ui.pointer('pointerup',handle);
+      }
+      assert.equal(ui.state.doc.objects[0].parameters.length_mm,count*20);
+      assert.equal(ui.state.undo.length,0);
+    }finally{await ui.close();}
+  }
+});
+
+test('dragging a D-shackle over a chain eye creates a spherical attachment',async()=>{
+  const doc=blankDesign('Drag D-shackle');
+  doc.parts=[
+    {id:'link',catalog:'generic.chain-link',pose:{position_mm:[0,0,1000]}},
+    {id:'shackle',catalog:'generic.d-shackle',pose:{position_mm:[150,0,1000]}}
+  ];
+  doc.anchors=[{part:'link',surface:'fixture'}];
+  const ui=await editor(doc);try{
+    assert.ok(ui.document.querySelector('[data-catalog="generic.d-shackle"]'));
+    assert.equal(ui.document.querySelector('[data-catalog="generic.d-link"]'),null);
+    assert.equal(ui.state.scene.parts.find(p=>p.id==='shackle').geometry.length,15);
+    ui.drag(ui.pixel(new Three.Vector3(150,0,985)),ui.pixel(new Three.Vector3(50,0,985)));
+    await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.joints[0].type,'spherical');
+    assert.equal(ui.state.doc.joints[0].a.part,'shackle');
+    assert.equal(ui.state.doc.joints[0].a.port,'eye');
+    assert.equal(ui.state.doc.joints[0].b.part,'link');
+    assert.equal(ui.state.doc.joints[0].b.port,'a');
+  }finally{await ui.close();}
+});
+
+test('dragging a D-shackle onto the exposed end of a flexible chain keeps its links',async()=>{
+  const doc=blankDesign('Drag D-shackle to chain');
+  doc.parts=[{id:'shackle',catalog:'generic.d-shackle',
+    pose:{position_mm:[150,0,1000]}}];
+  doc.objects=[{id:'chain',template:'chain',parameters:{length_mm:60},
+    pose:{position_mm:[0,0,1000]}}];
+  const ui=await editor(doc);try{
+    const links=ui.state.scene.parts.filter(p=>p.id.startsWith('chain/link-')).length;
+    ui.drag(ui.pixel(new Three.Vector3(150,0,985)),ui.pixel(new Three.Vector3(50,0,985)));
+    await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    const joint=ui.state.doc.joints[0];
+    assert.equal(joint.type,'spherical');
+    assert.deepEqual(new Set([joint.a.part,joint.b.part]),new Set(['shackle','chain/link-1']));
+    assert.equal(ui.state.scene.parts.filter(p=>p.id.startsWith('chain/link-')).length,links);
+    assert.equal(ui.state.doc.objects[0].parameters.length_mm,60);
+  }finally{await ui.close();}
+});
+
+test('dragging a D-shackle pin over a swivel bolt eye creates a hinge',async()=>{
+  const doc=blankDesign('Drag D-shackle pin');
+  doc.parts=[
+    {id:'eye',catalog:'tubeclamp.TC173MC',pose:{position_mm:[0,0,1000]}},
+    {id:'shackle',catalog:'generic.d-shackle',pose:{position_mm:[150,0,1000]}}
+  ];
+  doc.anchors=[{part:'eye',surface:'fixture'}];
+  const ui=await editor(doc);try{
+    ui.drag(ui.pixel(new Three.Vector3(150,0,985)),ui.pixel(new Three.Vector3(50,0,985)));
+    await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.joints[0].type,'revolute');
+    assert.deepEqual(new Set([ui.state.doc.joints[0].a.port,ui.state.doc.joints[0].b.port]),
+      new Set(['pin_bolt','hinge']));
+  }finally{await ui.close();}
+});
+
+test('dragging a D-shackle pin over an 8 mm bolt hole creates a hinge',async()=>{
+  const doc=blankDesign('Drag D-shackle to bolt hole');
+  doc.parts=[
+    {id:'flange',catalog:'tubeclamp.TC131T',pose:{position_mm:[0,0,1000]}},
+    {id:'shackle',catalog:'generic.d-shackle',pose:{position_mm:[150,0,1000]}}
+  ];
+  doc.anchors=[{part:'flange',surface:'fixture'}];
+  const ui=await editor(doc);try{
+    ui.drag(ui.pixel(new Three.Vector3(150,0,985)),ui.pixel(new Three.Vector3(-19.65,-19.65,1000)));
+    await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.joints[0].type,'revolute');
+    assert.deepEqual(new Set([ui.state.doc.joints[0].a.port,ui.state.doc.joints[0].b.port]),
+      new Set(['pin_bolt','bolt1']));
+  }finally{await ui.close();}
+});
+
+test('editing a mounted wheel axle reopens its mount dialog and saves the new location',async()=>{
+  const ui=await editor(fixture());try{
+    ui.select('pipe');ui.document.querySelector('#wheel-button').click();
+    ui.document.querySelector('#wheel-station').value='400';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints.some(joint=>joint.b.part==='wheel-1'));
+    const jointId=ui.state.doc.joints[0].id;
+    ui.select('wheel-1');ui.document.querySelector('[data-joint-edit]').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Edit wheel axle');
+    assert.equal(ui.document.querySelector('#joint-source'),null);
+    assert.equal(ui.document.querySelector('#wheel-target').value,'pipe');
+    assert.equal(ui.document.querySelector('#wheel-location').value,'station');
+    assert.equal(Number(ui.document.querySelector('#wheel-station').value),400);
+    ui.document.querySelector('#wheel-station').value='700';
+    ui.document.querySelector('#modal-actions .primary').click();
+    await ui.wait(()=>ui.state.doc.joints[0].a.frame.position_mm[2]===200);
+    assert.equal(ui.state.doc.joints.length,1);
+    assert.equal(ui.state.doc.joints[0].id,jointId);
+    ui.select('pipe');ui.document.querySelector('[data-joint-edit]').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Edit wheel axle');
+    assert.equal(Number(ui.document.querySelector('#wheel-station').value),700);
+  }finally{await ui.close();}
+});
+
+test('draft findings select and frame the implicated fitting',async()=>{
+  const doc=draftFixture();
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,0,100],end_mm:[1000,0,100],attachments:[]}]}];
+  const ui=await editor(doc,null,{interceptFetch:(path)=>path==='/api/draft-finalize-selected'?
+    new Response(JSON.stringify({status:'conflict',conflicts:[{
+      code:'MIRROR_BAKE',run:'run',part:'right',
+      message:'The reflected socket could not be found.'}]}),
+      {headers:{'Content-Type':'application/json'}}):null});
+  try{
+    ui.select('run');ui.document.querySelector('#draft-finalize-selected').click();
+    await ui.wait(()=>ui.document.querySelector('[data-draft-finding]'));
+    const finding=ui.document.querySelector('[data-draft-finding]');
+    assert.match(finding.textContent,/Select and frame right/);
+    finding.click();
+    assert.equal(ui.state.selected,'right');
+    assert.equal(ui.document.querySelector('#modal').open,false);
+    const center=new Three.Box3().setFromObject(ui.partObjects.get('right')).getCenter(new Three.Vector3());
+    assert.ok(ui.orbit.target.distanceTo(center)<1);
+  }finally{await ui.close();}
+});
+
+test('mirror warning is shown after finalization without blocking the result',async()=>{
+  const doc=draftFixture();doc.parts=[];
+  doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',
+    start_mm:[0,200,100],end_mm:[1000,200,100],attachments:[]}],
+    mirrors:[{id:'mirror-1',axis:'y',offset_mm:0}]}];
+  const result=await post('draft-finalize-selected',doc,{run:'run'});
+  assert.equal(result.status,'finalized');
+  result.warnings=[{code:'MIRROR_UNAVAILABLE',part:'run',run:'run',
+    message:'A reflected socket was unavailable; the original pipe was kept.'}];
+  const ui=await editor(doc,null,{interceptFetch:(path)=>path==='/api/draft-finalize-selected'?
+    new Response(JSON.stringify(result),{headers:{'Content-Type':'application/json'}}):null});
+  try{
+    ui.select('run');ui.document.querySelector('#draft-finalize-selected').click();
+    await ui.wait(()=>ui.document.querySelector('#modal-title').textContent==='Mirror warnings');
+    assert.equal(ui.state.doc.draft_subassemblies,undefined);
+    assert.ok(ui.state.doc.parts.some(part=>part.id==='run-mirror-mirror-1'));
+    assert.match(ui.document.querySelector('[data-draft-finding]').textContent,/original pipe was kept/);
+  }finally{await ui.close();}
+});
+
+test('flexible-line shape dropdown poses the line and whole-line movement preserves the shape',async()=>{
+  const ui=await editor(chainDesign(24));try{
+    selectChain(ui);
+    const choices=[...ui.document.querySelector('#chain-preset').options].map(option=>option.value);
+    for(const preset of ['circle-touch','circle-overlap','square','u-deep','teardrop','spiral-two','helix'])
+      assert.ok(choices.includes(preset));
+    changeInput(ui,'#chain-preset','circle-touch');
+    await ui.wait(()=>!!ui.state.doc.objects[0].components&&!ui.state.placementPending,20000);
+    assert.equal(ui.document.querySelector('#chain-preset').value,'circle-touch');
+    const shaped=structuredClone(ui.state.scene.parts.map(part=>part.pose.position_mm));
+    assert.ok(Math.max(...shaped.map(point=>point[0]))-Math.min(...shaped.map(point=>point[0]))>100);
+    changeInput(ui,'[data-pose="position_mm"][data-axis="0"]',120);
+    await ui.wait(()=>ui.state.doc.objects[0].pose.position_mm[0]===120&&!ui.state.placementPending,20000);
+    assert.equal(ui.document.querySelector('#chain-preset').value,'circle-touch');
+    const moved=ui.state.scene.parts.map(part=>part.pose.position_mm);
+    for(let i=0;i<shaped.length;i++){
+      assert.ok(Math.abs(moved[i][0]-shaped[i][0]-120)<.01);
+      assert.ok(Math.abs(moved[i][1]-shaped[i][1])<.01);
+      assert.ok(Math.abs(moved[i][2]-shaped[i][2])<.01);
+    }
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.objects[0].pose.position_mm[0]===0);
+    assert.ok(ui.document.querySelector('#chain-preset'));
   }finally{await ui.close();}
 });
 
@@ -3668,6 +4267,113 @@ test('TC148 is available in the toolbox, loads its mesh and connects a continuou
     assert.equal(ui.state.doc.joints[0].a.port,'through');assert.equal((await post('validate',ui.state.doc)).valid,true);
   }finally{await ui.close();}
 });
+
+test('Force preserves a valid frame when screw and cut-length edits are permitted',async()=>{
+  const doc=await adjustmentDesign(),ui=await editor(doc);
+  const original=structuredClone(ui.state.doc);
+  try{
+    ui.select('bottom-arm');ui.document.querySelector('#connect-selected').click();ui.select('elbow');
+    await ui.wait(()=>ui.document.querySelector('#modal-actions .primary')?.disabled===false);
+    changeInput(ui,'#snap-unlock-count',1);await ui.wait(()=>!ui.document.querySelector('#snap-force').disabled);
+    changeInput(ui,'#snap-resize-count',1);await ui.wait(()=>!ui.document.querySelector('#snap-force').disabled);
+    ui.document.querySelector('#snap-force').click();
+    await ui.wait(()=>!ui.document.querySelector('#snap-force').disabled);
+    assert.equal(ui.document.querySelector('#snap-move').value,'keep');
+    assert.equal(ui.document.querySelector('#snap-adjustments').textContent,'');
+    modalAction(ui,'Connect');await ui.wait(()=>ui.state.undo.length===1&&!ui.state.placementPending);
+    assert.deepEqual(ui.state.doc.parts,original.parts);
+    assert.deepEqual(ui.state.doc.joints.slice(0,-1),original.joints);
+  }finally{await ui.close();}
+});
+
+for(const fault of ['network','server','file','size'])test(`human import explains ${fault} failure and allows retry`,async()=>{
+  let reject=true,uploads=0;
+  const ui=await editor(blankDesign('Import failure'),null,{
+    bootstrapOverride:()=>fault==='size'?{human_import_max_bytes:1024*1024}:{},
+    interceptFetch(path){if(path!=='/api/import-human-model')return;uploads++;
+      if(reject&&fault==='network')throw new TypeError('Failed to fetch');
+      if(reject&&fault==='server')return new Response(JSON.stringify({error:'Upload is 2.0 MiB; this request allows 1.0 MiB.'}),{status:413});
+    }
+  });try{
+    ui.document.querySelector('#human-button').click();
+    const input=ui.document.querySelector('#human-model-file'),valid=new File([await exportRig(makeRig())],'retry.glb');
+    const file=fault==='file'?new File(['bad glTF'],'broken.glb'):fault==='size'?new File([new Uint8Array(2*1024*1024)],'large.glb'):valid;
+    Object.defineProperty(input,'files',{configurable:true,value:[file]});input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.document.querySelector('#human-model-status').textContent.startsWith('Could not import'));
+    const message=ui.document.querySelector('#human-model-status').textContent;
+    assert.ok(message.includes(file.name));assert.equal(input.disabled,false);assert.equal(ui.document.querySelector('#modal-actions .primary').disabled,false);
+    if(fault==='network')assert.match(message,/local PipeSim server.*usable response.*Browser detail: Failed to fetch/);
+    if(fault==='server')assert.match(message,/2.0 MiB.*1.0 MiB/);
+    if(fault==='file')assert.match(message,/invalid GLB header/);
+    if(fault==='size'){assert.match(message,/2.0 MiB.*1 MiB/);assert.equal(uploads,0);}
+    reject=false;Object.defineProperty(input,'files',{configurable:true,value:[valid]});input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.document.querySelector('#human-model-status').textContent.includes('retry.glb imported'));
+    assert.equal(input.disabled,false);
+  }finally{await ui.close();}
+});
+
+test('human appearance keeps the loading reason beside its controls and clears it when disabled',async()=>{
+  const doc=blankDesign('Unavailable appearance');doc.objects=[{id:'person',template:'human',render_model:{file:'missing-avatar.glb',name:'Missing avatar',enabled:true}}];
+  const ui=await editor(doc);try{
+    ui.select('person/pelvis');
+    await ui.wait(()=>ui.document.querySelector('#object-model-load-status')?.textContent.includes('missing-avatar.glb'));
+    assert.match(ui.document.querySelector('#object-model-load-status').textContent,/Showing the simple mannequin/);
+    ui.select('person/head');
+    assert.match(ui.document.querySelector('#object-model-load-status').textContent,/missing-avatar.glb/);
+    const enabled=ui.document.querySelector('#object-model-enabled');enabled.checked=false;enabled.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    await ui.wait(()=>ui.state.doc.objects[0].render_model.enabled===false);await ui.drain();
+    assert.equal(ui.document.querySelector('#object-model-load-status').hidden,true);
+    assert.equal(ui.state.doc.objects[0].render_model.file,'missing-avatar.glb');
+  }finally{await ui.close();}
+});
+
+test('Drop to floor carries a free sliding assembly and undoes as one edit',async()=>{
+  const doc=fixture();doc.anchors=[];
+  doc.parts=[{...doc.parts[0],pose:{position_mm:[0,0,100],rotation_deg:[0,90,0]}},
+    ...[['sleeve',0],['host',100]].map(([id,y])=>({id,body:{kind:'rigid',mass_kg:1,
+      geometry:[{type:'box',size_mm:[60,60,60]}]},pose:{position_mm:[0,y,100]}}))];
+  doc.joints=[{id:'slide',type:'prismatic',a:{part:'sleeve',frame:{axis:[1,0,0]}},
+    b:{part:'pipe',frame:{axis:[0,0,1]}},limits:{slide_mm:[-1,1]}},
+    {id:'mount',type:'fixed',a:{part:'sleeve',frame:{position_mm:[0,100,0]}},b:{part:'host'}}];
+  const ui=await editor(doc);try{
+    ui.select('pipe');const before=structuredClone(ui.state.doc);
+    ui.document.querySelector('[data-drop-floor="part"]').click();await ui.wait(()=>!ui.state.placementPending);
+    assert.equal(ui.state.undo.length,1);assert.match(ui.document.querySelector('#toast').textContent,/shape preserved/);
+    for(const p of ui.state.doc.parts){
+      const old=before.parts.find(v=>v.id===p.id);
+      assert.ok(Math.abs(p.pose.position_mm[2]-30)<1e-6);
+      assert.deepEqual(p.pose.position_mm.slice(0,2),old.pose.position_mm.slice(0,2));
+    }
+    assert.deepEqual(ui.state.doc.joints,before.joints);
+    assert.equal(ui.state.doc.parts[0].parameters.length_mm,1000);
+    const accepted=structuredClone(ui.state.doc);ui.select('host');
+    ui.document.querySelector('[data-drop-floor="part"]').click();await ui.wait(()=>!ui.state.placementPending);
+    assert.equal(ui.state.undo.length,1);assert.match(ui.document.querySelector('#toast').textContent,/Already resting/);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.parts[0].pose.position_mm[2]===100);
+    assert.deepEqual({...ui.state.doc,results:{}},{...before,results:{}});
+    ui.document.querySelector('#redo').click();await ui.wait(()=>Math.abs(ui.state.doc.parts[0].pose.position_mm[2]-30)<1e-6);
+    assert.deepEqual({...ui.state.doc,results:{}},{...accepted,results:{}});
+  }finally{await ui.close();}
+});
+
+test('manual reconnect defaults to the fitting station already occupied on the pipe',async()=>{
+  const doc=fixture();
+  doc.parts[0].parameters.length_mm=1600;doc.parts[0].pose.position_mm=[0,0,800];
+  doc.parts[1]={id:'tee',body:{kind:'connector',mass_kg:1,
+    geometry:[{type:'box',size_mm:[50,50,50]}],
+    ports:{bore:{type:'socket',through:true,profile:'round',diameter_mm:42.4,
+      engagement_mm:60,position_mm:[0,0,0],axis:[0,0,1]}}},pose:{position_mm:[0,0,848]}};
+  const ui=await editor(doc);try{
+    ui.select('pipe');ui.document.querySelector('#connect-selected').click();ui.select('tee');
+    await ui.wait(()=>ui.document.querySelector('#snap-station')&&
+      ui.document.querySelector('#modal-actions .primary')?.disabled===false);
+    assert.equal(Number(ui.document.querySelector('#snap-station').value),848);
+    modalAction(ui,'Connect');
+    await ui.wait(()=>ui.state.doc.joints.length===1&&!ui.state.placementPending);
+    assert.equal(ui.state.doc.joints[0].b.at_mm,848);
+    assert.equal((await post('validate',ui.state.doc)).valid,true);
+  }finally{await ui.close();}
+});
 function startShinDrag(ui,offset){
   ui.select('person/left_shin');ui.document.querySelector('[data-object-mode="limb"]').click();ui.document.querySelector('[data-tool="translate"]').click();ui.gizmo.axis='Y';
   ui.gizmo.dispatchEvent({type:'mouseDown'});ui.partObjects.get('person/left_shin').position.y+=offset;
@@ -3815,6 +4521,46 @@ test('rotating a thigh uses its spherical hip pivot and carries the lower leg',a
 });
 
 
+test('simulation duration survives blur and inspector refresh and is sent unchanged',async()=>{
+  const doc=freeTube();doc.metadata={simulation_duration_s:5};
+  const requests=[];
+  const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
+    if(path==='/api/simulate'){
+      requests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({id:'duration-job',status:'completed'}));
+    }
+    if(path==='/api/simulation-result')return new Response(JSON.stringify({result:{
+      mode:'preview',frames:[{time_s:0,parts:{}}],duration_s:requests.at(-1).duration,events:[],settled:true}}));
+    return null;
+  }});
+  try{
+    ui.document.querySelector('[data-mode="simulate"]').click();
+    assert.equal(ui.document.querySelector('#sim-duration').value,'5');
+    let seed=0x51d;
+    const durations=[1,.1,.25,30,...Array.from({length:12},()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return (1+seed%300)/10;})];
+    for(const [index,duration] of durations.entries()){
+      const input=ui.document.querySelector('#sim-duration');input.focus();input.value=String(duration);
+      input.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+      input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));input.blur();
+      if(index%2){
+        ui.document.querySelector('[data-mode="design"]').click();
+        ui.document.querySelector('[data-mode="simulate"]').click();
+      }else ui.select(ui.state.doc.parts[0].id);
+      const refreshed=ui.document.querySelector('#sim-duration');
+      assert.equal(refreshed.value,String(duration));assert.equal(refreshed.checkValidity(),true);
+      ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>!ui.state.busy);
+      assert.equal(requests.at(-1).duration,duration);
+      assert.equal(ui.document.querySelector('#sim-duration').value,String(duration));
+    }
+    // Clearing the field while editing must never silently launch the old duration.
+    const input=ui.document.querySelector('#sim-duration');input.value='';
+    input.dispatchEvent(new ui.window.Event('input',{bubbles:true}));ui.select(ui.state.doc.parts[0].id);
+    assert.equal(ui.document.querySelector('#sim-duration').value,'');
+    ui.document.querySelector('[data-run="simulate"]').click();await ui.drain();
+    assert.equal(requests.length,durations.length);assert.equal(ui.state.busy,false);
+  }finally{await ui.close();}
+});
+
 test('Preview quality lives in Preferences and Full uses individual links',async()=>{
   const requests=[];
   const ui=await editor(freeTube(),null,{interceptFetch:(path,options)=>{
@@ -3823,24 +4569,31 @@ test('Preview quality lives in Preferences and Full uses individual links',async
       return new Response(JSON.stringify({id:'quality-job',status:'completed'}));
     }
     if(path==='/api/simulation-result')return new Response(JSON.stringify({result:{
-      mode:requests.at(-1).mode,quality:requests.length===3?{resolved_mode:'full'}:{},
+      mode:requests.at(-1).mode,quality:requests.length===3?{resolved_mode:'full'}:{strength_evaluation:false},
       frames:[{time_s:0,parts:{}}],duration_s:0,events:[],settled:true}}));
     return null;
   }});
   try{
     ui.document.querySelector('#snap-settings-button').click();
-    for(const [id,value] of Object.entries({'pref-chain-links':'6','pref-preview-steps':'2000','pref-preview-iterations':'480','pref-preview-beam':'1000'}))
+    for(const [id,value] of Object.entries({'pref-chain-links':'6','pref-preview-steps':'120','pref-preview-iterations':'80','pref-preview-beam':'1000'}))
       ui.document.querySelector('#'+id).value=value;
     [...ui.document.querySelectorAll('#modal-actions button')].find(button=>button.textContent==='Save as defaults').click();
     const stored=JSON.parse(ui.window.localStorage.getItem('pipesim.preferences.v1'));
-    assert.equal(stored.simulationChainLinks,6);assert.equal(stored.previewStepsPerSecond,2000);
-    assert.equal(stored.previewSolverIterations,480);assert.equal(stored.previewBeamSegmentMm,1000);
+    assert.equal(stored.simulationChainLinks,6);assert.equal(stored.previewStepsPerSecond,120);
+    assert.equal(stored.previewSolverIterations,80);assert.equal(stored.previewBeamSegmentMm,1000);
     ui.document.querySelector('[data-mode="simulate"]').click();
     assert.equal(ui.document.querySelector('#sim-chain-links'),null);
+    const detail=ui.document.querySelector('[data-preview-detail="pipe"]');
+    assert.equal(detail.checked,false);detail.checked=true;detail.dispatchEvent(new ui.window.Event('change'));
+    assert.match(ui.document.querySelector('#preview-detail summary').textContent,/1 selected/);
+    ui.document.querySelector('[data-mode="design"]').click();ui.document.querySelector('[data-mode="simulate"]').click();
+    assert.equal(ui.document.querySelector('[data-preview-detail="pipe"]').checked,true);
     ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>!ui.state.busy);
     assert.equal(requests.at(-1).mode,'preview');assert.equal(requests.at(-1).chain_links_per_body,6);
-    assert.equal(requests.at(-1).preview_steps_per_second,2000);assert.equal(requests.at(-1).preview_solver_iterations,480);
+    assert.deepEqual(requests.at(-1).preview_detail_parts,['pipe']);
+    assert.equal(requests.at(-1).preview_steps_per_second,120);assert.equal(requests.at(-1).preview_solver_iterations,80);
     assert.match(ui.document.querySelector('#simulation-recording-mode').textContent,/Preview recording/);
+    assert.match(ui.document.querySelector('#simulation-recording-mode').textContent,/overload breakage disabled/);
     const mode=ui.document.querySelector('#sim-mode');mode.value='full';mode.dispatchEvent(new ui.window.Event('change'));
     ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>!ui.state.busy);
     assert.equal(requests.at(-1).mode,'full');assert.equal(requests.at(-1).chain_links_per_body,1);
@@ -3849,6 +4602,58 @@ test('Preview quality lives in Preferences and Full uses individual links',async
     const preview=ui.document.querySelector('#sim-mode');preview.value='preview';preview.dispatchEvent(new ui.window.Event('change'));
     ui.document.querySelector('[data-run="simulate"]').click();await ui.wait(()=>!ui.state.busy);
     assert.match(ui.document.querySelector('#simulation-recording-mode').textContent,/automatically refined to Full physics/);
+  }finally{await ui.close();}
+});
+
+test('a recording fetch failure keeps the completed simulation and reports the transfer problem',async()=>{
+  let resultRequests=0,cancelRequests=0;
+  const ui=await editor(freeTube(),null,{interceptFetch:(path)=>{
+    if(path==='/api/simulate')return new Response(JSON.stringify({id:'finished-job',status:'completed'}));
+    if(path==='/api/simulation-status')return new Response(JSON.stringify({id:'finished-job',status:'completed'}));
+    if(path==='/api/simulation-result'){
+      resultRequests++;
+      if(resultRequests<=3)throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify({result:{mode:'preview',frames:[{time_s:0,parts:{}}],duration_s:0,events:[],settled:true}}));
+    }
+    if(path==='/api/simulation-cancel'){cancelRequests++;return new Response(JSON.stringify({status:'cancelled'}));}
+    return null;
+  }});
+  try{
+    ui.document.querySelector('[data-mode="simulate"]').click();
+    ui.document.querySelector('[data-run="simulate"]').click();
+    await ui.wait(()=>!ui.state.busy,10000);
+    assert.equal(resultRequests,3);
+    assert.equal(cancelRequests,0);
+    assert.match(ui.state.simulationError,/finished, but its recording could not be fetched/);
+    ui.document.querySelector('#retry-simulation-result').click();
+    await ui.wait(()=>!ui.state.busy&&!!ui.state.recording);
+    assert.equal(resultRequests,4);
+    assert.equal(ui.state.pendingSimulationResult,null);
+  }finally{await ui.close();}
+});
+
+test('a status fetch failure does not cancel the simulation worker',async()=>{
+  let polls=0,cancels=0;
+  const ui=await editor(freeTube(),null,{interceptFetch:(path)=>{
+    if(path==='/api/simulate')return new Response(JSON.stringify({id:'running-job',status:'running'}));
+    if(path==='/api/simulation-status'){
+      polls++;
+      if(polls===1)throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify({id:'running-job',status:'completed'}));
+    }
+    if(path==='/api/simulation-result')return new Response(JSON.stringify({result:{mode:'preview',frames:[{time_s:0,parts:{}}],duration_s:0,events:[],settled:true}}));
+    if(path==='/api/simulation-cancel'){cancels++;return new Response(JSON.stringify({status:'cancelled'}));}
+    return null;
+  }});
+  try{
+    ui.document.querySelector('[data-mode="simulate"]').click();
+    ui.document.querySelector('[data-run="simulate"]').click();
+    await ui.wait(()=>!ui.state.busy);
+    assert.equal(cancels,0);
+    assert.match(ui.state.simulationError,/was not cancelled/);
+    ui.document.querySelector('#retry-simulation-result').click();
+    await ui.wait(()=>!ui.state.busy&&!!ui.state.recording);
+    assert.equal(polls,2);
   }finally{await ui.close();}
 });
 
@@ -3876,7 +4681,7 @@ test('Simulation progress, early cancellation and retry preserve the previous re
     ui.document.querySelector('#cancel-simulation').click();
     assert.match(ui.document.querySelector('#sim-progress').textContent,/Cancelling/);
     releaseStart();await ui.wait(()=>!ui.state.busy);
-    assert.equal(optionsSeen.chain_links_per_body,8);assert.equal(optionsSeen.mode,'preview');assert.ok(cancelled);
+    assert.equal(optionsSeen.chain_links_per_body,1000);assert.equal(optionsSeen.mode,'preview');assert.ok(cancelled);
     assert.equal(ui.state.recording,old);assert.equal(ui.state.doc.results.simulate,old);
     assert.equal(ui.document.querySelector('#cancel-simulation'),null);
     assert.match(ui.document.querySelector('#status-text').textContent,/cancelled/);
@@ -4331,13 +5136,14 @@ test('rope and webbing profiles are selectable and retain their material when re
     await ui.wait(()=>ui.state.scene.parts.length===4&&!ui.document.querySelector('#modal').open);
     assert.equal(ui.state.doc.objects[0].parameters.link_catalog,'generic.strap-seatbelt-65');
     assert.match(ui.document.querySelector('#chain-profile').value,/strap-seatbelt-65/);
+    assert.match(ui.document.querySelector('#inspector').textContent,/bends most easily across its broad face/);
     changeInput(ui,'#chain-length',150);
     await ui.wait(()=>ui.state.scene.parts.length===6&&!ui.state.placementPending);
     assert.equal(ui.state.doc.objects[0].parameters.link_catalog,'generic.strap-seatbelt-65');
   }finally{await ui.close();}
 });
 
-test('Tree Body action returns its exact pipes to draft without changing another subassembly',async()=>{
+for(const loose of [false,true])test(`Tree Body action returns pipes to draft with ${loose?'an external loose socket':'locked sockets'}`,async()=>{
   const doc=draftFixture();
   doc.parts.push({id:'pipe',catalog:'tubeclamp.tube-C',parameters:{length_mm:1040},
     pose:{position_mm:[500,0,100],rotation_deg:[0,90,0]}});
@@ -4347,8 +5153,12 @@ test('Tree Body action returns its exact pipes to draft without changing another
     {id:'left-pipe',type:'socket',a:{part:'left',port:'socket'},b:{part:'pipe',end:'start'},insertion_mm:20,locked:true},
     {id:'right-pipe',type:'socket',a:{part:'right',port:'socket'},b:{part:'pipe',end:'end'},insertion_mm:20,locked:true}
   ];
+  doc.joints[1].locked=!loose;
+  doc.joints[1].metadata={note:'Preserve the original screw state'};
   const ui=await editor(doc);try{
-    const toggle=ui.document.querySelector('[data-select="pipe"]').closest('details').querySelector('summary [data-tree-actions]');
+    const body=ui.document.querySelector('[data-select="pipe"]').closest('details');
+    if(loose)assert.equal(body.querySelector('[data-select="right"]'),null);
+    const toggle=body.querySelector('summary [data-tree-actions]');
     toggle.click();assert.match(ui.document.querySelector('#tree-actions-menu').textContent,/Return pipes to draft/);
     ui.document.querySelector('[data-tree-command="reopen"]').click();
     await ui.wait(()=>!ui.state.placementPending&&!!ui.state.doc.draft_subassemblies?.length);
@@ -4356,10 +5166,15 @@ test('Tree Body action returns its exact pipes to draft without changing another
     assert.equal(ui.state.doc.parts.some(p=>p.id==='other-pipe'),true);
     assert.equal(ui.state.doc.joints.length,0);
     assert.equal(ui.state.doc.draft_subassemblies[0].runs[0].id,'pipe');
+    const attachment=ui.state.doc.draft_subassemblies[0].runs[0].attachments.find(a=>a.connector==='right');
+    assert.equal(attachment.joint.locked,!loose);
+    assert.deepEqual(attachment.joint.metadata,doc.joints[1].metadata);
+    if(loose)assert.match(ui.document.querySelector('#toast').textContent,/1 loose socket connection preserved/);
     assert.equal(ui.state.scene.parts.find(p=>p.id==='pipe').draft,true);
     assert.equal(ui.state.undo.length,1);
     ui.document.querySelector('#undo').click();await ui.wait(()=>ui.state.doc.parts.some(p=>p.id==='pipe'));
     assert.equal(ui.state.doc.joints.length,2);
+    assert.deepEqual(ui.state.doc.joints,doc.joints);
   }finally{await ui.close();}
 });
 
@@ -4434,10 +5249,46 @@ test('Rename is available for parts and Body entries and displays names as text'
     ui.document.querySelector('#item-name').value='Rail <b>one</b>';modalAction(ui,'Rename');await ui.wait(()=>!ui.state.placementPending&&!ui.document.querySelector('#modal').open);
     assert.match(ui.document.querySelector(`[data-select="${pid}"]`).textContent,/Rail <b>one<\/b>/);assert.equal(ui.document.querySelector(`[data-select="${pid}"] b`),null);
     assert.equal(ui.document.querySelector('#inspector h2').textContent,'Rail <b>one</b>');assert.equal(ui.state.doc.parts[0].id,pid);
+    assert.equal(ui.document.querySelector('#selection-label').textContent,'Rail <b>one</b>');
+    assert.match(ui.document.querySelector('#selection-summary').textContent,/Rail <b>one<\/b>/);
     ui.document.querySelector('[aria-label="Actions for Body 01"]').click();ui.document.querySelector('[data-tree-command="rename"]').click();
     ui.document.querySelector('#item-name').value='Fixed <b>base</b>';modalAction(ui,'Rename');await ui.wait(()=>!ui.state.placementPending&&!ui.document.querySelector('#modal').open);
     assert.ok(ui.document.querySelector('[aria-label="Actions for Fixed <b>base</b>"]'));assert.match(ui.document.querySelector('[data-tree-group]').textContent,/Fixed <b>base<\/b>/);assert.equal(ui.document.querySelector('[data-tree-group] b'),null);assert.equal(ui.state.doc.metadata.body_labels[0].parts[0],pid);
   }finally{await ui.close();}
+});
+
+test('Renamed parts appear in connection properties and pickers through Undo, Redo and reload',async()=>{
+  const doc=fixture('TC104C');
+  doc.parts[1].label='Collar <b>A</b>';
+  doc.joints=[{id:'mount',type:'socket',a:{part:'tee',port:'through'},b:{part:'pipe',at_mm:500},locked:true}];
+  const ui=await editor(doc);let saved;
+  const connectionName=ui=>ui.document.querySelector('[data-joint-edit="mount"]').parentElement.querySelector('.joint-card-top span').textContent;
+  try{
+    ui.select('pipe');
+    ui.document.querySelector('[data-select="pipe"]').parentElement.querySelector('[data-tree-actions]').click();
+    ui.document.querySelector('[data-tree-command="rename"]').click();
+    ui.document.querySelector('#item-name').value='CrossBar <&> 左';modalAction(ui,'Rename');
+    await ui.wait(()=>!ui.state.placementPending&&!ui.document.querySelector('#modal').open);
+    assert.equal(ui.document.querySelector('#selection-label').textContent,'CrossBar <&> 左');
+    ui.select('tee');assert.equal(connectionName(ui),'CrossBar <&> 左');
+    assert.equal(ui.document.querySelector('.joint-card-top b'),null);
+    ui.document.querySelector('[data-joint-edit="mount"]').click();
+    assert.match(ui.document.querySelector('#snap-target').textContent,/Collar <b>A<\/b>.*CrossBar <&> 左/);
+    modalAction(ui,'Cancel');
+    ui.document.querySelector('#new-joint').click();
+    assert.match(ui.document.querySelector('#joint-part-b option[value="pipe"]').textContent,/^CrossBar <&> 左/);
+    assert.equal(ui.document.querySelector('#joint-part-b option[value="pipe"]').value,'pipe');
+    modalAction(ui,'Cancel');
+    assert.deepEqual(ui.state.doc.joints,doc.joints);
+    ui.document.querySelector('#undo').click();await ui.wait(()=>connectionName(ui)==='pipe');
+    ui.document.querySelector('#redo').click();await ui.wait(()=>connectionName(ui)==='CrossBar <&> 左');
+    saved=structuredClone(ui.state.doc);
+  }finally{await ui.close();}
+  const reopened=await editor(saved);try{
+    reopened.select('tee');assert.equal(connectionName(reopened),'CrossBar <&> 左');
+    reopened.select('pipe');assert.equal(reopened.document.querySelector('#selection-label').textContent,'CrossBar <&> 左');
+    assert.deepEqual(reopened.state.doc.joints,doc.joints);
+  }finally{await reopened.close();}
 });
 
 test('Rename validates blank names, avoids no-op Undo, and discards cancelled responses',async()=>{

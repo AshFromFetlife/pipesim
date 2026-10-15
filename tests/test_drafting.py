@@ -106,7 +106,7 @@ def test_finished_pipe_returns_to_draft_with_its_span_and_socket_graph():
     assert run['id'] == 'tube-1'
     assert 'locked_length_mm' not in run
     assert pytest.approx(1040) == sum((a-b)**2 for a,b in zip(run['start_mm'],run['end_mm']))**.5
-    assert run['attachments'] == [
+    assert [{k:v for k,v in a.items() if k!='joint'} for a in run['attachments']] == [
         {'connector': 'left', 'port': 'socket', 'end': 'start', 'insertion_mm': 20},
         {'connector': 'right', 'port': 'socket', 'end': 'end', 'insertion_mm': 20}]
     assert preview(Assembly.from_doc(result['document']))[0]['conflicts'] == []
@@ -133,7 +133,8 @@ def test_reopen_preserves_other_draft_structure_and_derives_through_station():
     assert [group['id'] for group in result['document']['draft_subassemblies']] == ['other', 'draft-1']
     assert {run['id'] for run in runs(result['document'])} == {'tube-1', 'tube-2'}
     attachment = next(a for a in runs(result['document'])[1]['attachments'] if a['connector'] == 'through')
-    assert attachment == {'connector': 'through', 'port': 'bore'}
+    assert attachment == {'connector': 'through', 'port': 'bore',
+                          'joint': next(j for j in exact['joints'] if j['a']['part']=='through')}
     again = finalize(Assembly.from_doc(result['document']), check_collisions=False, run_id='tube-1')
     assert again['status'] == 'finalized', again
     assert next(j for j in again['document']['joints'] if j['a']['part'] == 'through')['b']['at_mm'] == 520
@@ -149,7 +150,7 @@ def test_reopen_rejects_unsupported_constraints_without_modifying_exact_design()
         reopen(Assembly.from_doc(exact), ['tube-1'])
     assert before['parts'] == exact['parts']
     exact.pop('anchors')
-    exact['joints'][0]['locked'] = False
+    exact['joints'][0]['type'] = 'fixed'
     with pytest.raises(DocumentError, match='cannot represent'):
         reopen(Assembly.from_doc(exact), ['tube-1'])
 

@@ -21553,3 +21553,1336 @@ parts:
       geometry_status: parametric
       assumptions:
       - Steel grade and default wall thickness are assumptions, not supplier certification
+  tubeclamp.TC168MA:
+    name: 168M - Corner Swivel Male · A (26.9 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.216
+    geometry:
+    - type: tube
+      diameter_mm: 35.9
+      wall_mm: 4.0
+      length_mm: 32.5
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 22.15
+      - 7.3
+      - 32.5
+      position_mm:
+      - 28.025
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 32.5
+      wall_mm: 12.25
+      length_mm: 7.3
+      position_mm:
+      - 39.1
+      - 0
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+    - type: box
+      size_mm:
+      - 7.3
+      - 22.15
+      - 32.5
+      position_mm:
+      - 0
+      - -28.025
+      - 0
+    - type: tube
+      diameter_mm: 32.5
+      wall_mm: 12.25
+      length_mm: 7.3
+      position_mm:
+      - 0
+      - -39.1
+      - 0
+      axis:
+      - 1
+      - 0
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -19.95
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 26.9
+        profile: round
+        through: true
+        engagement_mm: 32.5
+        min_engagement_mm: 17.88
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_x:
+        type: eye
+        position_mm:
+        - 39.1
+        - 0
+        - 0
+        axis:
+        - 0
+        - -1
+        - 0
+        diameter_mm: 8.0
+        assembly: bolt
+        capacity: 1
+      hinge_y:
+        type: eye
+        position_mm:
+        - 0
+        - -39.1
+        - 0
+        axis:
+        - 1
+        - 0
+        - 0
+        diameter_mm: 8.0
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 73.3
+      g: 7.3
+      h: 32.5
+      i: 32.5
+      j: 8.0
+    source:
+      supplier: Tubeclamp AU
+      sku: TC168MA
+      url: https://www.tubeclamp.com.au/products/tc168m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC168MTechnicalDiagram-2025.jpg?v=1746747691
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from overall dimension; verify physical sample before
+        fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc168m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC168MB:
+    name: 168M - Corner Swivel Male · B (33.7 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.318
+    geometry:
+    - type: tube
+      diameter_mm: 42.7
+      wall_mm: 4.0
+      length_mm: 38.4
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 25.0
+      - 8.7
+      - 38.4
+      position_mm:
+      - 32.85
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.4
+      wall_mm: 13.85
+      length_mm: 8.7
+      position_mm:
+      - 45.35
+      - 0
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+    - type: box
+      size_mm:
+      - 8.7
+      - 25.0
+      - 38.4
+      position_mm:
+      - 0
+      - -32.85
+      - 0
+    - type: tube
+      diameter_mm: 38.4
+      wall_mm: 13.85
+      length_mm: 8.7
+      position_mm:
+      - 0
+      - -45.35
+      - 0
+      axis:
+      - 1
+      - 0
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -23.35
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 33.7
+        profile: round
+        through: true
+        engagement_mm: 38.4
+        min_engagement_mm: 21.12
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_x:
+        type: eye
+        position_mm:
+        - 45.35
+        - 0
+        - 0
+        axis:
+        - 0
+        - -1
+        - 0
+        diameter_mm: 10.7
+        assembly: bolt
+        capacity: 1
+      hinge_y:
+        type: eye
+        position_mm:
+        - 0
+        - -45.35
+        - 0
+        axis:
+        - 1
+        - 0
+        - 0
+        diameter_mm: 10.7
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 85.9
+      g: 8.7
+      h: 38.4
+      i: 38.4
+      j: 10.7
+    source:
+      supplier: Tubeclamp AU
+      sku: TC168MB
+      url: https://www.tubeclamp.com.au/products/tc168m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC168MTechnicalDiagram-2025.jpg?v=1746747691
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from overall dimension; verify physical sample before
+        fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc168m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC168MC:
+    name: 168M - Corner Swivel Male · C (42.4 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.292
+    geometry:
+    - type: tube
+      diameter_mm: 51.4
+      wall_mm: 4.0
+      length_mm: 32.8
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 24.2
+      - 8.4
+      - 32.8
+      position_mm:
+      - 36.8
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 32.8
+      wall_mm: 11.2
+      length_mm: 8.4
+      position_mm:
+      - 48.9
+      - 0
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+    - type: box
+      size_mm:
+      - 8.4
+      - 24.2
+      - 32.8
+      position_mm:
+      - 0
+      - -36.8
+      - 0
+    - type: tube
+      diameter_mm: 32.8
+      wall_mm: 11.2
+      length_mm: 8.4
+      position_mm:
+      - 0
+      - -48.9
+      - 0
+      axis:
+      - 1
+      - 0
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -27.7
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 42.4
+        profile: round
+        through: true
+        engagement_mm: 32.8
+        min_engagement_mm: 18.04
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_x:
+        type: eye
+        position_mm:
+        - 48.9
+        - 0
+        - 0
+        axis:
+        - 0
+        - -1
+        - 0
+        diameter_mm: 10.4
+        assembly: bolt
+        capacity: 1
+      hinge_y:
+        type: eye
+        position_mm:
+        - 0
+        - -48.9
+        - 0
+        axis:
+        - 1
+        - 0
+        - 0
+        diameter_mm: 10.4
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 91.0
+      g: 8.4
+      h: 32.8
+      i: 32.8
+      j: 10.4
+    source:
+      supplier: Tubeclamp AU
+      sku: TC168MC
+      url: https://www.tubeclamp.com.au/products/tc168m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC168MTechnicalDiagram-2025.jpg?v=1746747691
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from overall dimension; verify physical sample before
+        fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc168m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC168MD:
+    name: 168M - Corner Swivel Male · D (48.3 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.438
+    geometry:
+    - type: tube
+      diameter_mm: 57.3
+      wall_mm: 4.0
+      length_mm: 45.7
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 27.6
+      - 9.2
+      - 37.4
+      position_mm:
+      - 41.45
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 37.4
+      wall_mm: 13.45
+      length_mm: 9.2
+      position_mm:
+      - 55.25
+      - 0
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+    - type: box
+      size_mm:
+      - 9.2
+      - 27.6
+      - 37.4
+      position_mm:
+      - 0
+      - -41.45
+      - 0
+    - type: tube
+      diameter_mm: 37.4
+      wall_mm: 13.45
+      length_mm: 9.2
+      position_mm:
+      - 0
+      - -55.25
+      - 0
+      axis:
+      - 1
+      - 0
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -30.65
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 48.3
+        profile: round
+        through: true
+        engagement_mm: 45.7
+        min_engagement_mm: 25.14
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_x:
+        type: eye
+        position_mm:
+        - 55.25
+        - 0
+        - 0
+        axis:
+        - 0
+        - -1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+      hinge_y:
+        type: eye
+        position_mm:
+        - 0
+        - -55.25
+        - 0
+        axis:
+        - 1
+        - 0
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 102.6
+      g: 9.2
+      h: 37.4
+      i: 45.7
+      j: 10.5
+    source:
+      supplier: Tubeclamp AU
+      sku: TC168MD
+      url: https://www.tubeclamp.com.au/products/tc168m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC168MTechnicalDiagram-2025.jpg?v=1746747691
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from overall dimension; verify physical sample before
+        fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc168m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC167MA:
+    name: 167M - Double Swivel Inline Male · A (26.9 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.226
+    geometry:
+    - type: tube
+      diameter_mm: 35.9
+      wall_mm: 4.0
+      length_mm: 32.9
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 16.8
+      - 7.4
+      - 32.6
+      position_mm:
+      - 25.35
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 32.6
+      wall_mm: 12.1
+      length_mm: 7.4
+      position_mm:
+      - 37.95
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: box
+      size_mm:
+      - 16.8
+      - 7.4
+      - 32.6
+      position_mm:
+      - -25.35
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 32.6
+      wall_mm: 12.1
+      length_mm: 7.4
+      position_mm:
+      - -37.95
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -19.95
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 26.9
+        profile: round
+        through: true
+        engagement_mm: 32.9
+        min_engagement_mm: 18.1
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_right:
+        type: eye
+        position_mm:
+        - 37.95
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 8.4
+        assembly: bolt
+        capacity: 1
+      hinge_left:
+        type: eye
+        position_mm:
+        - -37.95
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 8.4
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 108.6
+      g: 7.4
+      h: 75.9
+      i: 32.6
+      j: 32.9
+      k: 8.4
+    source:
+      supplier: Tubeclamp AU
+      sku: TC167MA
+      url: https://www.tubeclamp.com.au/products/tc167m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC167MTechnicalDiagram-2025.jpg?v=1746747538
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from drawing; verify physical sample before fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc167m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC167MB:
+    name: 167M - Double Swivel Inline Male · B (33.7 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.334
+    geometry:
+    - type: tube
+      diameter_mm: 42.7
+      wall_mm: 4.0
+      length_mm: 41.1
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 17.5
+      - 8.9
+      - 38.5
+      position_mm:
+      - 29.1
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.5
+      wall_mm: 14.0
+      length_mm: 8.9
+      position_mm:
+      - 43.1
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: box
+      size_mm:
+      - 17.5
+      - 8.9
+      - 38.5
+      position_mm:
+      - -29.1
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.5
+      wall_mm: 14.0
+      length_mm: 8.9
+      position_mm:
+      - -43.1
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -23.35
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 33.7
+        profile: round
+        through: true
+        engagement_mm: 41.1
+        min_engagement_mm: 22.61
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_right:
+        type: eye
+        position_mm:
+        - 43.1
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+      hinge_left:
+        type: eye
+        position_mm:
+        - -43.1
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 124.3
+      g: 8.9
+      h: 86.2
+      i: 38.5
+      j: 41.1
+      k: 10.5
+    source:
+      supplier: Tubeclamp AU
+      sku: TC167MB
+      url: https://www.tubeclamp.com.au/products/tc167m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC167MTechnicalDiagram-2025.jpg?v=1746747538
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from drawing; verify physical sample before fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc167m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC167MC:
+    name: 167M - Double Swivel Inline Male · C (42.4 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.412
+    geometry:
+    - type: tube
+      diameter_mm: 51.4
+      wall_mm: 4.0
+      length_mm: 45.9
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 17.8
+      - 10.1
+      - 38.5
+      position_mm:
+      - 33.6
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.5
+      wall_mm: 14.0
+      length_mm: 10.1
+      position_mm:
+      - 47.75
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: box
+      size_mm:
+      - 17.8
+      - 10.1
+      - 38.5
+      position_mm:
+      - -33.6
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.5
+      wall_mm: 14.0
+      length_mm: 10.1
+      position_mm:
+      - -47.75
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -27.7
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 42.4
+        profile: round
+        through: true
+        engagement_mm: 45.9
+        min_engagement_mm: 25.25
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_right:
+        type: eye
+        position_mm:
+        - 47.75
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+      hinge_left:
+        type: eye
+        position_mm:
+        - -47.75
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 134.0
+      g: 10.1
+      h: 95.5
+      i: 38.5
+      j: 45.9
+      k: 10.5
+    source:
+      supplier: Tubeclamp AU
+      sku: TC167MC
+      url: https://www.tubeclamp.com.au/products/tc167m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC167MTechnicalDiagram-2025.jpg?v=1746747538
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from drawing; verify physical sample before fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc167m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC167MD:
+    name: 167M - Double Swivel Inline Male · D (48.3 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.458
+    geometry:
+    - type: tube
+      diameter_mm: 57.3
+      wall_mm: 4.0
+      length_mm: 48.4
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 20.0
+      - 9.6
+      - 38.9
+      position_mm:
+      - 37.65
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.9
+      wall_mm: 14.2
+      length_mm: 9.6
+      position_mm:
+      - 52.9
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: box
+      size_mm:
+      - 20.0
+      - 9.6
+      - 38.9
+      position_mm:
+      - -37.65
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.9
+      wall_mm: 14.2
+      length_mm: 9.6
+      position_mm:
+      - -52.9
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -30.65
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 48.3
+        profile: round
+        through: true
+        engagement_mm: 48.4
+        min_engagement_mm: 26.62
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_right:
+        type: eye
+        position_mm:
+        - 52.9
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+      hinge_left:
+        type: eye
+        position_mm:
+        - -52.9
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 144.8
+      g: 9.6
+      h: 105.8
+      i: 38.9
+      j: 48.4
+      k: 10.5
+    source:
+      supplier: Tubeclamp AU
+      sku: TC167MD
+      url: https://www.tubeclamp.com.au/products/tc167m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC167MTechnicalDiagram-2025.jpg?v=1746747538
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from drawing; verify physical sample before fabrication
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc167m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null
+  tubeclamp.TC167ME:
+    name: 167M - Double Swivel Inline Male · E (60.3 mm)
+    kind: connector
+    material: cast-iron
+    color: '#9aabb7'
+    mass_kg: 0.5
+    geometry:
+    - type: tube
+      diameter_mm: 69.3
+      wall_mm: 4.0
+      length_mm: 53.0
+      position_mm:
+      - 0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 0
+      - -1
+    - type: box
+      size_mm:
+      - 21.1
+      - 9.0
+      - 38.0
+      position_mm:
+      - 44.2
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.0
+      wall_mm: 13.75
+      length_mm: 9.0
+      position_mm:
+      - 60.0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: box
+      size_mm:
+      - 21.1
+      - 9.0
+      - 38.0
+      position_mm:
+      - -44.2
+      - 0
+      - 0
+    - type: tube
+      diameter_mm: 38.0
+      wall_mm: 13.75
+      length_mm: 9.0
+      position_mm:
+      - -60.0
+      - 0
+      - 0
+      axis:
+      - 0
+      - 1
+      - 0
+    - type: cylinder
+      diameter_mm: 12
+      length_mm: 4
+      position_mm:
+      - 0
+      - -36.65
+      - 0
+      axis:
+      - 0
+      - -1
+      - 0
+      color: '#58636b'
+    ports:
+      through:
+        type: socket
+        position_mm:
+        - 0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 0
+        - -1
+        diameter_mm: 60.3
+        profile: round
+        through: true
+        engagement_mm: 53.0
+        min_engagement_mm: 29.15
+        assembly: slide
+        capacity: 1
+        clearance_mm: 1.0
+        geometry_status: inferred-engagement
+      hinge_right:
+        type: eye
+        position_mm:
+        - 60.0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+      hinge_left:
+        type: eye
+        position_mm:
+        - -60.0
+        - 0
+        - 0
+        axis:
+        - 0
+        - 1
+        - 0
+        diameter_mm: 10.5
+        assembly: bolt
+        capacity: 1
+    drawing_dimensions_mm:
+      f: 161.0
+      g: 9.0
+      h: 120.0
+      i: 38.0
+      j: 53.0
+      k: 10.5
+    source:
+      supplier: Tubeclamp AU
+      sku: TC167ME
+      url: https://www.tubeclamp.com.au/products/tc167m
+      drawing_url: https://cdn.shopify.com/s/files/1/1384/6879/files/TC167MTechnicalDiagram-2025.jpg?v=1746747538
+      retrieved: '2026-10-13'
+      dimensions: supplier drawing, nominal ±1 mm
+      geometry_status: dimension-derived approximation
+      mass_basis: supplier drawing table
+      assumptions:
+      - 1 mm diametral bore clearance
+      - Tube shell wall and socket engagement estimated
+      - Eye positions inferred from drawing; verify physical sample before fabrication
+      - E drawing gives f=161 mm but h+i=158 mm; hinge centres follow h
+    strength:
+      axial_slip_n: null
+      required_torque_nm: null
+      source_url: https://www.tubeclamp.com.au/products/tc167m
+      basis: No size-specific rating supplied
+      rating_status: unknown
+      bending_nm: null
+      torsion_nm: null
+      fracture_n: null

@@ -22,6 +22,7 @@ SEGMENTS = ['pelvis', 'lumbar', 'thorax', 'neck', 'head'] + [
     side + '_' + part for side in ('left', 'right') for part in
     ('clavicle', 'upper_arm', 'forearm', 'hand', 'thigh', 'shin', 'foot')]
 NEXT = dict(zip(SEGMENTS[:4], SEGMENTS[1:5]))
+FIT_PARENT = {'lumbar': 'pelvis', 'thorax': 'lumbar', 'neck': 'thorax', 'head': 'neck'}
 ALIASES = dict(pelvis=['hips', 'hip', 'pelvis', 'roothips'],
                lumbar=['spine', 'spine01', 'spine1', 'abdomen', 'lowerback'],
                thorax=['chest', 'upperchest', 'spine2', 'spine02', 'spine3', 'spine03', 'upperback', 'chestupper'],
@@ -30,12 +31,48 @@ for side in ('left', 'right'):
     chain = [side + '_' + p for p in ('clavicle', 'upper_arm', 'forearm', 'hand')]
     legs = [side + '_' + p for p in ('thigh', 'shin', 'foot')]
     NEXT.update(zip(chain[:-1], chain[1:])); NEXT.update(zip(legs[:-1], legs[1:]))
+    FIT_PARENT.update({chain[0]: 'thorax', legs[0]: 'pelvis'})
+    FIT_PARENT.update({child: parent for parent, child in zip(chain[:-1], chain[1:])})
+    FIT_PARENT.update({child: parent for parent, child in zip(legs[:-1], legs[1:])})
     for part, names in dict(clavicle=['shoulder', 'clavicle', 'collar'], upper_arm=['upperarm', 'arm'],
                             forearm=['lowerarm', 'forearm'], hand=['hand', 'wrist'], thigh=['upperleg', 'upleg', 'thigh'],
                             shin=['lowerleg', 'leg', 'calf', 'shin'], foot=['foot', 'ankle']).items():
         ALIASES[side + '_' + part] = [v for n in names for v in (side+n, n+side, side[0]+n, n+side[0])]
 for segment in SEGMENTS: ALIASES[segment].append(segment.replace('_', ''))
 REQUIRED = ['pelvis', 'head'] + [s+'_'+p for s in ('left', 'right') for p in ('upper_arm', 'forearm', 'hand', 'thigh', 'shin', 'foot')]
+
+
+def fit_group(segment):
+    if segment in ('lumbar', 'thorax'): return 'torso'
+    if segment in ('neck', 'head'): return 'neck'
+    if segment.endswith(('_clavicle', '_upper_arm')): return 'shoulders'
+    if segment.endswith('_forearm'): return 'upper_arms'
+    if segment.endswith('_hand'): return 'forearms'
+    return 'legs'
+
+
+def fitted_human_anchors(source, target, proportions=None):
+    proportions = proportions or {}
+    result = {}
+    for segment in SEGMENTS:
+        if segment == 'pelvis':
+            result[segment] = target[segment].copy()
+            continue
+        if segment not in source:
+            result[segment] = target[segment].copy()
+            continue
+        parent = FIT_PARENT.get(segment)
+        while parent is not None and parent not in source:
+            parent = FIT_PARENT.get(parent)
+        if parent is None:
+            result[segment] = target[segment].copy()
+            continue
+        factor = proportions.get(fit_group(segment), 1)
+        if type(factor) not in (int, float) or not math.isfinite(factor) or not .5 <= factor <= 1.5:
+            raise DocumentError('Human model: body proportion controls must be between 50% and 150%')
+        direction = target[segment] - target[parent]
+        result[segment] = result[parent] + unit(direction) * np.linalg.norm(source[segment]-source[parent]) * factor
+    return result
 
 
 def canonical(name):
@@ -97,17 +134,12 @@ class HumanSkin:
         self.world = np.empty((len(self.nodes), 4, 4))
         self.refresh()
         self.inverse_binds = []
-        # Skeleton.pose(), as in THREE: restore bone worlds from inverse binds,
-        # then recover their local transforms, before fitting the ragdoll.
-        for skin_index,skin in enumerate(self.document['skins']):
+        # Match the browser: calibrate using authored node transforms. Inverse
+        # binds may be identities or include a bind-shape transform; inverting
+        # them to replace joint positions can collapse a valid skeleton.
+        for skin in self.document['skins']:
             inverses = self.accessor(skin['inverseBindMatrices']).reshape(-1, 4, 4).transpose(0, 2, 1) if 'inverseBindMatrices' in skin else np.tile(np.eye(4), (len(skin['joints']), 1, 1))
             self.inverse_binds.append(inverses)
-            if skin_index in active_skins:
-                for i, inverse in zip(skin['joints'], inverses): self.world[i] = np.linalg.inv(inverse)
-        for i in self.bones:
-            parent = self.parents.get(i)
-            self.local[i] = np.linalg.inv(self.world[parent]) @ self.world[i] if parent in self.bones else self.world[i].copy()
-        self.refresh()
         self.mapping = self.map_bones()
         rests = {p['id']: transform(p['pose']) for p in human['rest_parts']}
         anchors = {}
@@ -123,15 +155,17 @@ class HumanSkin:
         scale = np.linalg.norm(anchors['head']-anchors['pelvis']) / np.linalg.norm(self.world[self.mapping['head'], :3, 3]-hips)
         self.root = compose(anchors['pelvis'] - alignment.apply(hips)*scale, alignment, [scale]*3)
         self.refresh()
+        source_anchors = {segment: self.world[i, :3, 3].copy() for segment, i in self.mapping.items()}
+        fitted = fitted_human_anchors(source_anchors, anchors, self.config.get('body_proportions'))
         self.bindings = []
         for segment, i in self.mapping.items():
-            rest, anchor, position = rests[segment], anchors[segment], self.world[i, :3, 3]
+            rest, anchor, position = rests[segment], fitted[segment], self.world[i, :3, 3]
             q = rotation(self.world[i]); following = NEXT.get(segment)
             while following and following not in self.mapping: following = NEXT.get(following)
             children = [c for c in self.nodes[i].get('children', []) if c in self.bones]
             if following:
                 source = self.world[self.mapping[following], :3, 3] - position
-                target = anchors[following] - anchor
+                target = fitted[following] - anchor
             elif segment.endswith('_hand'):
                 finger = next((c for c in children if 'middle' in self.nodes[c].get('name', '').lower()),
                               next((c for c in children if 'index' in self.nodes[c].get('name', '').lower()), children[0] if children else None))
