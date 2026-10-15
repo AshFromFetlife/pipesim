@@ -414,6 +414,15 @@ def resize_drag(assembly,identifier,length_mm,side,behavior='follow',capture_mm=
         info=summary(instance,assembly.library)
         if length_mm>info['pitch_mm']*1000:
             raise DocumentError('A flexible line supports at most 1,000 segments')
+        from .chain_edit import resize_free_end
+        free_tail=resize_free_end(assembly,identifier,length_mm,side)
+        if free_tail is not None:
+            doc=free_tail['document']
+            after=Assembly.from_doc(doc,assembly.base,assembly.library)
+            _valid_against(assembly,after,{p for p in after.parts if p.startswith(identifier+'/')})
+            return {'status':'resized','document':doc,'member':identifier,'length_mm':length_mm,
+                    'moved':[],'endpoint':side,'changed':free_tail['changed'],
+                    'message':free_tail.get('message')}
         fixed_id=info['end_part'] if side=='start' else info['start_part']
         fixed_port=info['end_port'] if side=='start' else info['start_port']
         old_point,_=assembly.parts[fixed_id].frame({'port':fixed_port})

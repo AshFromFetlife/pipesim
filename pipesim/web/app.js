@@ -561,6 +561,7 @@ async function requestResize(target,side,length,shift=false){
       behavior:shift?preferences.resizeShiftMode:preferences.resizeConnectorMode,
       capture_mm:preferences.resizeCaptureMm,capture_deg:preferences.resizeCaptureDeg,
       auto_connect:preferences.resizeAutoConnect,locked:preferences.connectionLocked});
+    if(result.changed===false){restorePlacement();toast(result.message||'This end is already at its nearest connection.');return;}
     await acceptPlacement(result,revision);status(`Resized ${target.id} to ${result.length_mm.toFixed(1)} mm`);
   }catch(error){restorePlacement();toast(error.message,true);}
   finally{state.placementPending=false;updateResizeHandles();}
@@ -2392,7 +2393,12 @@ function renderChainControls(instance,selectedPart){
     <p>Move the line as one object or choose Pose segments. Simulation always lets its joints flex.</p>
     <div class="object-modes"><button id="chain-select-start">Select start</button><button id="chain-select-end">Select end</button></div>
     <div class="single-field"><label for="chain-link-index">Select segment</label><input id="chain-link-index" type="number" min="1" max="${info.count}" step="1" value="${Number(selectedPart.id.split('/link-').pop())||1}"></div>
-    <div class="object-modes"><button id="chain-attach-start">Attach start</button><button id="chain-attach-end">Attach end</button></div>`;
+    <div class="object-modes"><button id="chain-attach-start">Attach start</button><button id="chain-attach-end">Attach end</button></div>
+    <h3>EDIT THE LINE</h3>
+    <p>Cut beside the selected segment to make two editable lines. Add or remove a segment here to loosen or tighten the span while its attachments stay in place.</p>
+    <div class="object-modes"><button id="chain-cut-before" ${info.count<2?'disabled':''}>Cut before</button><button id="chain-cut-after" ${info.count<2?'disabled':''}>Cut after</button></div>
+    <div class="object-modes"><button id="chain-tighten">Remove one segment</button><button id="chain-loosen">Insert one segment</button></div>
+    <button class="inspect-action secondary" id="chain-splice">Join with another line…</button>`;
   $('#object-expand').closest('.inspect-section').before(section);
   $('#chain-length').onchange=async e=>{if(!e.target.reportValidity())return;await objectEdit('object-parameters',{object:instance.id,parameters:{...instance.parameters,length_mm:+e.target.value}});};
   $('#chain-profile').onchange=e=>objectEdit('object-parameters',{object:instance.id,parameters:{...instance.parameters,link_catalog:e.target.value}});
@@ -2401,6 +2407,39 @@ function renderChainControls(instance,selectedPart){
   $('#chain-select-start').onclick=()=>selectEnd('start');$('#chain-select-end').onclick=()=>selectEnd('end');
   $('#chain-link-index').onchange=e=>{if(e.target.reportValidity())select(instance.id+'/link-'+e.target.value);};
   for(const end of ['start','end'])$('#chain-attach-'+end).onclick=()=>attachmentDialog(instance,state.scene.parts.find(p=>p.id===info[end+'_part']));
+  const selectedLink=()=>Number($('#chain-link-index').value);
+  const editLine=async(route,body)=>{const result=await objectEdit(route,body);if(result?.message)toast(result.message);return result;};
+  for(const [side,offset] of [['before',-1],['after',0]])$(`#chain-cut-${side}`).onclick=()=>{
+    const cutAfter=selectedLink()+offset;
+    if(cutAfter<1||cutAfter>=info.count){toast('Select a segment inside the line for this cut.');return;}
+    editLine('chain-cut',{object:instance.id,after_link:cutAfter}).then(result=>{
+      if(result?.tail&&side==='before')select(result.tail+'/link-1');
+    });
+  };
+  $('#chain-tighten').onclick=()=>editLine('chain-adjust-span',{object:instance.id,link:selectedLink(),change:-1});
+  $('#chain-loosen').onclick=()=>editLine('chain-adjust-span',{object:instance.id,link:selectedLink(),change:1});
+  $('#chain-splice').onclick=()=>{
+    const compatible=(state.scene.chains||[]).filter(other=>other.id!==instance.id&&other.link_catalog===info.link_catalog);
+    if(!compatible.length){toast('Add another line with the same material and section to join.');return;}
+    const worldPort=(part,port)=>{const data=state.scene.parts.find(p=>p.id===part),mesh=partObjects.get(part);
+      return data&&mesh&&data.ports[port]?new THREE.Vector3(...data.ports[port].position_mm).applyMatrix4(mesh.matrix):null;};
+    const own={start:worldPort(info.start_part,info.start_port),end:worldPort(info.end_part,info.end_port)};
+    const options=compatible.flatMap(other=>{
+      const ends={start:worldPort(other.start_part,other.start_port),end:worldPort(other.end_part,other.end_port)};
+      return ['start','end'].flatMap(first_end=>['start','end'].map(second_end=>({
+        first:instance.id,second:other.id,first_end,second_end,
+        label:`${partName(instance.id)} ${first_end} → ${partName(other.id)} ${second_end}`,
+        distance:own[first_end]&&ends[second_end]?own[first_end].distanceTo(ends[second_end]):Infinity
+      })));
+    }).sort((a,b)=>a.distance-b.distance);
+    modal('Join flexible lines',`<p>Choose the two ends to splice. A gap is filled with matching segments; existing attachments remain in place.</p>
+      <div class="single-field"><label for="chain-splice-pair">ENDS TO JOIN</label><select id="chain-splice-pair">${options.map((option,index)=>`<option value="${index}">${esc(option.label)} · ${Number.isFinite(option.distance)?option.distance.toFixed(1)+' mm apart':'distance unknown'}</option>`).join('')}</select></div>`,[
+      {label:'Cancel',action:closeModal},
+      {label:'Join lines',primary:true,action:async()=>{const choice=options[Number($('#chain-splice-pair').value)];closeModal();
+        await editLine('chain-splice',{first:choice.first,second:choice.second,
+          first_end:choice.first_end,second_end:choice.second_end});}}
+    ]);
+  };
 }
 
 function wheelDialog(catalog='generic.wheel',position=null,wheelId=null,jointId=null){

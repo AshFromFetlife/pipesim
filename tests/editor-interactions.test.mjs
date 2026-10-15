@@ -3630,6 +3630,39 @@ test('a chain can move whole, pose links, hold that shape and keep hundreds of l
   }finally{await ui.close();}
 });
 
+test('selected flexible segment can be cut, spliced, loosened and tightened',async()=>{
+  const ui=await editor(chainDesign());try{
+    selectChain(ui);changeInput(ui,'#chain-link-index',12);
+    ui.document.querySelector('#chain-cut-after').click();
+    await ui.wait(()=>ui.state.doc.objects.length===2&&!ui.state.placementPending);
+    assert.equal(ui.state.scene.parts.length,25);
+    assert.equal(ui.state.scene.joints.length,23);
+    assert.equal(ui.state.undo.length,1);
+    ui.document.querySelector('#chain-splice').click();
+    assert.equal(ui.document.querySelector('#modal-title').textContent,'Join flexible lines');
+    modalAction(ui,'Join lines');
+    await ui.wait(()=>ui.state.doc.objects.length===1&&!ui.state.placementPending);
+    assert.equal(ui.state.scene.joints.length,24);
+    ui.document.querySelector('#chain-loosen').click();
+    await ui.wait(()=>ui.state.scene.parts.length===26&&!ui.state.placementPending);
+    changeInput(ui,'#chain-link-index',13);
+    ui.document.querySelector('#chain-tighten').click();
+    await ui.wait(()=>ui.state.scene.parts.length===25&&!ui.state.placementPending);
+    assert.equal(ui.state.scene.joints.length,24);
+    assert.equal(ui.state.undo.length,4);
+  }finally{await ui.close();}
+});
+
+test('cut before a selected segment keeps that segment selected in the new line',async()=>{
+  const ui=await editor(chainDesign());try{
+    selectChain(ui);changeInput(ui,'#chain-link-index',12);
+    ui.document.querySelector('#chain-cut-before').click();
+    await ui.wait(()=>ui.state.doc.objects.length===2&&!ui.state.placementPending);
+    assert.equal(ui.state.selected,'chain-cut/link-1');
+    assert.equal(ui.state.scene.joints.length,23);
+  }finally{await ui.close();}
+});
+
 test('rotating a draft pipe follows its mirror mode and warns on oblique crossings',async()=>{
   const doc=draftFixture();doc.parts=[];
   doc.draft_subassemblies=[{id:'draft-1',runs:[{id:'run',catalog:'tubeclamp.tube-C',

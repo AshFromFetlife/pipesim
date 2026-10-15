@@ -12,6 +12,9 @@ import pytest
 from fuzz_runtime import budget
 from pipesim.deletion import delete_parts
 from pipesim.document import Assembly
+from pipesim.grouping import set_object_layout
+from pipesim.math3d import pose_of
+from pipesim.posing import transform_part
 from pipesim.symmetry import materialize_mirror
 
 
@@ -30,7 +33,8 @@ def _case(seed, base, library):
     else:
         count = rng.randint(4, 40)
         source = {'id': 'chain', 'template': 'chain',
-                  'parameters': {'length_mm': count * 20, 'link_catalog': 'generic.chain-link'},
+                  'parameters': {'length_mm': count * 20,
+                                 'link_catalog': 'generic.rope-jute-6' if mode == 2 else 'generic.chain-link'},
                   'pose': {'position_mm': [offset if mode == 2 else offset + rng.uniform(80, 400),
                                            rng.uniform(-100, 100), rng.uniform(300, 800)]}}
     doc = {'format': 'pipesim/1', 'units': 'mm-kg-s-N-deg', 'name': f'Chain mirror fuzz {seed}',
@@ -39,6 +43,15 @@ def _case(seed, base, library):
                                     'mirrors': [{'id': 'plane', 'axis': 'x',
                                                  'offset_mm': offset, 'scope': 'scene'}]}]}
     original = Assembly.from_doc(doc, base, library)
+    if mode != 1:
+        # A scene mirror does not anchor a free rope's first segment. Pose the
+        # link before baking so every randomized mirror case checks the editor.
+        editable = Assembly.from_doc(set_object_layout(original, 'chain', 'posable'), base, library)
+        target = pose_of(editable.parts['chain/link-1'].matrix)
+        target['position_mm'][1] += rng.uniform(5, 80)
+        pose = transform_part(editable, 'chain/link-1', target, preview=True)
+        assert not pose['limited'], (seed, mode, pose)
+        assert 'chain/link-1' in pose['moved'], (seed, mode, pose)
     baked = materialize_mirror(original, 'scene', 'plane')
     exact = Assembly.from_doc(baked, base, library)
     if mode in (1, 2):

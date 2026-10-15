@@ -558,6 +558,20 @@ class Handler(BaseHTTPRequestHandler):
                     result=apply_preset(assembly,data['object'],data['preset'])
                     if result['changed']:
                         result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/chain-cut':
+                    from .chain_edit import cut
+                    result=cut(assembly,data['object'],data['after_link'])
+                    result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/chain-splice':
+                    from .chain_edit import splice
+                    result=splice(assembly,data['first'],data['second'],
+                                  data.get('first_end','end'),data.get('second_end','start'))
+                    result['scene']=self.scene(self.assembly(result['document'],base))
+                elif route=='/api/chain-adjust-span':
+                    from .chain_edit import adjust_span
+                    result=adjust_span(assembly,data['object'],data['link'],data['change'])
+                    if result['changed']:
+                        result['scene']=self.scene(self.assembly(result['document'],base))
                 elif route=='/api/human-symmetry':
                     from .human_symmetry import set_human_symmetry
                     document=set_human_symmetry(assembly,data['object'],data.get('group'),data.get('plane'))

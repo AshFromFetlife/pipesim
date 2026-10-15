@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from pipesim.chain_poses import PRESETS, apply_preset
-from pipesim.grouping import move_object, set_object_layout
+from pipesim.grouping import attach_part, move_object, set_object_layout
 from pipesim.math3d import pose_of, transform
 from pipesim.posing import transform_part
 
@@ -65,6 +65,106 @@ def test_whole_line_move_preserves_a_selected_shape(factory, blank):
     for part in posed.parts:
         assert np.allclose(moved.parts[part].matrix, delta @ posed.parts[part].matrix,
                            atol=1e-5)
+
+
+def test_free_hanging_rope_reaches_fixed_shackle_without_bending(factory, blank):
+    doc = copy.deepcopy(blank)
+    doc['objects'] = [{'id': 'line', 'template': 'chain',
+                       'parameters': {'length_mm': 1260, 'link_catalog': 'generic.rope-jute-6'},
+                       'pose': {'position_mm': [0, 0, 500]}}]
+    straight = factory(doc)
+    shaped = factory(apply_preset(straight, 'line', 'hanging-arc')['document'])
+    editable = factory(set_object_layout(shaped, 'line', 'posable'))
+    start = editable.parts['line/link-1'].frame({'port': 'b'})[0]
+    doc = copy.deepcopy(editable.doc)
+    doc['parts'] = [{'id': 'shackle', 'body': {'kind': 'connector', 'mass_kg': .1,
+        'geometry': [{'type': 'sphere', 'radius_mm': 8}],
+        'ports': {'eye': {'type': 'eye', 'assembly': 'hook',
+                          'position_mm': [0, 0, 0], 'axis': [1, 0, 0]}}},
+        'pose': {'position_mm': (start + [234.6, 0, 0]).tolist()}}]
+    doc['anchors'] = [{'part': 'shackle', 'surface': 'fixture'}]
+    before = factory(doc)
+    attached = attach_part(before, 'line', 'line/link-1',
+                           {'part': 'shackle', 'port': 'eye'}, 'spherical', part_port='b')
+    after = factory(attached['document'])
+    assert len([part for part in after.parts if part.startswith('line/link-')]) == 63
+    assert np.allclose(after.parts['shackle'].matrix, before.parts['shackle'].matrix)
+    assert np.allclose(nodes(after) - nodes(before), [234.6, 0, 0], atol=1e-5)
+    first, second, _ = after.joint_frames(attached['joint'])
+    assert np.linalg.norm(first - second) < .5
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_free_rope_first_segment_can_be_posed_with_scene_mirror(factory, blank, mirror):
+    doc = copy.deepcopy(blank)
+    doc['objects'] = [{'id': 'line', 'template': 'chain',
+                       'parameters': {'length_mm': 1260, 'link_catalog': 'generic.rope-jute-6'},
+                       'pose': {'position_mm': [100, 0, 500]}}]
+    if mirror:
+        doc['draft_subassemblies'] = [{'id': 'scene', 'runs': [],
+                                       'mirrors': [{'id': 'plane', 'axis': 'x',
+                                                    'offset_mm': 0, 'scope': 'scene'}]}]
+    shaped = factory(apply_preset(factory(doc), 'line', 'hanging-arc')['document'])
+    before = factory(set_object_layout(shaped, 'line', 'posable'))
+    target = pose_of(before.parts['line/link-1'].matrix)
+    target['position_mm'][1] += 50
+
+    preview = transform_part(before, 'line/link-1', target, preview=True)
+    assert not preview['limited']
+    assert 'line/link-1' in preview['moved']
+    after = factory(transform_part(before, 'line/link-1', target)['document'])
+    assert np.allclose(after.parts['line/link-1'].matrix[:3, 3], target['position_mm'], atol=.01)
+    assert np.allclose(nodes(after)-nodes(before), [0, 50, 0], atol=.01)
+    if mirror:
+        assert after.doc['draft_subassemblies'][0]['mirrors'] == doc['draft_subassemblies'][0]['mirrors']
+
+
+@pytest.mark.parametrize('mirror', [False, True])
+def test_rope_interior_eye_attaches_with_three_mm_reach_allowance(factory, blank, mirror):
+    doc = copy.deepcopy(blank)
+    doc['objects'] = [{'id': 'line', 'template': 'chain',
+                       'parameters': {'length_mm': 1260, 'link_catalog': 'generic.rope-jute-6'},
+                       'pose': {'position_mm': [0, 0, 500]}}]
+    if mirror:
+        doc['draft_subassemblies'] = [{'id': 'scene', 'runs': [],
+                                       'mirrors': [{'id': 'plane', 'axis': 'x',
+                                                    'offset_mm': 0, 'scope': 'scene'}]}]
+    shaped = apply_preset(factory(doc), 'line', 'hanging-arc')['document']
+    shaped['objects'][0]['layout_mode'] = 'posable'
+    original = factory(shaped)
+    first = original.parts['line/link-1'].frame({'port': 'b'})[0]
+    fifteenth = original.parts['line/link-15'].frame({'port': 'a'})[0]
+    doc = copy.deepcopy(shaped)
+    doc['parts'] = [
+        {'id': 'first-eye', 'body': {'kind': 'connector', 'mass_kg': .1,
+         'geometry': [{'type': 'sphere', 'radius_mm': 8}],
+         'ports': {'eye': {'type': 'eye', 'position_mm': [0, 0, 0], 'axis': [1, 0, 0]}}},
+         'pose': {'position_mm': first.tolist()}},
+        {'id': 'target-eye', 'catalog': 'generic.d-shackle',
+         'pose': {'position_mm': (fifteenth + [3, 0, -10]).tolist()}},
+    ]
+    doc['joints'] = [{'id': 'first-attachment', 'type': 'spherical',
+                      'a': {'part': 'first-eye', 'port': 'eye'},
+                      'b': {'part': 'line/link-1', 'port': 'b'}}]
+    doc['anchors'] = [{'part': name, 'surface': 'fixture'} for name in ('first-eye', 'target-eye')]
+    before = factory(doc)
+    attached = attach_part(before, 'line', 'line/link-15',
+                           {'part': 'target-eye', 'port': 'eye'}, 'spherical', part_port='a')
+    after = factory(attached['document'])
+    assert np.allclose(after.parts['first-eye'].matrix, before.parts['first-eye'].matrix)
+    assert np.allclose(after.parts['target-eye'].matrix, before.parts['target-eye'].matrix)
+    for joint in after.joints:
+        a, b, _ = after.joint_frames(joint)
+        assert np.linalg.norm(a - b) < .5
+    source_local = after.parts['line/link-15'].local_frame(attached['joint']['b'])[0]
+    nominal_local = after.parts['line/link-15'].local_frame({'port': 'a'})[0]
+    assert .5 < np.linalg.norm(source_local - nominal_local) <= 3.5
+    target_pose = pose_of(after.parts['line/link-25'].matrix)
+    target_pose['position_mm'][1] += 10
+    reshaped = factory(transform_part(after, 'line/link-25', target_pose)['document'])
+    for joint in reshaped.joints:
+        a, b, _ = reshaped.joint_frames(joint)
+        assert np.linalg.norm(a - b) < .5
 
 
 def test_anchor_and_two_end_connections_remain_placed(factory, blank):

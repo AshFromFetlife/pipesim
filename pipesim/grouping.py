@@ -309,7 +309,12 @@ def move_object(assembly, object_id, target, *, preview=False):
             raise DocumentError(f'{exc}. Detach or loosen the attachment in Connections to structure before moving the whole object.') from exc
         document=restore_objects(assembly.doc,document,assembly.base,assembly.library,{object_id:target})
     if instance.get('symmetry'):
-        symmetry=next(o for o in document['objects'] if o['id']==object_id)['symmetry']
+        saved=next(o for o in document['objects'] if o['id']==object_id)
+        # Regrouping reconstructs the parent matrix and may turn an exact
+        # zero Euler angle into a one-unit rounding residue. The projected
+        # whole-object pose is already valid and is the requested authored pose.
+        saved['pose']=copy.deepcopy(target)
+        symmetry=saved['symmetry']
         symmetry['rotation_deg'] = list(target['rotation_deg'])
         symmetry['line_offset_mm'] = target['position_mm'][1 if symmetry['axis']=='x' else 0]
     return {'document':document,'poses':poses,'moved':list(poses),'limited':limited,
@@ -447,8 +452,11 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
         nearest,_,face=closest_point_naive(mesh,hint[None,:])
         normal=mesh.face_normals[face[0]]
         target={'part':target['part'],'frame':{'position_mm':nearest[0].tolist(),'axis':normal.tolist()}}
-    if chain and (any(a['part'].startswith(object_id+'/') for a in assembly.anchors) or
-                  any(j['a']['part'].startswith(object_id+'/')!=j['b']['part'].startswith(object_id+'/') for j in assembly.joints)):
+    chain_has_external=chain and (
+        any(a['part'].startswith(object_id+'/') for a in assembly.anchors) or
+        any(j['a']['part'].startswith(object_id+'/')!=j['b']['part'].startswith(object_id+'/')
+            for j in assembly.joints))
+    if chain_has_external:
         # Attaching the other end is an explicit request to shape the chain.
         doc=copy.deepcopy(assembly.doc);next(o for o in doc['objects'] if o['id']==object_id)['layout_mode']='posable'
         # Layout mode changes how this edit is posed; it does not change any
@@ -463,7 +471,13 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
         desired=part.matrix.copy();desired[:3,3]+=point-current
         moved=None
         fast_chain_pose=False
-        if chain and instance.get('layout_mode')=='posable':
+        if chain and not chain_has_external:
+            # A shaped but unattached line has six free rigid-body degrees of
+            # freedom. Carry its complete centreline to the target before
+            # asking link IK to bend around actual attachment constraints.
+            parent=transform(instance.get('pose'));parent[:3,3]+=point-current
+            moved=move_object(assembly,object_id,pose_of(parent))
+        elif chain and instance.get('layout_mode')=='posable':
             from .chain import pose_chain
             local,_=part.local_frame(source)
             port=next((name for name in ('a','b') if np.allclose(part.local_frame({'port':name})[0],local)),None)
@@ -518,12 +532,32 @@ def attach_part(assembly, object_id, part_id=None, target=None, kind='revolute',
                     point,axis=assembly.parts[target['part']].frame(target)
                     current,_=assembly.parts[part_id].frame(source)
                     error=float(np.linalg.norm(current-point))
-    if error>.5:
+    # A flexible rope or strap can meet an eye within a small fitting allowance
+    # even when the nominal end-centre of a fixed-length segment stops short.
+    # Put the joint at the requested eye instead of rejecting a few millimetres
+    # of contact clearance. Keep the ordinary exact
+    # reach requirement for discrete chain links and rigid components.
+    contact_allowance=0.
+    if chain and part.definition.get('flexible_profile') in ('rope','strap') and 'port' in target:
+        target_port=assembly.parts[target['part']].ports.get(target['port'],{})
+        if target_port.get('type') in ('eye','clevis'):
+            cross_section=part.shapes[0] if part.shapes else {}
+            diameter=cross_section.get('diameter_mm')
+            if cross_section.get('type')=='box':
+                diameter=min(cross_section.get('size_mm',[0,0,0])[:2])
+            if isinstance(diameter,(int,float)):
+                contact_allowance=min(5.,max(0.,float(diameter)/2+.5))
+    if error>max(.5,contact_allowance):
         action='Move the chain closer, increase its length or pose its links' if chain else 'Move the person closer or pose the torso and limb'
         raise DocumentError(f'The attachment is still {error:.1f} mm out of reach. {action}, then preview again.')
     # Keep the chosen point on the actual target. A hinge axis is expressed in
     # each body's local frame and references the newly posed joint zero.
     local,_=part.local_frame(source)
+    if error>.5:
+        # Source frames can represent a nearby contact station on the fitting.
+        # The target remains at its named port, so occupancy and later edits
+        # still refer to the intended eye.
+        local=(np.linalg.inv(part.matrix)@np.r_[point,1.])[:3]
     source={'part':part_id,'frame':{'position_mm':local.tolist(),'axis':(part.matrix[:3,:3].T@axis).tolist()}}
     if saved:
         joint[side]=source

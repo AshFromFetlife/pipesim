@@ -502,7 +502,11 @@ def pose_chain(assembly, instance, selected, desired, mode='translate', endpoint
                 # An interior attachment cannot be represented by a chain
                 # node without adding a new segment at that station.
                 lock_link(name)
-    if not pinned: pinned[0] = nodes[0].copy()
+    # An unattached line needs a reference when editing an interior link, but
+    # its first link is free to move in all directions. Pinning node 0 here
+    # silently overrides that link's translation handle (and its b endpoint).
+    if not pinned and index > 0:
+        pinned[0] = nodes[0].copy()
     aim = index if endpoint == 'b' else index+1
     local = links[index].local_frame({'port': endpoint or 'a'})[0]
     target = point(desired, local)

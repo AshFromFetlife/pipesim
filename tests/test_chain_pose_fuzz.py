@@ -50,6 +50,99 @@ def _mirrored_attachment_case(seed, base, library):
     assert np.linalg.norm(first - second) < .5, seed
 
 
+def _free_posable_attachment_case(seed, base, library):
+    """A shaped line with no attachments can use its whole-body freedom."""
+    rng = random.Random(seed)
+    profile = rng.choice((*PROFILES, 'generic.rope-jute-6'))
+    definition = library.parts[profile]
+    pitch = np.linalg.norm(np.asarray(definition['ports']['a']['position_mm']) -
+                           np.asarray(definition['ports']['b']['position_mm']))
+    count = rng.randint(8, 70)
+    doc = {'format': 'pipesim/1', 'units': 'mm-kg-s-N-deg',
+           'name': f'Free line attachment {seed}', 'parts': [], 'joints': [], 'anchors': [],
+           'objects': [{'id': 'line', 'template': 'chain',
+                        'parameters': {'length_mm': count * pitch, 'link_catalog': profile},
+                        'pose': {'position_mm': [rng.uniform(-200, 200),
+                                                 rng.uniform(-200, 200), 800]}}]}
+    initial = Assembly.from_doc(doc, base, library)
+    shaped = apply_preset(initial, 'line', rng.choice(('hanging-arc', 'u-deep', 's-curve')))
+    doc = shaped['document']
+    next(o for o in doc['objects'] if o['id'] == 'line')['layout_mode'] = 'posable'
+    free = Assembly.from_doc(doc, base, library)
+    start = free.parts['line/link-1'].frame({'port': 'b'})[0]
+    offset = np.array([rng.uniform(150, 350), rng.uniform(-120, 120), rng.uniform(-80, 80)])
+    doc['parts'] = [{'id': 'shackle', 'body': {'kind': 'connector', 'mass_kg': .1,
+        'geometry': [{'type': 'sphere', 'radius_mm': 8}],
+        'ports': {'eye': {'type': 'eye', 'assembly': 'hook',
+                          'position_mm': [0, 0, 0], 'axis': [1, 0, 0]}}},
+        'pose': {'position_mm': (start + offset).tolist()}}]
+    doc['anchors'] = [{'part': 'shackle', 'surface': 'fixture'}]
+    before = Assembly.from_doc(doc, base, library)
+    result = attach_part(before, 'line', 'line/link-1',
+                         {'part': 'shackle', 'port': 'eye'}, 'spherical', part_port='b')
+    after = Assembly.from_doc(result['document'], base, library)
+    assert np.allclose(after.parts['shackle'].matrix, before.parts['shackle'].matrix), seed
+    for number in range(1, count + 1):
+        name = f'line/link-{number}'
+        old, new = before.parts[name].matrix, after.parts[name].matrix
+        assert np.allclose(new[:3, 3] - old[:3, 3], offset, atol=1e-4), (seed, name)
+        assert np.allclose(new[:3, :3], old[:3, :3], atol=1e-6), (seed, name)
+    for joint in after.joints:
+        first, second, _ = after.joint_frames(joint)
+        assert np.linalg.norm(first - second) < .5, (seed, joint['id'])
+
+
+def _near_reach_interior_rope_attachment_case(seed, base, library):
+    """A fixed rope end still permits an interior eye to meet nearby hardware."""
+    rng = random.Random(seed)
+    doc = {'format': 'pipesim/1', 'units': 'mm-kg-s-N-deg', 'name': f'Rope reach {seed}',
+           'parts': [], 'joints': [], 'anchors': [],
+           'objects': [{'id': 'line', 'template': 'chain',
+                        'parameters': {'length_mm': 1260, 'link_catalog': 'generic.rope-jute-6'},
+                        'pose': {'position_mm': [rng.uniform(-200, 200), 0, 500]}}]}
+    if seed % 2:
+        doc['draft_subassemblies'] = [{'id': 'scene', 'runs': [],
+                                       'mirrors': [{'id': 'plane', 'axis': 'x',
+                                                    'offset_mm': 0, 'scope': 'scene'}]}]
+    doc = apply_preset(Assembly.from_doc(doc, base, library), 'line', 'hanging-arc')['document']
+    doc['objects'][0]['layout_mode'] = 'posable'
+    shaped = Assembly.from_doc(doc, base, library)
+    start = shaped.parts['line/link-1'].frame({'port': 'b'})[0]
+    selected = shaped.parts['line/link-15'].frame({'port': 'a'})[0]
+    offset = np.array([rng.uniform(2.8, 3.2), rng.uniform(-.05, .05), 0.])
+    doc['parts'] = [{'id': name, 'body': {'kind': 'connector', 'mass_kg': .1,
+                     'geometry': [{'type': 'sphere', 'radius_mm': 8}],
+                     'ports': {'eye': {'type': 'eye', 'position_mm': [0, 0, 0], 'axis': [1, 0, 0]}}},
+                     'pose': {'position_mm': position.tolist()}}
+                    for name, position in (('first-eye', start), ('target-eye', selected + offset))]
+    doc['joints'] = [{'id': 'first-attachment', 'type': 'spherical',
+                      'a': {'part': 'first-eye', 'port': 'eye'},
+                      'b': {'part': 'line/link-1', 'port': 'b'}}]
+    doc['anchors'] = [{'part': name, 'surface': 'fixture'} for name in ('first-eye', 'target-eye')]
+    before = Assembly.from_doc(doc, base, library)
+    result = attach_part(before, 'line', 'line/link-15',
+                         {'part': 'target-eye', 'port': 'eye'}, 'spherical', part_port='a')
+    after = Assembly.from_doc(result['document'], base, library)
+    for joint in after.joints:
+        a, b, _ = after.joint_frames(joint)
+        assert np.linalg.norm(a - b) < .5, (seed, joint['id'])
+    assert np.allclose(after.parts['first-eye'].matrix, before.parts['first-eye'].matrix), seed
+    assert np.allclose(after.parts['target-eye'].matrix, before.parts['target-eye'].matrix), seed
+    local = after.parts['line/link-15'].local_frame(result['joint']['b'])[0]
+    nominal = after.parts['line/link-15'].local_frame({'port': 'a'})[0]
+    assert .5 < np.linalg.norm(local - nominal) <= 3.5, seed
+
+
+@pytest.mark.parametrize('seed', [0, 1, 2, 3])
+def test_free_posable_line_reaches_mounted_eye(seed, tmp_path, library):
+    _free_posable_attachment_case(seed, tmp_path, library)
+
+
+@pytest.mark.parametrize('seed', [0, 1, 2, 3])
+def test_near_reach_interior_rope_attachment(seed, tmp_path, library):
+    _near_reach_interior_rope_attachment_case(seed, tmp_path, library)
+
+
 def _case(seed, base, library):
     rng = random.Random(seed)
     profile = rng.choice(PROFILES)
@@ -110,7 +203,11 @@ def test_long_randomized_line_presets(tmp_path, library):
     while time.monotonic() < deadline:
         seed = rng.getrandbits(64)
         try:
-            if completed % 5 == 0:
+            if completed % 13 == 0:
+                _near_reach_interior_rope_attachment_case(seed, tmp_path, library)
+            elif completed % 7 == 0:
+                _free_posable_attachment_case(seed, tmp_path, library)
+            elif completed % 5 == 0:
                 _mirrored_attachment_case(seed, tmp_path, library)
             else:
                 _case(seed, tmp_path, library)
