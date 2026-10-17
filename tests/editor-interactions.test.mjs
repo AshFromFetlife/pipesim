@@ -926,6 +926,7 @@ test('finalizing a mirrored draft run commits both sides in one edit',async()=>{
 async function editor(doc,storedDefaults=null,{beforeResponse=()=>{},onRequest=null,onResponse=()=>{},onToast=()=>{},onError=()=>{},requestTimeoutMs=0,bootstrapOverride=()=>({}),interceptFetch=()=>null,storedHotkeys=null,storedPreferences=null,storedLastSavedPath=null,realGizmo=false}={}){
   const html=await readFile('pipesim/web/index.html','utf8');const dom=new JSDOM(html,{url});const window=dom.window;
   const document=window.document,timers=[],captures=new Set();let frame,inFlight=0;
+  window.cancelAnimationFrame=()=>{};
   window.addEventListener('error',event=>onError(event.error||event.message));
   window.addEventListener('unhandledrejection',event=>onError(event.reason));
   if(storedDefaults)window.localStorage.setItem('pipesim.snap-defaults.v1',storedDefaults);
@@ -4892,6 +4893,84 @@ test('Build planning displays prepared subassemblies and highlights the whole sl
     ui.document.querySelector('[data-step="2"]').click();
     assert.match(ui.document.querySelector('#inspector').textContent,/support it separately/);
   }finally{await ui.close();}
+});
+
+test('BOM groups and previews a batch before applying it as one undoable edit',async()=>{
+  const doc=(await post('parse',null,{text:await readFile('tests/fixtures/resize-square.pipe.yaml','utf8')})).document;
+  const requests=[],ui=await editor(doc,null,{onRequest:(path,body)=>requests.push({path,body})});
+  try{
+    const original=structuredClone(ui.state.doc),undo=ui.state.undo.length;
+    ui.document.querySelector('[data-mode="build"]').click();
+    const buttons=[...ui.document.querySelectorAll('#inspector button')];
+    assert.ok(buttons.indexOf(ui.document.querySelector('#calculate-bom'))<buttons.indexOf(ui.document.querySelector('[data-run="plan"]')));
+    ui.document.querySelector('#calculate-bom').click();await ui.wait(()=>ui.document.querySelector('#bom-table table'));
+    assert.ok(requests.some(r=>r.path==='/api/bom'));assert.ok(!requests.some(r=>r.path==='/api/plan'));
+    assert.match(ui.document.querySelector('#bom-table').textContent,/tubeclamp\.tube-C/);
+    ui.document.querySelector('[data-bom-tab="lengths"]').click();
+    const group=ui.document.querySelector('[data-bom-group-value]');group.value='1001';
+    ui.document.querySelector('[data-bom-group]').click();
+    assert.equal(ui.document.querySelectorAll('[data-bom-check="lengths"]:checked').length,4);
+    assert.ok(!requests.some(r=>r.path==='/api/bom-preview'));
+    assert.deepEqual(ui.state.doc,original);
+    ui.document.querySelector('#bom-preview').click();await ui.wait(()=>!ui.document.querySelector('#bom-apply').disabled,30000);
+    assert.equal(requests.filter(r=>r.path==='/api/bom-preview').length,1);
+    assert.equal(ui.state.undo.length,undo);assert.deepEqual(ui.state.doc,original);
+    assert.equal(ui.document.querySelector('#bom-view canvas').dataset.rendered,'true');
+    ui.document.querySelector('#bom-before').click();ui.document.querySelector('#bom-after').click();
+    ui.document.querySelector('#bom-apply').click();await ui.wait(()=>!ui.state.placementPending&&!ui.document.querySelector('#modal').open);
+    assert.equal(ui.state.undo.length,undo+1);
+    assert.ok(ui.state.doc.parts.filter(p=>p.parameters?.length_mm).every(p=>p.parameters.length_mm===1001));
+    assert.deepEqual(ui.state.doc.joints.map(j=>j.id),original.joints.map(j=>j.id));
+    ui.document.querySelector('#undo').click();await ui.drain();assert.deepEqual(ui.state.doc,{...original,results:{}});
+  }finally{await ui.close();}
+});
+
+test('BOM rounding queues lengths angles and safe socket stations without per-field solves',async()=>{
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',parts:[
+    {id:'pipe',catalog:'tubeclamp.tube-C',parameters:{length_mm:174.9},pose:{position_mm:[0,0,300]}},
+    {id:'tee',catalog:'tubeclamp.TC101C',pose:{position_mm:[0,0,349.63],rotation_deg:[0,0,.2]}}
+  ],joints:[{id:'through',type:'socket',a:{part:'tee',port:'through'},b:{part:'pipe',at_mm:137.08},locked:true}]};
+  const requests=[],ui=await editor(doc,null,{onRequest:path=>requests.push(path)});
+  try{
+    const original=structuredClone(ui.state.doc);ui.document.querySelector('[data-mode="build"]').click();ui.document.querySelector('#calculate-bom').click();await ui.wait(()=>ui.document.querySelector('#bom-table table'));
+    ui.document.querySelector('#bom-round-lengths').click();ui.document.querySelector('#bom-round-angles').click();ui.document.querySelector('#bom-round-stations').click();
+    ui.document.querySelector('[data-bom-tab="lengths"]').click();assert.equal(ui.document.querySelector('[data-bom-value="lengths"]').value,'175');
+    ui.document.querySelector('[data-bom-tab="angles"]').click();assert.equal(ui.document.querySelector('[data-bom-value="angles"][data-id="tee"][data-axis="2"]').value,'0');
+    ui.document.querySelector('[data-bom-tab="stations"]').click();assert.equal(ui.document.querySelector('[data-bom-value="stations"]').value,'137');
+    assert.equal(requests.filter(p=>p==='/api/bom-preview').length,0);
+    ui.document.querySelector('#bom-preview').click();await ui.wait(()=>!ui.document.querySelector('#bom-apply').disabled,30000);
+    assert.match(ui.document.querySelector('#bom-status').textContent,/4 of 4 targets matched/);
+    const station=ui.document.querySelector('[data-bom-value="stations"]');station.value='138';station.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    assert.equal(ui.document.querySelector('#bom-apply').disabled,true);
+    ui.document.querySelector('#modal-actions button').click();assert.deepEqual(ui.state.doc,original);assert.equal(ui.state.placementPending,false);
+  }finally{await ui.close();}
+});
+
+test('BOM rejects a stale apply and keeps all queued edits out of the source',async()=>{
+  const ui=await editor(fixture(),null,{interceptFetch:path=>path==='/api/bom-apply'?new Response(JSON.stringify({status:'stale',message:'Preview the batch again before applying it.'})):null});
+  try{
+    const original=structuredClone(ui.state.doc);ui.document.querySelector('[data-mode="build"]').click();ui.document.querySelector('#calculate-bom').click();await ui.wait(()=>ui.document.querySelector('#bom-table table'));
+    ui.document.querySelector('[data-bom-tab="lengths"]').click();const input=ui.document.querySelector('[data-bom-value="lengths"]');input.value=String(+input.value+1);input.dispatchEvent(new ui.window.Event('input',{bubbles:true}));
+    ui.document.querySelector('#bom-preview').click();await ui.wait(()=>!ui.document.querySelector('#bom-apply').disabled,30000);
+    ui.document.querySelector('#bom-apply').click();await ui.wait(()=>ui.document.querySelector('#bom-status').textContent.includes('again'));
+    await ui.drain();assert.equal(ui.document.querySelector('#bom-apply').disabled,true);assert.deepEqual(ui.state.doc,original);
+    ui.document.querySelector('#bom-clear').click();assert.equal(ui.document.querySelectorAll('[data-bom-check]:checked').length,0);
+    assert.equal(ui.document.querySelector('#bom-after').disabled,true);
+  }finally{await ui.close();}
+});
+
+test('BOM closing a pending preview cancels it and ignores a late response',async()=>{
+  let finish,cancelled=false;
+  const ui=await editor(fixture(),null,{interceptFetch:path=>{
+    if(path==='/api/bom-preview')return new Promise(resolve=>{finish=()=>resolve(new Response(JSON.stringify({status:'preview',preview_id:'late',matched:1,requested:1,changes:[],scene:{parts:[]}})));});
+    if(path==='/api/bom-cancel'){cancelled=true;return new Response(JSON.stringify({cancelled:true}));}return null;
+  }});
+  try{
+    const original=structuredClone(ui.state.doc);ui.document.querySelector('[data-mode="build"]').click();ui.document.querySelector('#calculate-bom').click();await ui.wait(()=>ui.document.querySelector('#bom-table table'));
+    ui.document.querySelector('#bom-round-lengths').click();ui.document.querySelector('#bom-preview').click();await ui.wait(()=>finish);
+    ui.document.querySelector('#modal-actions button').click();await ui.wait(()=>cancelled);finish();await ui.drain();
+    assert.deepEqual(ui.state.doc,original);assert.equal(ui.document.querySelector('#modal').open,false);assert.equal(ui.state.placementPending,false);
+  }finally{finish?.();await ui.close();}
 });
 
 test('Build planning displays a light fitting placement without a separate micro-lift page',async()=>{

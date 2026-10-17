@@ -146,7 +146,7 @@ async function offerSimilarConnections(message,ports){
     return;
   }
 }
-const EDITOR_API_VERSION=32;
+const EDITOR_API_VERSION=33;
 let humanImportMaxBytes=200*1024*1024;
 let serverApiVersion=null;
 const SERVER_UPDATE_MESSAGE=`The PipeSim server at ${window.location.host} is older than this editor. Save your work, stop the process using that address, start the server again, then reload this tab.`;
@@ -2694,9 +2694,89 @@ function buildHandlingSummary(plan){
   }
   return text;
 }
+function bomNumber(value){return Number(value).toLocaleString('en-AU',{maximumFractionDigits:6});}
+function bomRound(value,increment){return Number((Math.sign(value)*Math.round((Math.abs(value)+1e-10)/increment)*increment).toFixed(9));}
+function drawBomView(host,data,highlight=[]){
+  let viewRenderer,controls,content,frame;
+  try{
+    viewRenderer=new THREE.WebGLRenderer({antialias:true});viewRenderer.setPixelRatio(Math.min(devicePixelRatio,2));viewRenderer.setSize(360,300);host.replaceChildren(viewRenderer.domElement);
+    const view=new THREE.Scene();view.background=scene.background.clone();view.add(new THREE.HemisphereLight('#ffffff','#70818a',3));
+    const light=new THREE.DirectionalLight('#ffffff',3);light.position.set(1,-2,3);view.add(light);content=new THREE.Group();view.add(content);
+    const selected=new Set(highlight);
+    for(const part of data.parts){const group=new THREE.Group();for(const shape of part.geometry)group.add(meshShape(shape,selected.has(part.id)?'#eea24c':part.color,part.kind));setPose(group,part.pose);content.add(group);}
+    const box=new THREE.Box3().setFromObject(content);
+    for(const part of data.parts)box.expandByPoint(new THREE.Vector3(...(part.pose.position_mm||[0,0,0])));
+    const center=box.getCenter(new THREE.Vector3()),radius=Math.max(box.getSize(new THREE.Vector3()).length()/2,70);
+    const cam=new THREE.PerspectiveCamera(38,360/300,1,100000);cam.up.set(0,0,1);cam.position.copy(center).addScaledVector(new THREE.Vector3(1,-1,.8).normalize(),radius/Math.sin(THREE.MathUtils.degToRad(19))*1.15);cam.lookAt(center);
+    controls=new OrbitControls(cam,viewRenderer.domElement);controls.target.copy(center);
+    // STL meshes arrive asynchronously. Keep this isolated viewport current
+    // while the dialog is open, and stop its animation when it is discarded.
+    const render=()=>{viewRenderer?.render(view,cam);frame=requestAnimationFrame(render);};controls.update();render();
+  }catch(error){host.textContent='The dimension changes are listed below. 3D preview is unavailable in this view.';}
+  return ()=>{window.cancelAnimationFrame(frame);controls?.dispose();if(content)dispose(content);viewRenderer?.dispose();viewRenderer=null;};
+}
+async function calculateBom(){
+  if(state.busy||state.placementPending)return;
+  const revision=state.revision,sourceScene=state.scene;
+  let report=null,tab='parts',generation=0,activeJob=null,preview=null,closed=false,disposeView=null;
+  const queued={lengths:{},angles:{},stations:{}};
+  state.placementPending=true;gizmo?.detach();
+  const cancelled=()=>closed||revision!==state.revision;
+  function cleanup(){closed=true;generation++;if(activeJob)api('bom-cancel',{document:null,job_id:activeJob}).catch(()=>{});disposeView?.();$('#modal').classList.remove('bom-modal');state.placementPending=false;attachGizmo();}
+  function invalidate(){generation++;preview=null;applyButton.disabled=true;if(activeJob){api('bom-cancel',{document:null,job_id:activeJob}).catch(()=>{});activeJob=null;}$('#bom-cancel').hidden=true;$('#bom-after').disabled=true;$('#bom-changes').replaceChildren();previewButton.disabled=!!report?.estimated;$('#bom-status').textContent='Changes queued. Preview the batch before applying it.';}
+  function field(kind,id,value,editable=true,axis=null){const checked=Object.hasOwn(queued[kind],id),target=checked?queued[kind][id]:value;
+    return `<input type="number" step="any" required ${kind==='lengths'?'min="0.001"':kind==='stations'?'min="0"':''} aria-label="${esc(id)} ${axis===null?'target':`angle ${'XYZ'[axis]}`}" data-bom-value="${kind}" data-id="${esc(id)}" ${axis===null?'':`data-axis="${axis}"`} value="${esc(axis===null?target:target[axis])}" ${editable?'':'disabled'}>`;}
+  function tick(kind,id,editable){return `<input type="checkbox" aria-label="Adjust ${esc(id)}" data-bom-check="${kind}" data-id="${esc(id)}" ${Object.hasOwn(queued[kind],id)?'checked':''} ${editable?'':'disabled'}>`;}
+  function draw(){
+    const content=$('#bom-table');
+    if(tab==='parts')content.innerHTML=`<table><thead><tr><th>Code</th><th>Part</th><th>Qty</th><th>Cut / dimensions · mm</th></tr></thead><tbody>${report.bom.items.map(r=>`<tr><td>${esc(r.catalog)}</td><td>${esc(r.name)}</td><td>${r.quantity}</td><td>${r.length_mm===null?(r.panel_dimensions_mm?.map(bomNumber).join(' × ')||'—'):bomNumber(r.length_mm)}</td></tr>`).join('')}</tbody></table>`+(report.bom.additional_hardware?.length?'<h3>Connection & mounting hardware</h3><ul>'+report.bom.additional_hardware.map(h=>`<li>${esc(h.connection)} · ${esc(h.description)}</li>`).join('')+'</ul>':'');
+    if(tab==='lengths')content.innerHTML=report.length_groups.map(g=>`<details class="bom-length-group" open><summary>${esc(g.catalog)} · ${g.parts.length} ${g.parts.length===1?'pipe':'pipes'} · ${bomNumber(g.minimum_mm)}${g.maximum_mm-g.minimum_mm>1e-6?'–'+bomNumber(g.maximum_mm):''} mm</summary><div class="bom-group-controls"><label>Group length · mm <input type="number" step="any" min="0.001" data-bom-group-value="${g.id}" value="${bomRound(g.suggested_mm,+$('#bom-length-step').value||1)}" ${report.estimated?'disabled':''}></label><button class="button" data-bom-group="${g.id}" ${report.estimated?'disabled':''}>Use for group</button></div><table><thead><tr><th>Adjust</th><th>Pipe</th><th>Current · mm</th><th>Target · mm</th></tr></thead><tbody>${g.parts.map(p=>`<tr><td>${tick('lengths',p.id,p.editable)}</td><td>${esc(p.id)}${p.editable?'':'<small>Fixed geometry</small>'}</td><td title="${p.length_mm}">${bomNumber(p.length_mm)}</td><td>${field('lengths',p.id,p.length_mm,p.editable)}</td></tr>`).join('')}</tbody></table></details>`).join('');
+    if(tab==='angles')content.innerHTML=`<p>Round part orientations in the design axes. Connected fittings are fitted together; world fixings retain their poses.</p><table><thead><tr><th>Adjust</th><th>Part / current X, Y, Z · °</th><th>Target X, Y, Z · °</th></tr></thead><tbody>${report.angles.map(p=>`<tr><td>${tick('angles',p.part,p.editable)}</td><td>${esc(p.part)}<small>${p.rotation_deg.map(bomNumber).join(' / ')}</small></td><td class="bom-angle-values">${[0,1,2].map(i=>field('angles',p.part,p.rotation_deg,p.editable,i)).join('')}</td></tr>`).join('')}</tbody></table>`;
+    if(tab==='stations')content.innerHTML=`<p>Distance from the pipe start to the centre of each through socket.</p><table><thead><tr><th>Adjust</th><th>Pipe / fitting</th><th>Current · mm</th><th>Target · mm</th></tr></thead><tbody>${report.stations.map(p=>`<tr><td>${tick('stations',p.joint,p.editable)}</td><td>${esc(p.part)}<small>${esc(p.connector)}</small></td><td>${bomNumber(p.station_mm)}</td><td>${field('stations',p.joint,p.station_mm,p.editable)}</td></tr>`).join('')}</tbody></table>`;
+    $$('[data-bom-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.bomTab===tab)));
+    function read(kind,id){const fields=$$('[data-bom-value]').filter(f=>f.dataset.bomValue===kind&&f.dataset.id===id);return kind==='angles'?fields.map(f=>+f.value):+fields[0].value;}
+    $$('[data-bom-check]').forEach(input=>input.onchange=()=>{if(input.checked)queued[input.dataset.bomCheck][input.dataset.id]=read(input.dataset.bomCheck,input.dataset.id);else delete queued[input.dataset.bomCheck][input.dataset.id];invalidate();});
+    $$('[data-bom-value]').forEach(input=>input.oninput=()=>{const kind=input.dataset.bomValue,id=input.dataset.id;queued[kind][id]=read(kind,id);const check=$$('[data-bom-check]').find(c=>c.dataset.bomCheck===kind&&c.dataset.id===id);check.checked=true;invalidate();});
+    $$('[data-bom-group]').forEach(button=>button.onclick=()=>{const g=report.length_groups.find(g=>g.id===button.dataset.bomGroup),input=$(`[data-bom-group-value="${g.id}"]`);if(!input.reportValidity())return;for(const p of g.parts)if(p.editable)queued.lengths[p.id]=+input.value;invalidate();draw();});
+  }
+  function round(kind){const step=+$(kind==='angles'?'#bom-angle-step':kind==='stations'?'#bom-station-step':'#bom-length-step').value;if(!Number.isFinite(step)||step<=0){$('#bom-status').textContent='Choose a positive rounding increment.';return;}
+    if(kind==='lengths')for(const g of report.length_groups)for(const p of g.parts)if(p.editable)queued.lengths[p.id]=Math.max(step,bomRound(queued.lengths[p.id]??p.length_mm,step));
+    if(kind==='angles')for(const p of report.angles)if(p.editable)queued.angles[p.part]=(queued.angles[p.part]||p.rotation_deg).map(v=>bomRound(v,step));
+    if(kind==='stations')for(const p of report.stations)if(p.editable){const minimum=Math.ceil(p.minimum_mm/step)*step,maximum=Math.floor(((queued.lengths[p.part]??p.length_mm)-p.minimum_mm)/step)*step;queued.stations[p.joint]=maximum>=minimum?Math.min(maximum,Math.max(minimum,bomRound(queued.stations[p.joint]??p.station_mm,step))):p.station_mm;}
+    invalidate();draw();
+  }
+  async function previewBatch(){
+    if(!report||report.estimated)return;
+    if(!$$('#bom-table input[type="number"]').every(i=>i.reportValidity()))return;
+    if(Object.values(queued.lengths).some(v=>!Number.isFinite(v)||v<=0)||Object.values(queued.stations).some(v=>!Number.isFinite(v)||v<0)||Object.values(queued.angles).some(a=>a.some(v=>!Number.isFinite(v)))){$('#bom-status').textContent='Enter positive pipe lengths, non-negative socket distances and finite angles before previewing.';return;}
+    const version=++generation,job_id=Date.now().toString(36)+Math.random().toString(36).slice(2);activeJob=job_id;
+    applyButton.disabled=true;$('#bom-status').textContent='Fitting the batch and checking the completed assembly…';$('#bom-cancel').hidden=false;
+    try{const result=await api('bom-preview',{targets:clone(queued),job_id});if(cancelled()||version!==generation)return;if(result.cancelled){$('#bom-status').textContent='Preview cancelled. Your design is unchanged.';return;}
+      preview=result;applyButton.disabled=result.status!=='preview';$('#bom-status').textContent=result.message+` ${result.matched} of ${result.requested} targets matched.`;
+      result.changes.sort((a,b)=>Number(a.matched)-Number(b.matched));
+      $('#bom-changes').innerHTML='<table><thead><tr><th>Adjustment</th><th>Before → checked preview</th></tr></thead><tbody>'+result.changes.map(c=>`<tr class="${c.matched?'':'bom-retained'}"><td>${esc(c.id)}<small>${esc(c.kind)}${c.matched?'':' · requested target not reached'}</small></td><td>${(Array.isArray(c.before)?c.before:[c.before]).map(bomNumber).join(' / ')} → ${(Array.isArray(c.after)?c.after:[c.after]).map(bomNumber).join(' / ')}${c.matched?'':`<small>Requested: ${(Array.isArray(c.requested)?c.requested:[c.requested]).map(bomNumber).join(' / ')}</small>`}</td></tr>`).join('')+'</tbody></table>';
+      disposeView?.();disposeView=drawBomView($('#bom-view'),result.scene,result.changes.filter(c=>c.kind==='length'||c.kind==='angle').map(c=>c.id));$('#bom-before').disabled=false;$('#bom-after').disabled=false;
+    }catch(error){if(!cancelled()&&version===generation)$('#bom-status').textContent='Preview did not complete. Your design is unchanged. '+error.message;}
+    finally{if(!closed&&version===generation){activeJob=null;$('#bom-cancel').hidden=true;previewButton.disabled=false;}}
+  }
+  async function applyBatch(){if(!preview||cancelled())return;const version=generation;applyButton.disabled=true;try{const result=await api('bom-apply',{preview_id:preview.preview_id});if(cancelled()||version!==generation)return;if(result.status!=='applied'){preview=null;$('#bom-status').textContent=result.message;return;}closeModal();await acceptPlacement(result,revision);status('BOM adjustments applied as one edit');}catch(error){if(!cancelled())$('#bom-status').textContent='Apply did not complete. '+error.message;}finally{if(!closed)applyButton.disabled=!preview;}}
+  modal('Parts & materials',`<div class="bom-controls"><label>Group lengths within · mm <input id="bom-tolerance" type="number" min="0" max="1000" step="any" value="1"></label><button class="button" id="bom-regroup">Regroup</button><label>Length increment · mm <input id="bom-length-step" type="number" min="0.001" step="any" value="${preferences.dimensionPrecisionMm}"></label><button class="button" id="bom-round-lengths">Round pipe lengths</button><label>Angle increment · ° <input id="bom-angle-step" type="number" min="0.001" max="180" step="any" value="15"></label><button class="button" id="bom-round-angles">Round angles</button><label>Socket increment · mm <input id="bom-station-step" type="number" min="0.001" step="any" value="${preferences.dimensionPrecisionMm}"></label><button class="button" id="bom-round-stations">Round socket positions</button></div><p id="bom-summary">Calculating parts…</p><div class="bom-layout"><div><nav class="bom-tabs">${[['parts','Parts list'],['lengths','Pipe lengths'],['angles','Angles'],['stations','Through sockets']].map(([id,label])=>`<button data-bom-tab="${id}" aria-pressed="${id==='parts'}">${label}</button>`).join('')}</nav><div id="bom-table" class="bom-table"></div></div><aside><p id="bom-status" role="status">No design changes until Apply.</p><button class="button" id="bom-cancel" hidden>Cancel preview</button><div id="bom-view" aria-label="Assembly adjustment preview"></div><div class="bom-compare"><button class="button" id="bom-before" disabled>Before</button><button class="button" id="bom-after" disabled>Preview</button></div><div id="bom-changes"></div></aside></div>`,[
+    {label:'Close',action:closeModal},{label:'Preview batch',action:previewBatch},{label:'Apply adjustments',primary:true,action:applyBatch}]);
+  const [closeButton,previewButton,applyButton]=$$('#modal-actions button');previewButton.id='bom-preview';applyButton.id='bom-apply';previewButton.disabled=true;applyButton.disabled=true;
+  applyButton.onclick=applyBatch;
+  const clearButton=document.createElement('button');clearButton.className='button';clearButton.textContent='Clear adjustments';clearButton.id='bom-clear';clearButton.onclick=()=>{if(!report)return;for(const kind of Object.keys(queued))queued[kind]={};invalidate();draw();};$('#modal-actions').insertBefore(clearButton,previewButton);
+  $('#modal').classList.add('bom-modal');reviewCleanup=cleanup;
+  $$('[data-bom-tab]').forEach(b=>b.onclick=()=>{if(!report)return;tab=b.dataset.bomTab;draw();});
+  $('#bom-round-lengths').onclick=()=>report&&round('lengths');$('#bom-round-angles').onclick=()=>report&&round('angles');$('#bom-round-stations').onclick=()=>report&&round('stations');
+  $('#bom-cancel').onclick=()=>{if(activeJob)api('bom-cancel',{document:null,job_id:activeJob});};
+  $('#bom-before').onclick=()=>{disposeView?.();disposeView=drawBomView($('#bom-view'),sourceScene);};
+  $('#bom-after').onclick=()=>{if(preview){disposeView?.();disposeView=drawBomView($('#bom-view'),preview.scene);}};
+  async function load(){const version=++generation;try{const data=await api('bom',{tolerance_mm:+$('#bom-tolerance').value,precision_mm:preferences.dimensionPrecisionMm});if(cancelled()||version!==generation)return;report=data;preview=null;applyButton.disabled=true;previewButton.disabled=report.estimated;$('#bom-summary').textContent=`${report.bom.items.reduce((n,r)=>n+r.quantity,0)} parts · ${report.bom.total_mass_kg.toFixed(1)} kg. `+(report.estimated?'Draft lengths are estimates. Finalize the draft to adjust the finished assembly.':'Group matching pipe profiles, queue changes, then preview the batch. Existing connections and world fixings are preserved.');for(const id of ['#bom-round-lengths','#bom-round-angles','#bom-round-stations'])$(id).disabled=report.estimated;draw();}catch(error){if(!cancelled())$('#bom-status').textContent=error.message;}}
+  $('#bom-regroup').onclick=()=>{if($('#bom-tolerance').reportValidity()){invalidate();load();}};await load();
+}
 function renderBuild(){
   const p=state.plan,steps=buildInstructions(p),step=steps[state.step];
-  let html='<div class="inspect-section"><h2>A plan you can build.</h2><p>Build smaller subassemblies, then slide parallel connections together.</p><button class="inspect-action" data-run="plan" '+(state.busy?'disabled':'')+'>'+(state.planning?'Finding assembly order…':'Find assembly order')+'</button>';
+  let html='<div class="inspect-section"><h2>A plan you can build.</h2><p>Build smaller subassemblies, then slide parallel connections together.</p><button class="inspect-action secondary" id="calculate-bom" '+(state.busy?'disabled':'')+'>Calculate BOM</button><button class="inspect-action" data-run="plan" '+(state.busy?'disabled':'')+'>'+(state.planning?'Finding assembly order…':'Find assembly order')+'</button>';
   if(state.planning)html+='<div id="plan-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-plan">Cancel search</button>';
   if(p)html+='<div class="report-head" style="margin-top:17px"><div class="report-symbol '+(p.status==='buildable'?'':'warn')+'">'+(p.status==='buildable'?'✓':'?')+'</div><div><b>'+esc(p.status)+'</b><div class="subtle">'+steps.length+' assembly steps</div></div></div>'+(p.reason?'<p>'+esc(p.reason)+'</p>':'');
   html+=buildHandlingSummary(p)+'</div>';
@@ -2705,6 +2785,7 @@ function renderBuild(){
     html+=steps.map((s,i)=>'<button class="build-step '+(i===state.step?'active':'')+'" data-step="'+i+'"><span>'+String(s.number).padStart(2,'0')+'</span>'+esc(buildStepLabel(s))+'</button>').join('')+'</div>';
   }
   $('#inspector').innerHTML=html;bindOperations();
+  $('#calculate-bom').onclick=calculateBom;
   $$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));
   $$('[data-build-pose]').forEach(b=>b.onclick=()=>showStep(state.step,b.dataset.buildPose));
   if($('#export-build'))$('#export-build').onclick=()=>exportBuild();

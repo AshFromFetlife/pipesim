@@ -4,6 +4,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  bom-normalisation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Verify batch dimension adjustments
+        run: python -m pytest -q tests/test_bom_editing.py
+      - name: Fuzz closed frames, sliding tuples and the reported large frame
+        run: python -m pytest -s -q tests/test_bom_fuzz.py
+      - name: Keep failing documents and targets
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bom-normalisation-failures
+          path: fuzz-runs/bom/
+
   dynamics:
     runs-on: ubuntu-latest
     timeout-minutes: 120

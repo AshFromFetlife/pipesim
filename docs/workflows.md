@@ -267,6 +267,12 @@ Build planning finds parallel socket connections and prepares smaller subassembl
 Build export requires a validated design and a checked assembly sequence. An unfinished search writes `planning-report.json` with its stopping reason; exhausting a search budget does not establish that the design is impossible to build. The illustrated book fits each step's visible parts and movement arrow. The planner never silently undoes a previously completed joint.
 
 
+### Review and normalise the bill of materials
+
+In **Build instructions → Calculate BOM**, review the same parts, cuts, panels and mounting hardware as the book without searching for an assembly order. **Pipe lengths** groups compatible pipes whose longest and shortest lengths differ by at most the chosen tolerance. Set a group length or edit individual targets; **Round pipe lengths** uses the selected millimetre increment. **Round angles** defaults to 15° in the design axes, and **Round socket positions** adjusts distances from the pipe start to the centre of each through socket, retaining full engagement.
+
+These controls queue a batch. **Preview batch** fits the dimensions and connected fittings together, then independently validates the completed assembly, including collisions. Compare Before/Preview and the requested versus checked dimensions. Unreached targets are listed explicitly; a failed fit is not treated as proof of an impossible design. **Apply adjustments** commits the checked preview as one undoable edit. Close or cancel to keep the source unchanged. World fixings, connection identities, screw specifications and authored joint states are preserved. Existing drafts show estimated quantities; finish them before editing manufactured dimensions. Members with custom geometry and components with authored joint motion are shown but retain their geometry.
+
 ### Fast motion preview
 
 Preview defaults to 60 physics steps per second with four internal substeps and

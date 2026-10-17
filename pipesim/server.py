@@ -22,7 +22,7 @@ from .human_assets import MAX_ASSET_BYTES
 WEB=Path(__file__).parent/'web'
 BUNDLED_MESHES=(DATA/'libraries'/'meshes').resolve()
 DESIGN_SUFFIXES={'.yaml','.yml','.json'}
-EDITOR_API_VERSION=32
+EDITOR_API_VERSION=33
 MAX_JSON_REQUEST_BYTES=32*1024*1024
 # File bytes expand by 4/3 in base64; allow filenames and the JSON envelope too.
 MAX_HUMAN_IMPORT_REQUEST_BYTES=((MAX_ASSET_BYTES+2)//3)*4+1024*1024
@@ -56,6 +56,8 @@ class EditorServer(ThreadingHTTPServer):
         self.connections=ConnectionJobs()
         from .planning_jobs import PlanningJobs
         self.planning=PlanningJobs()
+        from .bom_editing import BomPreviews
+        self.bom_previews=BomPreviews()
         self.draft_jobs={}; self.draft_jobs_lock=threading.Lock()
         self.autosave_lock=threading.Lock()
         self.human_model_cache={}
@@ -309,8 +311,26 @@ class Handler(BaseHTTPRequestHandler):
                 result=self.server.simulations.get(data['job_id'],cancel=route=='/api/simulation-cancel')
             elif route in ('/api/plan-status','/api/plan-cancel','/api/plan-result'):
                 result=self.server.planning.get(data['job_id'],cancel=route=='/api/plan-cancel',result=route=='/api/plan-result')
-            elif route=='/api/connection-cancel':
+            elif route in ('/api/connection-cancel','/api/bom-cancel'):
                 result=self.server.connections.cancel(data['job_id'])
+            elif route in ('/api/bom','/api/bom-preview','/api/bom-apply'):
+                from .bom_editing import analyse,normalize
+                assembly=self.assembly(data['document'],base,validate_mirror_geometry=False)
+                if route=='/api/bom':
+                    result=analyse(assembly,data.get('tolerance_mm',1.),data.get('precision_mm'))
+                elif route=='/api/bom-preview':
+                    preview_id=secrets.token_urlsafe(24)
+                    def preview_batch(cancelled):
+                        result=normalize(assembly,data.get('targets',{}),cancelled)
+                        self.server.bom_previews.remember(preview_id,result)
+                        candidate=self.assembly(result['document'],base,validate_mirror_geometry=False)
+                        return {**{k:v for k,v in result.items() if k!='document'},'preview_id':preview_id,
+                                'scene':self.scene(candidate)}
+                    result=self.server.connections.run(data.get('job_id'),preview_batch)
+                else:
+                    result=self.server.bom_previews.apply(assembly,data['preview_id'])
+                    if result['status']=='applied':
+                        result['scene']=self.scene(self.assembly(result['document'],base,validate_mirror_geometry=False))
             elif route=='/api/snap-options':
                 from .snapping import connection_options
                 from .connection_jobs import check_cancelled

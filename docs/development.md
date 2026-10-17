@@ -654,6 +654,14 @@ python -m pytest -s -q --basetemp=cube-fuzz-repro tests/test_symmetry_cube_fuzz.
 Remove-Item Env:PIPESIM_FUZZ_MINUTES, Env:PIPESIM_CUBE_FUZZ_CASES
 ```
 
+## BOM batch checks
+
+The BOM batch fitter uses editable member lengths as virtual draft edges and solves socket origins together in a sparse system. It does not call the sequential resize/finalisation searches for every field. Requested orientations are fitted first; insertion depths and through stations stay within the actual socket ranges. A separate full validation gates the preview. Cached previews are tied to the source input hash and applied as one editor transaction.
+
+`python -m pytest -q tests/test_bom_editing.py` covers closed loops, anchored frames, through tuples, socket boundaries, authored poses and the full complicated-metal fixture. `python -m pytest -s -q tests/test_bom_fuzz.py` runs retained cases and a fresh 30-minute campaign across six families: rotated frames, parallel sliding tuples, reordered copies of that fixture, bore boundaries, authored sliding joints and retained anchor goals. It checks geometry independently of the fitter and includes intentionally broken rounding and authored-state handling to verify detection. Reproduce a case using `PIPESIM_BOM_FUZZ_CASE_SEED`; failures retain the document, targets and candidate in `fuzz-runs/bom/`. The browser tests cover batching, preview isolation, cancellation, source checks and Undo.
+
+The BOM fuzz worker enforces a 120-second deadline on the preview operation, including its final validation. The 450-second child-process deadline also allows the oracle's separate source and result checks; these repeatedly reconstruct the large fixture's meshes and are deliberately excluded from the preview's budget. The original 180-second whole-case deadline could expire under concurrent test load even when the checked preview completed within its own limit. Its exact reordered model is retained as seed `2978354784897548468`.
+
 ## Rebuilding source data
 
 The editable YAML libraries are runtime source files. `scripts/make_library.py` reproduces the initial catalogue from the transcribed supplier tables and stored source metadata. It overwrites those generated YAML files; preserve local catalogue edits elsewhere. `scripts/make_schemas.py` reproduces the JSON Schemas. The example generators are similarly explicit maintenance operations.

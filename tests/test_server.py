@@ -109,6 +109,28 @@ def test_editor_port_cannot_be_shared_by_another_server(editor):
         EditorServer(editor.root,editor.design,editor.server_port)
 
 
+def test_bom_preview_and_apply_keep_source_immutable_and_reject_stale_results(editor):
+    doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','parts':[
+        {'id':'pipe','catalog':'tubeclamp.tube-C','parameters':{'length_mm':174.9},'pose':{'position_mm':[0,0,200]}}],'joints':[]}
+    report=json.loads(request(editor,'/api/bom',{'document':doc})[1])
+    assert report['bom']['items'][0]['length_mm']==175
+    preview=json.loads(request(editor,'/api/bom-preview',{'document':doc,'targets':{'lengths':{'pipe':175}},'job_id':'bom-preview-test'})[1])
+    assert preview['status']=='preview' and 'document' not in preview
+    assert doc['parts'][0]['parameters']['length_mm']==174.9
+    stale=json.loads(request(editor,'/api/bom-apply',{'document':{**doc,'name':'edited'},'preview_id':preview['preview_id']})[1])
+    assert stale['status']=='stale'
+    result=json.loads(request(editor,'/api/bom-apply',{'document':doc,'preview_id':preview['preview_id']})[1])
+    assert result['status']=='applied' and result['document']['parts'][0]['parameters']['length_mm']==175
+    assert 'scene' in result
+
+
+def test_bom_preview_supports_early_cancellation(editor,load):
+    request(editor,'/api/bom-cancel',{'job_id':'cancel-bom-preview'})
+    result=json.loads(request(editor,'/api/bom-preview',{'document':load('workbench').doc,
+        'targets':{},'job_id':'cancel-bom-preview'})[1])
+    assert result=={'cancelled':True}
+
+
 @pytest.mark.parametrize('background',[False,True])
 def test_build_api_keeps_raw_motion_and_combines_loose_fitting_pages(editor,monkeypatch,background):
     doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','parts':[
