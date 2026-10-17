@@ -13,7 +13,7 @@ from PIL import Image, ImageColor, ImageDraw
 from scipy.spatial.transform import Rotation
 from .document import Assembly, DocumentError, Part
 from .physics import World, _matrix
-from .geometry import assembly_bounds
+from .geometry import assembly_bounds, mesh_for_part
 from .math3d import transform, pose_of
 from .human_assets import scene_humans
 from .human_rendering import HumanSkin, SEGMENTS
@@ -74,6 +74,105 @@ class Renderer:
             self.projection=matrix.T.flatten().tolist()
         else: self.projection=pb.computeProjectionMatrixFOV(40,width/height,near,far)
         self.initial={pid:p.matrix.copy() for pid,p in assembly.parts.items()}
+        self._overview_view=self.view
+        self._overview_projection=self.projection
+        self._view_rotation=np.array(self.view).reshape(4,4).T[:3,:3]
+        self._fit_bounds={}
+        self._floor_body=None
+        self._frame_bounds=None
+
+    def _fit_visible_camera(self,visible,matrices,highlighted,arrow,floor_z_mm=None):
+        """Frame the current step without changing the overview's viewing angle."""
+        points=[]
+        for pid in sorted(visible & matrices.keys()):
+            if pid not in self._fit_bounds:
+                self._fit_bounds[pid]=mesh_for_part(self.assembly.parts[pid]).bounds
+            lo,hi=self._fit_bounds[pid]
+            corners=np.array([[x,y,z] for x in (lo[0],hi[0])
+                              for y in (lo[1],hi[1]) for z in (lo[2],hi[2])])
+            matrix=matrices[pid]
+            points.extend(corners@matrix[:3,:3].T+matrix[:3,3])
+        if not points: return
+        self._frame_bounds=np.array([np.min(points,axis=0),np.max(points,axis=0)])
+        if floor_z_mm is not None:
+            lo,hi=self._frame_bounds
+            points.extend([[x,y,floor_z_mm] for x in (lo[0],hi[0]) for y in (lo[1],hi[1])])
+        if arrow and highlighted:
+            center=np.mean([matrices[pid][:3,3] for pid in sorted(highlighted)],axis=0)
+            direction=np.array(arrow,float)
+            points.extend([center-direction*180,center-direction*40])
+        points=np.asarray(points)
+        target=(points.min(axis=0)+points.max(axis=0))/2
+        projected=(points-target)@self._view_rotation.T
+        aspect=self.width/self.height
+        if self.orthographic:
+            scale=max(50.,np.abs(projected[:,1]).max(),np.abs(projected[:,0]).max()/aspect)*1.25/1000
+            distance=max(220.,np.linalg.norm(points.max(axis=0)-points.min(axis=0))*2.2)
+        else:
+            tangent=math.tan(math.radians(20))
+            spans=np.maximum(np.abs(projected[:,0])/(tangent*aspect),np.abs(projected[:,1])/tangent)
+            # Keep the nearest geometry ahead of the near plane, including
+            # long members pointing almost directly towards the camera.
+            distance=max(220.,float(projected[:,2].max()+50),float(np.max(projected[:,2]+spans*1.25)))
+        eye=target+self._view_rotation[2]*distance
+        self.view=pb.computeViewMatrix(eye/1000,target/1000,self._view_rotation[1])
+        near=.01;far=max(100.,distance/1000*10)
+        if self.orthographic:
+            matrix=np.array([[1/(scale*aspect),0,0,0],[0,1/scale,0,0],
+                             [0,0,-2/(far-near),-(far+near)/(far-near)],[0,0,0,1]])
+            self.projection=matrix.T.flatten().tolist()
+        else:
+            self.projection=pb.computeProjectionMatrixFOV(40,aspect,near,far)
+
+    def _show_floor(self,floor_z_mm):
+        """Use a real depth-tested floor even for a ground-free design preview."""
+        center=np.zeros(2)
+        if floor_z_mm is not None and self._frame_bounds is not None:
+            center=self._frame_bounds[:,:2].mean(axis=0)/1000
+        if self.world.ground is not None:
+            original=self.assembly.doc.get('environment',{}).get('ground_z_mm',0)
+            height=original if floor_z_mm is None else floor_z_mm
+            pb.resetBasePositionAndOrientation(self.world.ground,[*center,height/1000],[0,0,0,1],physicsClientId=self.world.client)
+            return self.world.ground
+        if floor_z_mm is not None and self._floor_body is None:
+            visual=pb.createVisualShape(pb.GEOM_BOX,halfExtents=[50,50,.01],
+                                       visualFramePosition=[0,0,-.0101],rgbaColor=[.88,.9,.91,1],physicsClientId=self.world.client)
+            self._floor_body=pb.createMultiBody(baseMass=0,baseVisualShapeIndex=visual,physicsClientId=self.world.client)
+        if self._floor_body is not None:
+            height=-1e8 if floor_z_mm is None else floor_z_mm/1000
+            pb.resetBasePositionAndOrientation(self._floor_body,[*center,height],[0,0,0,1],physicsClientId=self.world.client)
+        return self._floor_body if floor_z_mm is not None else None
+
+    def _paint_floor_grid(self,rgba,mask,floor_body,floor_z_mm):
+        """Unproject floor pixels so the grid stays behind all rendered parts."""
+        rows,cols=np.nonzero(mask==floor_body)
+        if not len(rows): return
+        span=1000. if self._frame_bounds is None else max(self._frame_bounds[1,:2]-self._frame_bounds[0,:2])
+        spacing=max(10.,10.**math.floor(math.log10(max(span/10.,1.))))
+        inverse=np.linalg.inv(np.array(self.projection).reshape(4,4).T@np.array(self.view).reshape(4,4).T)
+        x,y=2*(cols+.5)/self.width-1,1-2*(rows+.5)/self.height
+        plane=inverse[2]-floor_z_mm/1000*inverse[3]
+        if abs(plane[2])<1e-12:return
+        # Intersect the camera rays with the exact plane. Depth-buffer
+        # quantization otherwise turns fine grid lines into distant speckles.
+        z=-(plane[0]*x+plane[1]*y+plane[3])/plane[2]
+        clip=np.column_stack([x,y,z,np.ones(len(rows))])
+        points=clip@inverse.T
+        xy=points[:,:2]/points[:,3,None]*1000
+        distance=np.abs((xy+spacing/2)%spacing-spacing/2)
+        grid=np.min(distance,axis=1)<spacing*.012
+        # Fade before the grid becomes subpixel near the horizon. A finite
+        # footprint also keeps a small part's floor readable at close zoom.
+        center=np.zeros(2) if self._frame_bounds is None else self._frame_bounds[:,:2].mean(axis=0)
+        radius=max(span*1.8,300.)
+        fade=np.clip((radius-np.linalg.norm(xy-center,axis=1))/(radius*.35),0,1)
+        if not self.orthographic:
+            pixel_spacing=spacing*self.height*np.abs(points[:,3])/(2000*math.tan(math.radians(20)))
+            fade*=np.clip((pixel_spacing-5)/10,0,1)
+        selected=grid & (fade>0)
+        blend=fade[selected,None]
+        old=rgba[rows[selected],cols[selected],:3]
+        rgba[rows[selected],cols[selected],:3]=(old*(1-blend)+np.array([174,188,194])*blend).astype(np.uint8)
 
     def project(self,position_mm):
         vp=np.array(self.projection).reshape(4,4).T@np.array(self.view).reshape(4,4).T
@@ -81,15 +180,25 @@ class Renderer:
         clip/=clip[3]
         return [(clip[0]+1)*self.width/2,(1-clip[1])*self.height/2]
 
-    def frame(self,poses=None,visible=None,highlight=None,arrow=None,time_s=0,*,beam_status=None,beam_source=None,warning_mm=10):
+    def frame(self,poses=None,visible=None,highlight=None,arrow=None,time_s=0,*,beam_status=None,beam_source=None,warning_mm=10,fit_visible=False,floor_z_mm=None,fit_parts=None):
         # Bullet cannot deform/release ordinary visual meshes in place. Reclaim
         # its scene between skinned frames so video length cannot grow native
         # mesh memory without bound. Parsed rigs and textures remain cached.
         if self.skins and self.rendered:
             self.world.close(); self.world=World(self.separate,static=True)
+            self._floor_body=None
         self.rendered=True
         visible=set(self.initial) if visible is None else set(visible)
+        highlighted={highlight} if isinstance(highlight,str) else set(highlight or [])
         matrices={pid:transform(poses[pid]) if poses and pid in poses else initial.copy() for pid,initial in self.initial.items()}
+        self.view,self.projection=self._overview_view,self._overview_projection
+        self._frame_bounds=None
+        if fit_visible:
+            # Focus a lifting detail without hiding or repositioning retained
+            # geometry elsewhere in the preparation area.
+            focus=visible if fit_parts is None else visible & ({fit_parts} if isinstance(fit_parts,str) else set(fit_parts))
+            self._fit_visible_camera(focus,matrices,highlighted & focus,arrow,floor_z_mm)
+        floor_body=self._show_floor(floor_z_mm)
         skinned={skin.human['id']+'/'+segment for skin in self.skins for segment in skin.mapping}
         # Hide all 19 bodies, including segments an imported skeleton omits.
         for skin in self.skins:
@@ -100,8 +209,8 @@ class Renderer:
             dyn=pb.getDynamicsInfo(body,-1,physicsClientId=self.world.client)
             center=matrix@_matrix(dyn[3],dyn[4])
             pb.resetBasePositionAndOrientation(body,center[:3,3]/1000,Rotation.from_matrix(center[:3,:3]).as_quat(),physicsClientId=self.world.client)
-            color='#eea24c' if pid==highlight else self.assembly.parts[pid].definition.get('color','#8d9ba5')
-            if highlight and pid!=highlight: color='#b4c0c7'
+            color='#eea24c' if pid in highlighted else self.assembly.parts[pid].definition.get('color','#8d9ba5')
+            if highlighted and pid not in highlighted: color='#b4c0c7'
             source=(beam_source or {}).get(pid)
             if source and beam_status and source in beam_status:
                 status=beam_status[source]
@@ -135,14 +244,20 @@ class Renderer:
         rgba=np.asarray(image[2],dtype=np.uint8).reshape(self.height,self.width,4).copy()
         mask=np.asarray(image[4]).reshape(self.height,self.width)
         if self.background=='transparent':
-            rgba[(mask<0)|(mask==self.world.ground),3]=0
+            hidden=(mask<0)
+            if floor_z_mm is None and self.world.ground is not None: hidden|=mask==self.world.ground
+            rgba[hidden,3]=0
         else:
             bg=ImageColor.getrgb(self.background)
             rgba[mask<0,:3]=bg
             rgba[:,:,3]=255
+        if floor_z_mm is not None and floor_body is not None:
+            self._paint_floor_grid(rgba,mask,floor_body,floor_z_mm)
         result=Image.fromarray(rgba)
-        if arrow and highlight:
-            p=self.initial[highlight][:3,3]; direction=np.array(arrow,float)
+        if floor_z_mm is not None:
+            ImageDraw.Draw(result).text((16,self.height-26),'FLOOR',fill='#52656c')
+        if arrow and highlighted:
+            p=np.mean([matrices[pid][:3,3] for pid in sorted(highlighted)],axis=0); direction=np.array(arrow,float)
             start=self.project(p-direction*180); end=self.project(p-direction*40)
             draw=ImageDraw.Draw(result)
             draw.line([tuple(start),tuple(end)],fill='#df7928',width=5)

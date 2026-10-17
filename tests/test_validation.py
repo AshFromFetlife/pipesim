@@ -66,8 +66,12 @@ def test_split_clamp_can_be_added_radially(blank,factory):
 def test_false_radial_override_rejected(blank,factory):
     doc=collar_trap(blank);doc['joints'][-1]['assembly']='radial';assert 'CLOSED_SOCKET_RADIAL' in codes(factory(doc))
 def test_workbench_buildable(load):
-    result=plan_build(load('workbench'));assert result['status']=='buildable';assert len(result['steps'])==13
+    assembly=load('workbench');result=plan_build(assembly);assert result['status']=='buildable'
+    introduced=[pid for step in result['steps'] for pid in step['introduced_parts']]
+    assert len(introduced)==len(set(introduced))==len(assembly.parts)
+    assert set(introduced)==set(assembly.parts)
     assert result['steps'][-1]['part']=='worktop';assert result['certificate']['stability_checked']
+    assert result['steps'][-1]['assistance_required']
 def test_search_exhaustion_is_not_impossibility(load):
     result=plan_build(load('workbench'),search_limit=1);assert result['status']=='indeterminate'
 def test_unsupported_final_is_not_buildable(blank,factory):

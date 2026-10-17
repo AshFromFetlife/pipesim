@@ -5,7 +5,7 @@ import {mkdir, writeFile} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {random} from '../tests/helpers/geometry-workflow-model.mjs';
 
-const minutes=Number(process.env.PIPESIM_WORKFLOW_MINUTES??process.env.PIPESIM_FUZZ_MINUTES??45);
+const minutes=Number(process.env.PIPESIM_WORKFLOW_MINUTES??process.env.PIPESIM_FUZZ_MINUTES??60);
 const rootSeed=Number(process.env.PIPESIM_WORKFLOW_SEED??randomBytes(4).readUInt32LE());
 const limit=Number(process.env.PIPESIM_WORKFLOW_CASES??1000000);
 const requiredActions=['connect','translate','resize','resize-length','build-from-library','detach-reconnect',
@@ -27,9 +27,10 @@ for(let index=0;index<limit&&(index===0||Date.now()-started<minutes*60000);index
   const entry={seed,steps,status:'running'};cases.push(entry);await save();
   console.log(`Starting case ${index+1}, seed=${seed}, additional_actions=${steps}`);
   let output='';
-  const child=spawn(process.execPath,['--test','--test-name-pattern=stateful geometry|seeded anchored resize|seeded free assembly|seeded material|seeded whole assembly|seeded reinforcement','tests/editor-interactions.test.mjs'],{
+  const child=spawn(process.execPath,['--test','--test-name-pattern=stateful geometry|seeded anchored resize|seeded free assembly|seeded material|seeded whole assembly|seeded reinforcement|seeded file open','tests/editor-interactions.test.mjs'],{
     cwd:process.cwd(),windowsHide:true,env:{...process.env,PIPESIM_WORKFLOW_CASE_SEED:String(seed),
       PIPESIM_WORKFLOW_SEED:String(rootSeed),PIPESIM_WORKFLOW_STEPS:String(steps),PIPESIM_WORKFLOW_REPRO_DIR:directory,
+      PIPESIM_FILE_OPEN_CASE_SEED:String(seed),PIPESIM_FILE_OPEN_SEED:String(rootSeed),
       PIPESIM_ANCHORED_RESIZE_CASE_SEED:String(seed),PIPESIM_ANCHORED_RESIZE_SEED:String(rootSeed),
       PIPESIM_FREE_ASSEMBLY_CASE_SEED:String(seed),PIPESIM_FREE_ASSEMBLY_SEED:String(rootSeed),
       PIPESIM_MATERIAL_CASE_SEED:String(seed),PIPESIM_MATERIAL_SEED:String(rootSeed),
@@ -53,13 +54,16 @@ for(let index=0;index<limit&&(index===0||Date.now()-started<minutes*60000);index
   if(whole){entry.wholeAssemblyCases=Number(whole[1]);entry.wholeAssemblyMoves=Number(whole[2]);}
   const reinforcement=output.match(/Reinforcement cases_passed=(\d+) connections=(\d+)/);
   if(reinforcement){entry.reinforcementCases=Number(reinforcement[1]);entry.reinforcementConnections=Number(reinforcement[2]);}
+  const fileOpen=output.match(/File open case_seed=(\d+) passed/);
+  if(fileOpen)entry.fileOpenSeed=Number(fileOpen[1]);
   // A zero exit status alone also describes skipped tests or a stale filter.
   // Require evidence that all requested workflows actually ran this seed.
   if(code===0&&(!completed||Number(completed[1])!==seed||!entry.completedActions||
       !entry.successfulActions||requiredActions.some(action=>!(entry.successfulActions[action]>0))||
       entry.anchoredResizeCases!==1||entry.anchoredResizeEdits!==4||
       entry.freeAssemblyCases!==1||entry.rigidConnections!==1||entry.materialCases!==1||entry.profileChanges!==3||
-      entry.wholeAssemblyCases!==1||entry.wholeAssemblyMoves!==2||entry.reinforcementCases!==1||entry.reinforcementConnections!==1)) {
+      entry.wholeAssemblyCases!==1||entry.wholeAssemblyMoves!==2||entry.reinforcementCases!==1||entry.reinforcementConnections!==1||
+      entry.fileOpenSeed!==seed)) {
     entry.status='failed';entry.failure='Missing or incomplete workflow coverage report';
     console.error(entry.failure);
   }

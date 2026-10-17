@@ -1315,6 +1315,23 @@
           "type": "integer",
           "minimum": 1
         },
+        "time_limit_s": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "max_lift_mass_kg": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "dimension_precision_mm": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 10
+        },
+        "collision_query_limit": {
+          "type": "integer",
+          "minimum": 1
+        },
         "sequence": {
           "type": "array",
           "items": {

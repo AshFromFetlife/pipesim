@@ -1,6 +1,6 @@
 export const DEFAULT_PREFERENCES=Object.freeze({
   autosaveEnabled:true,autosaveDirectory:'designs/.autosaves',autosaveMinutes:5,autosaveKeep:10,
-  startup:'workspace',startupExample:'',lengthUnit:'mm',massUnit:'kg',forceUnit:'N',
+  startup:'workspace',startupExample:'',lengthUnit:'mm',massUnit:'kg',forceUnit:'N',dimensionPrecisionMm:1,
   gridVisible:true,floorVisible:true,portsVisible:false,theme:'system',undoLimit:80,defaultTool:'select',fitOnOpen:true,fitAfterDuplicate:true,
   cameraFovDeg:38,defaultDuplicateCount:2,defaultHumanHeightMm:1750,defaultHumanMassKg:75,defaultChainLengthMm:1000,
   renderWidth:1600,renderHeight:1000,renderLighting:'studio',renderBackground:'#edf1f3',
@@ -20,7 +20,7 @@ const ranges={autosaveMinutes:[1,120],autosaveKeep:[1,100],undoLimit:[10,500],ca
   defaultDuplicateCount:[1,100],defaultHumanHeightMm:[500,2500],defaultHumanMassKg:[10,250],defaultChainLengthMm:[1,100000],
   renderWidth:[320,4096],renderHeight:[240,4096],simulationSeconds:[.1,30],
   simulationChainLinks:[1,1000],previewStepsPerSecond:[30,240],previewSolverIterations:[10,120],previewBeamSegmentMm:[400,2000],
-  deflectionWarningMm:[.01,100000],connectionToleranceMm:[.01,20],
+  deflectionWarningMm:[.01,100000],connectionToleranceMm:[.01,20],dimensionPrecisionMm:[.001,10],
   resizeCaptureMm:[0,100],resizeCaptureDeg:[0,45],resizeKeyStepMm:[.1,1000]};
 const scales={length:{mm:1,cm:10,m:1000,in:25.4,ft:304.8},
   mass:{kg:1,g:.001,lb:.45359237},force:{N:1,kN:1000,lbf:4.4482216152605}};
@@ -38,7 +38,7 @@ export function validatePreferences(input){
     const value=Number(input[key]);
     if(!Number.isFinite(value)||value<min||value>max||
       (key!=='simulationSeconds'&&key!=='deflectionWarningMm'&&key!=='connectionToleranceMm'&&key!=='defaultHumanMassKg'&&
-       key!=='resizeCaptureMm'&&key!=='resizeCaptureDeg'&&key!=='resizeKeyStepMm'&&!Number.isInteger(value)))
+       key!=='resizeCaptureMm'&&key!=='resizeCaptureDeg'&&key!=='resizeKeyStepMm'&&key!=='dimensionPrecisionMm'&&!Number.isInteger(value)))
       throw new Error(`${key} must be between ${min} and ${max}`);
     result[key]=value;
   }
@@ -75,5 +75,11 @@ export function loadPreferences(storage){
 export function savePreferences(storage,input){
   const result=validatePreferences(input);storage.setItem(KEY,JSON.stringify(result));return result;
 }
-export function displayValue(value,kind,unit){return Number((value/scales[kind][unit]).toFixed(4));}
+export function displayValue(value,kind,unit,precisionMm=null){
+  if(kind==='length'&&precisionMm!=null)value=Math.sign(value)*Math.round((Math.abs(value)+Number.EPSILON*Math.abs(value))/precisionMm)*precisionMm;
+  const [mantissa,exponent='0']=String(precisionMm??1).split('e');
+  const decimals=Math.max(0,(mantissa.split('.')[1]?.length||0)-Number(exponent));
+  const digits=kind==='length'&&precisionMm!=null?Math.min(15,Math.max(4,decimals+Math.ceil(Math.log10(scales[kind][unit]))+1)):4;
+  return Number((value/scales[kind][unit]).toFixed(digits));
+}
 export function storedValue(value,kind,unit){return Number(value)*scales[kind][unit];}

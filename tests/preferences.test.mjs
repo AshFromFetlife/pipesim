@@ -78,3 +78,17 @@ test('keyboard nudge distance has one persisted millimetre source across unit pr
   assert.throws(()=>validateSnapSettings({...DEFAULT_SNAP_SETTINGS,keyboardMoveMm:0}),/keyboardMoveMm/);
   assert.throws(()=>validateSnapSettings({...DEFAULT_SNAP_SETTINGS,keyboardMoveMm:10001}),/keyboardMoveMm/);
 });
+
+test('dimension precision persists and rounds physical dimensions independently of units and snapping',()=>{
+  const values=new Map(),storage={getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value)};
+  assert.equal(DEFAULT_PREFERENCES.dimensionPrecisionMm,1);
+  savePreferences(storage,{...DEFAULT_PREFERENCES,dimensionPrecisionMm:.5});
+  assert.equal(loadPreferences(storage).dimensionPrecisionMm,.5);
+  for(const length of [174.886027,174.885476,174.887322])assert.equal(displayValue(length,'length','mm',1),175);
+  assert.equal(displayValue(1937.2001412798647,'length','mm',.1),1937.2);
+  assert.equal(displayValue(-1.25,'length','mm',.5),-1.5);
+  assert.equal(displayValue(25.4,'length','in',.1),1);
+  assert.equal(displayValue(1,'length','mm',.333333),.999999);
+  assert.equal(displayValue(.123456,'length','mm',.123456),.123456);
+  for(const value of [0,-1,.0001,11,Infinity,NaN])assert.throws(()=>validatePreferences({...DEFAULT_PREFERENCES,dimensionPrecisionMm:value}),/dimensionPrecisionMm/);
+});

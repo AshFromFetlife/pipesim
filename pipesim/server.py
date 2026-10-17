@@ -22,7 +22,7 @@ from .human_assets import MAX_ASSET_BYTES
 WEB=Path(__file__).parent/'web'
 BUNDLED_MESHES=(DATA/'libraries'/'meshes').resolve()
 DESIGN_SUFFIXES={'.yaml','.yml','.json'}
-EDITOR_API_VERSION=30
+EDITOR_API_VERSION=32
 MAX_JSON_REQUEST_BYTES=32*1024*1024
 # File bytes expand by 4/3 in base64; allow filenames and the JSON envelope too.
 MAX_HUMAN_IMPORT_REQUEST_BYTES=((MAX_ASSET_BYTES+2)//3)*4+1024*1024
@@ -54,6 +54,8 @@ class EditorServer(ThreadingHTTPServer):
         self.simulations=SimulationJobs()
         from .connection_jobs import ConnectionJobs
         self.connections=ConnectionJobs()
+        from .planning_jobs import PlanningJobs
+        self.planning=PlanningJobs()
         self.draft_jobs={}; self.draft_jobs_lock=threading.Lock()
         self.autosave_lock=threading.Lock()
         self.human_model_cache={}
@@ -63,6 +65,7 @@ class EditorServer(ThreadingHTTPServer):
             for event in self.draft_jobs.values(): event.set()
         self.simulations.close()
         self.connections.close()
+        self.planning.close()
         super().server_close()
     def path(self,relative):
         path=(self.root/relative).resolve()
@@ -104,6 +107,20 @@ class EditorServer(ThreadingHTTPServer):
         if not directory.exists(): return []
         return sorted((p for p in directory.glob('*.autosave.json') if p.is_file() and not p.is_symlink()),
                       key=lambda p:p.stat().st_mtime_ns,reverse=True)
+
+    def uploaded_design_path(self,name,doc,base):
+        """Recover a browser-selected workspace file without trusting an OS path."""
+        candidates=[base/name,self.root/name,self.root/'designs'/name]
+        candidates.extend(self.root/item['path'] for item in self.designs()
+                          if Path(item['path']).name==name)
+        for candidate in dict.fromkeys(candidates):
+            try:
+                path=self.path(candidate)
+                if path.is_file() and path.stat().st_size<=MAX_JSON_REQUEST_BYTES and read(path)==doc:
+                    return path
+            except (ValueError,OSError,KeyError,TypeError):
+                continue
+        return None
 
 class Handler(BaseHTTPRequestHandler):
     server: EditorServer
@@ -290,6 +307,8 @@ class Handler(BaseHTTPRequestHandler):
                     if payload is not None:
                         self.send_data(200,payload);return
                 result=self.server.simulations.get(data['job_id'],cancel=route=='/api/simulation-cancel')
+            elif route in ('/api/plan-status','/api/plan-cancel','/api/plan-result'):
+                result=self.server.planning.get(data['job_id'],cancel=route=='/api/plan-cancel',result=route=='/api/plan-result')
             elif route=='/api/connection-cancel':
                 result=self.server.connections.cancel(data['job_id'])
             elif route=='/api/snap-options':
@@ -390,19 +409,23 @@ class Handler(BaseHTTPRequestHandler):
                         'mirror_pose_error':error}
             elif route=='/api/open-file':
                 # A browser supplies contents and a basename, never its original
-                # OS directory. Resolve companion assets relative to designs/.
-                name=re.sub(r'[^\w .-]','_',data['filename'].replace('\\','/').rsplit('/',1)[-1]).lstrip('. ')
+                # OS directory. Recognize existing workspace designs before
+                # assigning external imports a new location under designs/.
+                filename=data['filename'].replace('\\','/').rsplit('/',1)[-1]
+                name=re.sub(r'[^\w .-]','_',filename).lstrip('. ')
                 if Path(name).suffix.lower() not in DESIGN_SUFFIXES: raise DocumentError('Open a .yaml, .yml or .json design')
-                path=self.server.path('designs/'+name)
-                stem,suffix=path.stem,path.suffix
-                index=1
-                while path.exists():
-                    path=path.with_name(f'{stem}-imported-{index}{suffix}'); index+=1
                 doc=parse(data['text'])
+                source=self.server.uploaded_design_path(filename,doc,base)
+                path=source or self.server.path('designs/'+name)
+                if source is None:
+                    stem,suffix=path.stem,path.suffix
+                    index=1
+                    while path.exists():
+                        path=path.with_name(f'{stem}-imported-{index}{suffix}'); index+=1
                 try: result=self.opened_design(doc,path)
                 except (DocumentError,OSError) as exc:
                     raise DocumentError(f'{exc}\nFile open reads one file. For separate libraries or meshes, keep the design and its companion folders inside designs/ and open it from Load.') from exc
-                result['imported']=True
+                result['imported']=source is None
             elif route=='/api/save':
                 path=self.server.path(data['path'])
                 if path.suffix.lower() not in DESIGN_SUFFIXES: raise DocumentError('Save a .yaml, .yml or .json design')
@@ -644,7 +667,10 @@ class Handler(BaseHTTPRequestHandler):
                 elif route=='/api/plan':
                     if doc.get('draft_subassemblies'): raise DocumentError('Finalize draft subassemblies before build planning')
                     from .planning import plan_build
-                    result=plan_build(assembly)
+                    result=self.server.planning.start(assembly) if data.get('background') else plan_build(assembly)
+                    if not data.get('background') and result.get('status')=='buildable':
+                        from .build_presentation import instruction_steps
+                        result['instruction_steps']=instruction_steps(assembly,result)
                 elif route=='/api/fit':
                     assembly.require_finished('fit tests')
                     from .human import reach,seat_fit,run_fit_tests
@@ -669,7 +695,7 @@ class Handler(BaseHTTPRequestHandler):
                     directory=self.server.root/'output'/('export-'+secrets.token_hex(4)); directory.mkdir(parents=True)
                     if route=='/api/export':
                         from .exporting import build_export
-                        result=build_export(assembly,directory,engineering=data.get('engineering',False))
+                        result=build_export(assembly,directory,engineering=data.get('engineering',False),precision_mm=data.get('dimension_precision_mm'))
                         relative=(directory/'instructions.html').relative_to(self.server.root).as_posix()
                     elif route=='/api/render-video':
                         from .rendering import render_video,animation_frames

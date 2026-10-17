@@ -128,6 +128,71 @@ stress, deformation and damage results.
 
 The local HTTP service serves a vendored Three.js frontend and calls the same Python functions as the CLI. It has no database, cloud storage or remote execution endpoint. Writes require a per-session token, a trusted loopback Host and same-origin requests. Paths are resolved within the editor root, excluding repository control directories. This is a local single-user service, not an internet-facing deployment.
 
+## Assembly planning
+
+Build planning decomposes the connection graph along parallel socket axes.
+Nonparallel connections stay together, so a frame, end cap or pair of fittings
+can slide as a prepared subassembly. Each candidate still passes collision
+checks against the retained parts; closed sockets only withdraw through their
+mouths. Small assemblies retain the simpler individual insertion order where
+possible. Detached groups use computed floor resting poses, with connected
+subassemblies lifted and reoriented explicitly. A capture join may hold one
+connected group with a named helper until the next pipe fastens it to a supported
+base. Ground anchors are fixed only when their group reaches the main assembly;
+they do not bypass the floor equilibrium check.
+
+The editor runs planning in a cancellable background job and displays visited
+states, checked paths and elapsed time. Both search states and collision work
+are bounded; an exhausted budget is indeterminate, not proof that a design
+cannot be built. Defaults are 3,000 states, 250,000 collision queries and 300
+seconds; `build.search_limit`, `build.collision_query_limit` and
+`build.time_limit_s` can override them. By default the search first targets
+15 kg handling operations (or the heaviest indivisible part), then may use an
+explicitly assisted sequence within the same total time budget. Setting
+`build.max_lift_mass_kg` makes that mass a hard bound and disables the heavier
+fallback. These are search limits, not ergonomic ratings. The certificate records
+the preferred and effective bounds, actual maximum handled mass, assisted stages
+and required floor area and overhead clearance.
+Build steps distinguish newly introduced parts from complete
+moving subassemblies, and both the editor and printed book highlight the group.
+Printed illustrations fit the current assembly stage so small preparations
+remain readable.
+
+`tests/test_planning.py` retains closed cubes, common-rail fittings and the
+218-part reported metal frame. The portable frame keeps its authored collision
+geometry without depending on local visual STL files. `tests/test_planning_fuzz.py`
+runs retained cases and a 30-minute fresh campaign, varying orientation, lengths,
+connector counts, part ordering and obstructions. Each case has an independent
+process deadline, so an inner clearance loop cannot evade the test budget.
+Obstacle cases include remote barriers on the same fitting, with both axial
+and radial sockets and both hollow and convex collision proxies.
+Failures save the document and seed under `fuzz-runs/planning/`. Set
+`PIPESIM_PLANNING_FUZZ_SEED` to repeat a campaign,
+`PIPESIM_PLANNING_FUZZ_CASE_SEED` to regenerate one case, or
+`PIPESIM_PLANNING_FUZZ_REPLAY` to replay an exact saved JSON document even after
+the generator changes. Use `PIPESIM_FUZZ_MINUTES` to change the campaign duration.
+Regression and fuzz cases both reject the old
+individual-only planner. Independent replay checks resting contact hulls against
+mass centres, connected lifted groups, floor clearance, transfer waypoints and
+explicitly assisted capture joins. Version 3 plans contain actual `poses` for
+each visible part and `start_poses` plus `motion_waypoints` for explicit lifts.
+The exporter regenerates older cached plans that lack those physical stages.
+The editor and book derive `instruction_steps` for presentation: an initial
+placement and unassisted floor reorientation of one loose part up to 15 kg
+share a positioning page. Assembled groups and assisted handling keep explicit
+lift pages. `source_steps` maps every displayed page to the unchanged physical
+steps; `image_number` selects the final working pose. The regression and seeded
+matrix in `tests/test_build_presentation.py` check coverage and prevent hiding
+fastening, anchoring, fixtures or assistance.
+
+`tests/test_dimension_precision.py` covers supplier cut grouping, stock allocation
+after rounding, exact-length evidence and a 100-seed precision matrix. Browser
+preferences and build export use the same millimetre increment without rounding
+saved geometry. `tests/test_mirror_catalog_identity.py` covers catalogue reuse,
+port-name permutations, signed through-bore motion and repeated reflections, with
+60 seeded catalogue cases by default (`PIPESIM_CATALOG_MIRROR_SEED` and
+`PIPESIM_CATALOG_MIRROR_CASES` control replay and size).
+
 ## Commands and exit codes
 
 `editor`, `library`, `validate`, `plan`, `analyse`, `simulate`, `stress`, `bom`, `build`, `render`, `animate`, `motion-check`, `mesh`, `fit`, `human`, `import-mesh`, `expand`, `snapshot`, `contact-loads`, `bundle`.
@@ -324,6 +389,16 @@ connection in every round. `PIPESIM_REINFORCEMENT_CASES` (default 8),
 `PIPESIM_REINFORCEMENT_SEED`, and `PIPESIM_REINFORCEMENT_CASE_SEED` control the
 matrix. Failures save under `fuzz-runs/reinforcement`; replay with
 `PIPESIM_REINFORCEMENT_REPLAY` and the test filter `seeded reinforcement`.
+
+File opening also runs in every campaign round. It covers browser file-picker
+and drag-and-drop opening of existing workspace designs, including root,
+`designs/`, nested, and current-directory files with relative mirrored meshes.
+Inline bodies and custom definitions must retain their paths, served mesh bytes,
+and contents through saving and reopening. The standalone matrix includes 16
+retained cases crossing those choices and 24 fresh seeds. Use `PIPESIM_FILE_OPEN_SEED`,
+`PIPESIM_FILE_OPEN_CASES`, or `PIPESIM_FILE_OPEN_CASE_SEED` with the test filter
+`seeded file open` to repeat it. The editor campaign now defaults to 60 minutes;
+the earlier parser-only reload checks did not exercise browser-selected files.
 
 Failures are saved under `fuzz-runs/editor-workflows` (or
 `PIPESIM_WORKFLOW_REPRO_DIR`). `replay.json` contains the starting document,
@@ -595,4 +670,4 @@ The TC136 and TC161 models also regenerate STL files under `pipesim/data/librari
 
 New supplier parts generally require data, not Python changes. Add measured geometry, ports, mass and source assumptions to a library. New articulated equipment can be a reusable object containing ordinary parts/joints. For new solver behaviour, extend the JSON Schema and the relevant shared backend, then add a physical or geometric regression case.
 
-The substantial next engineering extensions are a sparse frame solver, exact CAD/B-rep import, calibrated connector failure surfaces, deformable panels/contact, richer human kinematics and a planner supporting coordinated placement and tool access. Current outputs explicitly retain these model boundaries.
+The substantial next engineering extensions are a sparse frame solver, exact CAD/B-rep import, calibrated connector failure surfaces, deformable panels/contact, richer human kinematics and assembly planning with tool access constraints. Current outputs explicitly retain these model boundaries.

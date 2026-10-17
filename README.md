@@ -2,7 +2,9 @@
 
 A local design studio and command-line toolchain for modular tube structures. Author a design in YAML or JSON, edit it in 3D, check its connections and assembly order, simulate its motion, calculate beam response, and export illustrated build instructions.
 
-![Workbench rendered by PipeSim](Animation1.webp)
+![A device](Animation1.webp)
+
+![Another device](Animation2.webp)
 
 ## Run it
 

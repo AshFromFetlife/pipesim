@@ -26,9 +26,31 @@ jobs:
           name: dynamics-fuzz-repro
           path: fuzz-runs/dynamics/
 
+  assembly-planning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e ".[dev]"
+      - name: Verify parallel frames, shared rails and bounded insertion checks
+        run: python -m pytest -q tests/test_planning.py tests/test_planning_jobs.py tests/test_planning_presentation.py tests/test_build_presentation.py tests/test_dimension_precision.py
+      - name: Fuzz coordinated assembly planning
+        env:
+          PIPESIM_FUZZ_MINUTES: '30'
+        run: python -m pytest -s -q --basetemp=fuzz-runs/planning/pytest tests/test_planning_fuzz.py
+      - name: Keep exact planning failures and seeds
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assembly-planning-fuzz
+          path: fuzz-runs/planning/
+
   editor-workflows:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,7 +65,7 @@ jobs:
         run: node --test --test-name-pattern='geometry workflow oracles|anchored resize workflow oracles|free assembly workflow oracles|material workflow oracles|whole assembly workflow oracles|reinforcement workflow oracles' tests/editor-interactions.test.mjs
       - name: Exercise mixed geometry workflows through the editor and API
         env:
-          PIPESIM_WORKFLOW_MINUTES: '45'
+          PIPESIM_WORKFLOW_MINUTES: '60'
         run: npm run fuzz:editor
       - name: Keep campaign counts and exact failure replays
         if: always()
@@ -164,7 +186,7 @@ jobs:
 
   mirror-cube:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -172,7 +194,7 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -e ".[dev]"
       - name: Check deterministic cube and cross-plane regressions
-        run: python -m pytest -q tests/test_symmetry_cube_collisions.py tests/test_symmetry_cross_plane.py
+        run: python -m pytest -q tests/test_symmetry_cube_collisions.py tests/test_symmetry_cross_plane.py tests/test_mirror_catalog_identity.py
       - name: Fuzz orthogonal mirror cubes
         env:
           PIPESIM_CUBE_FUZZ_CASES: '1000000'

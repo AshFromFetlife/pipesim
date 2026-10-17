@@ -2,9 +2,9 @@
 // orbit widgets are replaced; picking, projections, DOM events and documents are real.
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile,writeFile,mkdtemp,rm,realpath} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,mkdtemp,rm,realpath} from 'node:fs/promises';
 import {randomBytes} from 'node:crypto';
-import {join,dirname,basename} from 'node:path';
+import {join,dirname,basename,relative,sep} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
 import {setTimeout as pause} from 'node:timers/promises';
@@ -461,6 +461,46 @@ test('preferences convert inspector values for display while saving millimetres'
     await ui.wait(()=>ui.state.doc.parts.find(part=>part.id==='tee').pose.position_mm[0]===508);
     assert.equal(ui.state.doc.units,'mm-kg-s-N-deg');
     assert.equal(JSON.parse(ui.window.localStorage.getItem('pipesim.preferences.v1')).renderWidth,2048);
+  }finally{await ui.close();}
+});
+
+test('dimension precision updates the inspector and build export without rounding the design',async()=>{
+  const doc=freeTube();doc.parts[0].parameters.length_mm=1937.2001412798647;
+  let exported;
+  const ui=await editor(doc,null,{interceptFetch:(path,options)=>{
+    if(path==='/api/export'){exported=JSON.parse(options.body);return new Response(JSON.stringify({steps:1,stock_bars:1,url:'/output/precision/instructions.html',directory:'output/precision'}));}
+    return null;
+  }});
+  try{
+    const id=doc.parts[0].id;ui.select(id);const original=structuredClone(ui.state.doc);
+    const length=ui.document.querySelector('[data-param="length_mm"]');
+    assert.equal(Number(length.value),1937);
+    length.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.deepEqual(ui.state.doc,original);
+    ui.document.querySelector('#snap-settings-button').click();
+    ui.document.querySelector('#pref-dimension-precision').value='.1';
+    ui.document.querySelector('#modal-actions .primary').click();
+    assert.equal(Number(ui.document.querySelector('[data-param="length_mm"]').value),1937.2);
+    assert.equal(JSON.parse(ui.window.localStorage.getItem('pipesim.preferences.v1')).dimensionPrecisionMm,.1);
+    assert.deepEqual(ui.state.doc,original);
+    ui.state.plan={status:'buildable',steps:[{number:1,part:id,kind:'position',parts:[id],moving_parts:[id],installed_parts:[id],instruction:'Cut to 1937.2001412798647 mm.',fasten:[]}]};
+    ui.document.querySelector('[data-mode="build"]').click();
+    assert.match(ui.document.querySelector('#inspector').textContent,/Cut to 1937\.2 mm/);
+    ui.document.querySelector('#export-build').click();await ui.wait(()=>!ui.state.busy);
+    assert.equal(exported.dimension_precision_mm,.1);
+    assert.deepEqual(ui.state.doc,original);
+  }finally{await ui.close();}
+});
+
+test('draft precision starts from exact geometry and does not commit a display-only rounding',async()=>{
+  const doc={format:'pipesim/1',units:'mm-kg-s-N-deg',parts:[],joints:[],draft_subassemblies:[{id:'draft',runs:[{id:'cut',catalog:'tubeclamp.tube-C',start_mm:[0,0,100],end_mm:[174.886027,0,100]}]}]};
+  const ui=await editor(doc,null,{storedPreferences:JSON.stringify({...preferences.DEFAULT_PREFERENCES,dimensionPrecisionMm:.001})});
+  try{
+    ui.select('cut');const original=structuredClone(ui.state.doc),input=ui.document.querySelector('#draft-length');
+    assert.equal(Number(input.value),174.886);
+    assert.match(input.title,/174\.886027/);
+    input.dispatchEvent(new ui.window.Event('change',{bubbles:true}));
+    assert.deepEqual(ui.state.doc,original);
   }finally{await ui.close();}
 });
 
@@ -2865,6 +2905,69 @@ test('OS drop on the canvas opens JSON and suppresses browser navigation',async(
   }finally{await ui.close();}
 });
 
+async function fileOpenAssetWorkflow(seed){
+  const folder=['','designs','designs/nested','output'][seed%4];
+  const filename=seed===0?'complicatedMetal.json':`Mirrored frame ${seed} #.${['json','yaml','yml'][seed%3]}`;
+  const path=folder?`${folder}/${filename}`:filename;
+  const asset='designs/assets/mirrored/mirror-75041da7f4d4b3db4bf3.stl';
+  const bytes=await readFile('tests/fixtures/assets/mirrored/mirror-08acd26e49da986bd75c.stl');
+  await mkdir(dirname(join(workspace,asset)),{recursive:true});
+  await writeFile(join(workspace,asset),bytes);
+  const mesh={type:'mesh',file:relative(dirname(join(workspace,path)),join(workspace,asset)).split(sep).join('/')};
+  const body={kind:'rigid',mass_kg:1,geometry:[mesh]};
+  const doc={...blankDesign(`File open seed ${seed}`),parts:[{id:'mirror',body,
+    pose:{position_mm:[seed%500,30,200],rotation_deg:[0,seed%360,0]}}]};
+  if(seed&4){doc.definitions={'custom.mirror':body};delete doc.parts[0].body;doc.parts[0].catalog='custom.mirror';}
+  const text=JSON.stringify(doc,null,2);
+  await mkdir(dirname(join(workspace,path)),{recursive:true});
+  await writeFile(join(workspace,path),text);
+  const errors=[];
+  const ui=await editor(fixture(),null,{onToast:(message,error)=>{if(error)errors.push(message);}});
+  try{
+    const file=new File([text],filename);
+    if(seed&8)fileDrag(ui,'drop',[file],ui.document.querySelector('#viewport canvas'));
+    else fileInput(ui,file);
+    await ui.wait(()=>ui.state.doc.name===doc.name||ui.document.querySelector('#modal-title').textContent==='Could not open design');
+    assert.equal(ui.document.querySelector('#modal').open,false,`seed=${seed}: ${ui.document.querySelector('#modal-content').textContent}`);
+    await ui.drain();
+    assert.deepEqual(errors,[],`seed=${seed}`);
+    assert.equal(ui.state.path,path,`seed=${seed}`);
+    assert.equal(ui.state.dirty,false);
+    assert.deepEqual(ui.state.doc,doc);
+    assert.equal(await readFile(join(workspace,path),'utf8'),text,'opening must not rewrite the source');
+    const shape=ui.state.scene.parts[0].geometry[0];
+    const response=await fetch(url+shape.url);
+    assert.equal(response.status,200);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()),bytes);
+    ui.document.querySelector('#save-button').click();modalAction(ui,'Save file');
+    await ui.wait(()=>!ui.document.querySelector('#modal').open);await ui.drain();
+    const reopened=await (await fetch(url+'/api/open?path='+encodeURIComponent(path))).json();
+    assert.deepEqual(reopened.document,doc);
+    assert.equal(reopened.scene.parts[0].geometry[0].url,shape.url);
+  }finally{await ui.close();}
+}
+
+test('OS file picker resolves existing mirrored assets from the workspace root',async()=>{
+  await fileOpenAssetWorkflow(0);
+});
+
+test('seeded file open workflows preserve meshes through picker, drop, save and reload',async()=>{
+  const root=Number(process.env.PIPESIM_FILE_OPEN_SEED??randomBytes(4).readUInt32LE());
+  let state=root>>>0;
+  const next=()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state;};
+  const count=Number(process.env.PIPESIM_FILE_OPEN_CASES??24);
+  const single=process.env.PIPESIM_FILE_OPEN_CASE_SEED;
+  assert.ok(Number.isSafeInteger(root)&&root>=0&&root<=0xffffffff,'PIPESIM_FILE_OPEN_SEED must be a uint32');
+  assert.ok(Number.isSafeInteger(count)&&count>=0,'PIPESIM_FILE_OPEN_CASES must be a nonnegative integer');
+  // Cross all four directories with both input methods and both mesh owners.
+  const seeds=single===undefined?[...Array.from({length:16},(_,i)=>i),...Array.from({length:count},next)]:[Number(single)];
+  console.log(`File open workflows root_seed=${root}, cases=${seeds.length}`);
+  for(const seed of seeds){
+    assert.ok(Number.isSafeInteger(seed)&&seed>=0&&seed<=0xffffffff,'PIPESIM_FILE_OPEN_CASE_SEED must be a uint32');
+    await fileOpenAssetWorkflow(seed);console.log(`File open case_seed=${seed} passed`);
+  }
+});
+
 test('dirty design stays intact on cancel, then Save and open persists it first',async()=>{
   const ui=await editor(fixture());try{
     ui.document.querySelector('#rename').click();ui.document.querySelector('#design-name').value='Unsaved work';modalAction(ui,'Rename');
@@ -4726,6 +4829,199 @@ test('Simulation progress, early cancellation and retry preserve the previous re
     ui.document.querySelector('#cancel-simulation').click();
     await ui.wait(()=>!ui.state.busy);assert.equal(ui.state.recording,old);
   }finally{releaseStart();await ui.close();}
+});
+
+test('Build planning shows progress and supports early and running cancellation',async()=>{
+  let releaseStart,cancelled=false,polls=0,optionsSeen;
+  const startGate=new Promise(resolve=>releaseStart=resolve);
+  const ui=await editor(freeTube(),null,{interceptFetch:(path,options)=>{
+    if(path==='/api/plan'){
+      optionsSeen=JSON.parse(options.body);
+      return startGate.then(()=>new Response(JSON.stringify({id:'plan-job',status:'running',progress:{message:'Finding parallel sections'}})));
+    }
+    if(path==='/api/plan-cancel'){cancelled=true;return new Response(JSON.stringify({id:'plan-job',status:'cancelled'}));}
+    if(path==='/api/plan-status'){polls++;return new Response(JSON.stringify({id:'plan-job',status:cancelled?'cancelled':'running',elapsed_s:4,progress:{message:'Checking parallel frame',paths_checked:12,states_explored:6}}));}
+    return null;
+  }});
+  try{
+    const old={status:'indeterminate',steps:[],reason:'Prior plan'};
+    ui.state.plan=old;ui.state.doc.build_plan=old;
+    ui.document.querySelector('[data-mode="build"]').click();
+    ui.document.querySelector('[data-run="plan"]').click();
+    assert.ok(ui.state.busy);assert.ok(ui.document.querySelector('[data-run="plan"]').disabled);
+    ui.document.querySelector('#cancel-plan').click();
+    assert.match(ui.document.querySelector('#plan-progress').textContent,/Cancelling/);
+    releaseStart();await ui.wait(()=>!ui.state.busy);
+    assert.equal(optionsSeen.background,true);assert.ok(cancelled);
+    assert.equal(ui.state.plan,old);assert.equal(ui.state.doc.build_plan,old);
+    assert.equal(ui.document.querySelector('#cancel-plan'),null);
+    cancelled=false;ui.document.querySelector('[data-run="plan"]').click();
+    await ui.wait(()=>polls>0);
+    assert.match(ui.document.querySelector('#plan-progress').textContent,/12 paths checked/);
+    assert.match(ui.document.querySelector('#plan-progress').textContent,/4 s elapsed/);
+    ui.document.querySelector('#cancel-plan').click();
+    await ui.wait(()=>!ui.state.busy);assert.equal(ui.state.plan,old);
+    assert.match(ui.document.querySelector('#status-text').textContent,/cancelled/);
+  }finally{releaseStart();await ui.close();}
+});
+
+test('Build planning displays prepared subassemblies and highlights the whole sliding group',async()=>{
+  const steps=[{number:1,part:'pipe',parts:['pipe'],moving_parts:['pipe'],subassembly:'Frame A',kind:'position',instruction:'Prepare Frame A.',fasten:[],installed_parts:['pipe']},
+    {number:2,part:'tee',parts:[],moving_parts:['pipe','tee'],target_parts:[],subassembly:'Complete frame',kind:'merge',instruction:'Slide the prepared frame along both rails.',fasten:[],installed_parts:['pipe','tee']},
+    {number:3,part:'tee',parts:[],moving_parts:['pipe','tee'],target_parts:[],subassembly:'main',prepared_subassembly:'subassembly-2',kind:'position',instruction:'Position Subassembly 2 and support it separately.',fasten:[],installed_parts:['pipe','tee']}];
+  const plan={status:'buildable',steps};
+  const ui=await editor(fixture(),null,{interceptFetch:path=>{
+    if(path==='/api/plan')return new Response(JSON.stringify({id:'plan-job',status:'completed'}));
+    if(path==='/api/plan-result')return new Response(JSON.stringify({result:plan}));
+    return null;
+  }});
+  try{
+    ui.document.querySelector('[data-mode="build"]').click();
+    ui.document.querySelector('[data-run="plan"]').click();
+    await ui.wait(()=>!ui.state.busy&&ui.state.plan?.status==='buildable');
+    assert.equal(ui.partObjects.get('tee').visible,false);
+    assert.match(ui.document.querySelector('[data-step="1"]').textContent,/Merge Complete frame/);
+    ui.document.querySelector('[data-step="1"]').click();
+    for(const id of ['pipe','tee']){
+      const object=ui.partObjects.get(id);assert.ok(object.visible);
+      let highlighted=false;object.traverse(mesh=>{if(mesh.isMesh&&mesh.material?.emissive)highlighted||=mesh.material.emissive.getHexString()==='438f79';});
+      assert.ok(highlighted,id+' belongs to the moving subassembly');
+    }
+    assert.match(ui.document.querySelector('#inspector').textContent,/along both rails/);
+    assert.match(ui.document.querySelector('[data-step="2"]').textContent,/Position Subassembly 2/);
+    ui.document.querySelector('[data-step="2"]').click();
+    assert.match(ui.document.querySelector('#inspector').textContent,/support it separately/);
+  }finally{await ui.close();}
+});
+
+test('Build planning displays a light fitting placement without a separate micro-lift page',async()=>{
+  const doc=fixture('TC116C'),original=structuredClone(doc.parts);
+  const first={tee:{position_mm:[1000,0,70],rotation_deg:[0,0,0]}};
+  const final={tee:{position_mm:[1200,200,45],rotation_deg:[90,0,0]}};
+  const initial={number:1,part:'tee',parts:['tee'],introduced_parts:['tee'],moving_parts:['tee'],
+    subassembly:'subassembly-89',kind:'position',instruction:'Position the fitting.',fasten:[],installed_parts:['tee'],floor_z_mm:0,poses:first};
+  const lifting={...initial,number:2,parts:[],introduced_parts:[],kind:'lift',instruction:'Lift and turn the fitting.',
+    start_poses:first,poses:final};
+  const display={...lifting,number:1,kind:'position',parts:['tee'],introduced_parts:['tee'],
+    display_title:'Position TC116C',instruction:'Place TC116C on the floor in the shown orientation.',source_steps:[1,2],image_number:2};
+  const plan={status:'buildable',steps:[initial,lifting],instruction_steps:[display]};
+  const ui=await editor(doc,null,{interceptFetch:path=>{
+    if(path==='/api/plan')return new Response(JSON.stringify({id:'compact-plan',status:'completed'}));
+    if(path==='/api/plan-result')return new Response(JSON.stringify({result:plan}));
+    return null;
+  }});
+  try{
+    ui.document.querySelector('[data-mode="build"]').click();ui.document.querySelector('[data-run="plan"]').click();
+    await ui.wait(()=>!ui.state.busy&&ui.state.plan?.status==='buildable');
+    const inspector=ui.document.querySelector('#inspector');
+    assert.match(inspector.textContent,/1 assembly steps/);assert.match(inspector.textContent,/STEP 1 OF 1/);
+    assert.equal(ui.document.querySelectorAll('[data-step]').length,1);
+    assert.match(ui.document.querySelector('[data-step="0"]').textContent,/Position TC116C/);
+    assert.equal(ui.document.querySelector('[data-build-pose]'),null);
+    assert.doesNotMatch(inspector.textContent,/Lifted assembly|Lift and turn|Lift Subassembly/);
+    const object=ui.partObjects.get('tee');
+    assert.deepEqual(object.position.toArray(),final.tee.position_mm);
+    const expected=new Three.Quaternion().setFromEuler(new Three.Euler(Math.PI/2,0,0,'XYZ'));
+    assert.ok(object.quaternion.angleTo(expected)<1e-6);
+    let highlighted=false;object.traverse(mesh=>{if(mesh.isMesh&&mesh.material?.emissive)highlighted||=mesh.material.emissive.getHexString()==='438f79';});
+    assert.ok(highlighted);assert.equal(ui.partObjects.get('pipe').visible,false);
+    assert.deepEqual(ui.state.doc.parts,original);
+    assert.deepEqual(ui.state.doc.build_plan.steps,[initial,lifting],'Raw physical motion evidence is unchanged');
+  }finally{await ui.close();}
+});
+
+test('Build planning shows floor poses and explicit lifts without changing the design',async()=>{
+  const doc=fixture(),original=structuredClone(doc.parts);
+  const floorPoses={pipe:{position_mm:[100000,0,61.2],rotation_deg:[0,90,0]},tee:{position_mm:[100000,200,70],rotation_deg:[90,0,0]}};
+  const liftedPoses={pipe:{position_mm:[0,0,600],rotation_deg:[0,0,0]},tee:{position_mm:[0,200,600],rotation_deg:[0,0,90]}};
+  const steps=[{number:1,part:'pipe',parts:['pipe','tee'],moving_parts:['pipe','tee'],subassembly:'subassembly-1',kind:'position',instruction:'Build the connected frame on the floor.',fasten:[],installed_parts:['pipe','tee'],floor_z_mm:40,poses:floorPoses},
+    {number:2,part:'pipe',parts:[],moving_parts:['pipe','tee'],subassembly:'main',prepared_subassembly:'subassembly-1',kind:'lift',instruction:'Lift and turn the connected frame into place.',fasten:[],installed_parts:['pipe','tee'],floor_z_mm:40,start_poses:floorPoses,poses:liftedPoses}];
+  const ui=await editor(doc,null,{storedPreferences:JSON.stringify({...preferences.DEFAULT_PREFERENCES,floorVisible:false,gridVisible:false}),interceptFetch:path=>{
+    if(path==='/api/plan')return new Response(JSON.stringify({id:'floor-plan',status:'completed'}));
+    if(path==='/api/plan-result')return new Response(JSON.stringify({result:{status:'buildable',steps,certificate:{fallback_used:true,maximum_handled_mass_kg:101.5586465,floor_work_area_mm:[12123,8345],maximum_overhead_height_mm:4321}}}));
+    return null;
+  }});
+  const checkPoses=poses=>{for(const [id,pose] of Object.entries(poses)){
+    const object=ui.partObjects.get(id);
+    assert.deepEqual(object.position.toArray(),pose.position_mm);
+    const expected=new Three.Quaternion().setFromEuler(new Three.Euler(...pose.rotation_deg.map(Three.MathUtils.degToRad),'XYZ'));
+    assert.ok(object.quaternion.angleTo(expected)<1e-6,id+' uses the preparation orientation');
+  }};
+  try{
+    const floor=ui.scene.children.find(object=>object.geometry?.type==='PlaneGeometry'&&object.geometry.parameters.width===30000);
+    assert.equal(floor.visible,false);
+    ui.document.querySelector('[data-mode="build"]').click();ui.document.querySelector('[data-run="plan"]').click();
+    await ui.wait(()=>!ui.state.busy&&ui.state.plan?.status==='buildable');
+    assert.match(ui.document.querySelector('#inspector').textContent,/Largest handling operation: 101.6 kg/);
+    assert.match(ui.document.querySelector('#inspector').textContent,/lighter alternatives may exist/);
+    assert.match(ui.document.querySelector('#inspector').textContent,/12.2 × 8.4 m.*Clear height: 4.4 m/);
+    checkPoses(floorPoses);assert.equal(floor.visible,true);assert.equal(floor.position.z,39);assert.ok(floor.position.x>90000,'The floor follows the displayed preparation area');
+    assert.match(ui.document.querySelector('[data-step="1"]').textContent,/Lift Subassembly 1/);
+    ui.document.querySelector('[data-step="1"]').click();checkPoses(floorPoses);
+    assert.equal(ui.document.querySelector('[data-build-pose="start"]').getAttribute('aria-pressed'),'true');
+    assert.match(ui.document.querySelector('#inspector').textContent,/Lifted assembly.*kg/);
+    ui.document.querySelector('[data-build-pose="end"]').click();checkPoses(liftedPoses);
+    ui.document.querySelector('#snap-settings-button').click();
+    ui.document.querySelector('#pref-dimension-precision').value='.1';
+    ui.document.querySelector('#modal-actions .primary').click();
+    checkPoses(liftedPoses);assert.equal(floor.visible,true,'Build support stays visible after preferences change');
+    ui.document.querySelector('[data-build-pose="start"]').click();checkPoses(floorPoses);
+    ui.document.querySelector('[data-mode="design"]').click();
+    for(const part of ui.state.scene.parts)assert.deepEqual(ui.partObjects.get(part.id).position.toArray(),part.pose.position_mm);
+    assert.equal(floor.visible,false);assert.deepEqual(floor.position.toArray(),[0,0,-1]);
+    assert.deepEqual(ui.state.doc.parts,original,'Preparation and lifting poses never edit the saved design');
+  }finally{await ui.close();}
+});
+
+test('Build planning focuses the floor preparation before a lift without hiding distant retained parts',async()=>{
+  const start={pipe:{position_mm:[20000,0,21.2],rotation_deg:[0,90,0]},tee:{position_mm:[0,0,70],rotation_deg:[0,0,0]}};
+  const end={...start,pipe:{position_mm:[0,0,600],rotation_deg:[0,0,0]}};
+  const step={number:1,part:'pipe',parts:[],moving_parts:['pipe'],subassembly:'main',kind:'lift',instruction:'Lift pipe from the floor.',fasten:[],installed_parts:['pipe','tee'],floor_z_mm:0,start_poses:start,poses:end};
+  const ui=await editor(fixture(),null,{interceptFetch:path=>{
+    if(path==='/api/plan')return new Response(JSON.stringify({id:'focused-lift',status:'completed'}));
+    if(path==='/api/plan-result')return new Response(JSON.stringify({result:{status:'buildable',steps:[step]}}));
+    return null;
+  }});
+  try{
+    ui.document.querySelector('[data-mode="build"]').click();ui.document.querySelector('[data-run="plan"]').click();
+    await ui.wait(()=>!ui.state.busy&&ui.state.plan?.status==='buildable');
+    assert.ok(ui.orbit.target.x>19000,'Before lifting focuses the preparation, not the empty space between groups');
+    assert.ok(ui.camera.position.distanceTo(ui.orbit.target)<3000);
+    assert.equal(ui.partObjects.get('tee').visible,true);
+    assert.deepEqual(ui.partObjects.get('tee').position.toArray(),start.tee.position_mm);
+    ui.document.querySelector('[data-build-pose="end"]').click();
+    assert.ok(Math.abs(ui.orbit.target.x)<1000);
+    assert.deepEqual(ui.partObjects.get('pipe').position.toArray(),end.pipe.position_mm);
+  }finally{await ui.close();}
+});
+
+test('Build planning respects cancellation during result fetch and a changed editor mode',async()=>{
+  for(const cancel of [true,false]){
+    let releaseResult,resultRequested=false;
+    const gate=new Promise(resolve=>releaseResult=resolve);
+    const plan={status:'buildable',steps:[{number:1,part:'pipe',instruction:'Prepare pipe.',fasten:[],installed_parts:['pipe']}]};
+    const ui=await editor(fixture(),null,{interceptFetch:path=>{
+      if(path==='/api/plan')return new Response(JSON.stringify({id:'finished-plan',status:'completed'}));
+      if(path==='/api/plan-result'){resultRequested=true;return gate.then(()=>new Response(JSON.stringify({result:plan})));}
+      if(path==='/api/plan-cancel')return new Response(JSON.stringify({id:'finished-plan',status:'completed'}));
+      return null;
+    }});
+    try{
+      ui.document.querySelector('[data-mode="build"]').click();ui.document.querySelector('[data-run="plan"]').click();
+      await ui.wait(()=>resultRequested);
+      if(cancel)ui.document.querySelector('#cancel-plan').click();
+      else ui.document.querySelector('[data-mode="design"]').click();
+      releaseResult();await ui.wait(()=>!ui.state.busy);
+      if(cancel)assert.equal(ui.state.plan,null);
+      else{
+        assert.equal(ui.state.plan.status,'buildable');assert.equal(ui.state.mode,'design');
+        assert.ok(ui.partObjects.get('tee').visible,'Finishing a plan must not hide the current design');
+        ui.state.playing=true;
+        ui.document.querySelector('[data-mode="build"]').click();
+        assert.equal(ui.state.playing,false,'Build steps stop simulation playback');
+      }
+    }finally{releaseResult();await ui.close();}
+  }
 });
 
 test('Failed simulation restores the Run button and does not overwrite results',async()=>{

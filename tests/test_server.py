@@ -34,6 +34,18 @@ def test_bootstrap_serves_real_library_and_offline_editor(editor):
     assert request(editor,'/vendor/three.module.js')[0]==200
 
 
+def test_build_export_receives_browser_precision_without_changing_design(editor,monkeypatch,load):
+    source=load('workbench').doc; observed={}
+    def export(assembly,directory,**options):
+        observed.update(options);observed['document']=copy.deepcopy(assembly.doc)
+        return {'directory':str(directory),'steps':1,'stock_bars':1}
+    monkeypatch.setattr('pipesim.exporting.build_export',export)
+    code,raw=request(editor,'/api/export',{'document':source,'path':'design.pipe.yaml','dimension_precision_mm':.25})
+    assert code==200 and json.loads(raw)['url'].endswith('/instructions.html')
+    assert observed['precision_mm']==.25
+    assert observed['document']==source
+
+
 def test_connection_search_can_be_cancelled_before_and_during_execution(editor,monkeypatch,load):
     from pipesim.connection_jobs import check_cancelled
     entered=threading.Event();finished=threading.Event();response=[]
@@ -65,9 +77,65 @@ def test_connection_search_can_be_cancelled_before_and_during_execution(editor,m
         editor.connections.close();thread.join(6)
 
 
+def test_build_planning_reports_progress_and_can_be_cancelled(editor,monkeypatch,load):
+    entered=threading.Event(); finished=threading.Event()
+    def plan(assembly,*,progress,cancelled):
+        progress({'message':'Checking common sliding direction','paths_checked':7})
+        entered.set()
+        try:
+            assert finished.wait(.01) is False
+            for _ in range(1000):
+                if cancelled(): return {'status':'cancelled','steps':[]}
+                threading.Event().wait(.005)
+            pytest.fail('Planning cancel did not reach the worker')
+        finally: finished.set()
+    monkeypatch.setattr('pipesim.planning.plan_build',plan)
+    payload={'document':load('workbench').doc,'background':True}
+    job=json.loads(request(editor,'/api/plan',payload)[1])
+    assert entered.wait(5)
+    progress=json.loads(request(editor,'/api/plan-status',{'job_id':job['id']})[1])
+    assert progress['progress']['paths_checked']==7
+    assert 'result' not in progress
+    assert json.loads(request(editor,'/api/plan-cancel',{'job_id':job['id']})[1])['cancel_requested']
+    assert finished.wait(5)
+    result=json.loads(request(editor,'/api/plan-result',{'job_id':job['id']})[1])
+    assert result['status']=='cancelled' and 'result' not in result
+    monkeypatch.setattr('pipesim.planning.plan_build',lambda *args,**kwargs:{'status':'buildable','steps':[]})
+    assert json.loads(request(editor,'/api/plan',{'document':payload['document']})[1])['status']=='buildable'
+
+
 def test_editor_port_cannot_be_shared_by_another_server(editor):
     with pytest.raises(OSError):
         EditorServer(editor.root,editor.design,editor.server_port)
+
+
+@pytest.mark.parametrize('background',[False,True])
+def test_build_api_keeps_raw_motion_and_combines_loose_fitting_pages(editor,monkeypatch,background):
+    doc={'format':'pipesim/1','units':'mm-kg-s-N-deg','parts':[
+        {'id':'fitting','catalog':'tubeclamp.TC116C'}],'joints':[]}
+    start={'position_mm':[0,0,40],'rotation_deg':[0,0,0]}
+    end={'position_mm':[0,0,30],'rotation_deg':[90,0,0]}
+    initial={'number':1,'kind':'position','part':'fitting','parts':['fitting'],
+        'introduced_parts':['fitting'],'moving_parts':['fitting'],
+        'subassembly':'preparation','floor_z_mm':0,'grounded_after':True,
+        'poses':{'fitting':start},'pose':start}
+    lift={**initial,'number':2,'kind':'lift','introduced_parts':[],
+        'poses':{'fitting':end},'pose':end,'start_poses':{'fitting':start}}
+    physical={'status':'buildable','steps':[initial,lift]}
+    monkeypatch.setattr('pipesim.planning.plan_build',lambda *args,**kwargs:copy.deepcopy(physical))
+    response=json.loads(request(editor,'/api/plan',{'document':doc,'background':background})[1])
+    if background:
+        for _ in range(500):
+            response=json.loads(request(editor,'/api/plan-result',{'job_id':response['id']})[1])
+            if response['status']!='running':break
+            threading.Event().wait(.01)
+        assert response['status']=='completed',response
+        response=response['result']
+    assert response['steps']==physical['steps']
+    shown=response['instruction_steps']
+    assert len(shown)==1 and shown[0]['source_steps']==[1,2]
+    assert shown[0]['display_title']=='Position TC116C' and shown[0]['kind']=='position'
+    assert shown[0]['poses']==lift['poses'] and shown[0]['image_number']==2
 
 
 def test_editor_accepts_scene_asset_burst_while_editing(editor):
@@ -439,6 +507,11 @@ def test_open_loads_custom_library_and_relative_mesh_from_design_directory(edito
     assert opened['library']['custom.fitting']==definition
     shape=opened['scene']['parts'][0]['geometry'][0]
     assert request(editor,shape['url'])[1]==mesh.read_bytes()
+    selected=json.loads(request(editor,'/api/open-file',{
+        'filename':'frame.pipe.yaml','text':json.dumps(doc)})[1])
+    assert selected['path']=='designs/custom/frame.pipe.yaml'
+    assert selected['document']==doc and selected['library']['custom.fitting']==definition
+    assert request(editor,selected['scene']['parts'][0]['geometry'][0]['url'])[1]==mesh.read_bytes()
 
 
 @pytest.mark.parametrize('filename,text',[
@@ -461,6 +534,33 @@ def test_file_open_avoids_overwriting_names_and_ignores_os_path(editor,blank):
     assert result['path']=='designs/existing.pipe-imported-1.yaml'
     assert not (editor.root/result['path']).exists()
     assert json.loads(request(editor,'/api/open?path=designs/existing.pipe.yaml')[1])['document']==blank
+
+
+@pytest.mark.parametrize('folder', ['', 'designs', 'designs/nested', 'output'])
+def test_file_open_recognizes_workspace_design_and_preserves_asset_base(editor,blank,folder):
+    from pipesim.server import BUNDLED_MESHES
+    from pipesim.editing import reference_path
+    mesh=next(BUNDLED_MESHES.glob('*.stl')).read_bytes()
+    asset=editor.root/'designs/assets/mirrored/mirror-existing.stl'
+    asset.parent.mkdir(parents=True);asset.write_bytes(mesh)
+    path=editor.root/folder/'existing.json'
+    doc={**blank,'parts':[{'id':'mirror','body':{'mass_kg':1,'geometry':[
+        {'type':'mesh','file':reference_path(asset,path.parent)}]}}]}
+    write(path,doc)
+    if folder: write(editor.root/path.name,blank)  # A matching name alone is not the source.
+    before=path.read_bytes()
+    # Browsers provide only the basename, even when selected inside the workspace.
+    result=json.loads(request(editor,'/api/open-file',{'filename':path.name,
+        'path':'output/current.yaml' if folder=='output' else 'designs/current.yaml',
+        'text':json.dumps(doc)})[1])
+    assert result['path']==path.relative_to(editor.root).as_posix()
+    assert result['imported'] is False and result['document']==doc
+    shape=result['scene']['parts'][0]['geometry'][0]
+    assert request(editor,shape['url'])[1]==mesh
+    resolved=json.loads(request(editor,'/api/resolve',{
+        'document':result['document'],'path':result['path']})[1])
+    assert request(editor,resolved['parts'][0]['geometry'][0]['url'])[1]==mesh
+    assert path.read_bytes()==before
 
 
 @pytest.mark.parametrize('filename,text',[

@@ -37,8 +37,14 @@ def test_bom_includes_panel_dimensions_and_real_supplier_links(load):
 
 def test_build_export_has_every_step_and_reloadable_bundled_design(load,tmp_path):
     a=load('workbench'); report=build_export(a,tmp_path,engineering=True,illustrations=False)
-    assert report['steps']==13
-    assert len(read(tmp_path/'build-plan.json')['steps'])==13
+    saved=read(tmp_path/'build-plan.json')
+    steps=saved['steps']
+    assert report['steps']==len(saved['instruction_steps'])>=len(a.parts)
+    assert report['physical_steps']==len(steps)
+    assert [number for step in saved['instruction_steps'] for number in step['source_steps']]==[step['number'] for step in steps]
+    introduced=[pid for step in steps for pid in step['introduced_parts']]
+    assert len(introduced)==len(set(introduced))==len(a.parts)
+    assert set(introduced)==set(a.parts)
     b=Assembly.load(tmp_path/'design.pipe.yaml')
     for pid,p in a.parts.items():
         assert b.parts[pid].mass==pytest.approx(p.mass)
@@ -46,6 +52,9 @@ def test_build_export_has_every_step_and_reloadable_bundled_design(load,tmp_path
     html=(tmp_path/'instructions.html').read_text(encoding='utf-8')
     assert '1400 × 800 × 30' in html
     assert 'Structural response' in html
+    # The 21.84 kg worktop is inserted directly, not an explicit lift step.
+    assert 'Largest handling operation: 21.8 kg' in html
+    assert 'team or suitable lifting equipment' in html
 
 def test_imported_mesh_and_custom_material_are_portable(blank,tmp_path):
     source=tmp_path/'original'; source.mkdir(); destination=tmp_path/'packed'

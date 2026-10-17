@@ -31,7 +31,7 @@ try{const saved=JSON.parse(window.localStorage.getItem(LIBRARY_HOTKEYS_KEY)||'{}
     if(typeof catalog==='string'&&typeof hotkey==='string'&&/^(?:Shift\+)?[0-9]$|^Alt\+Shift\+[A-CE-Z]$/.test(hotkey)&&
        !Object.values(libraryHotkeys).includes(hotkey))libraryHotkeys[catalog]=hotkey;
 }catch{}
-const state={doc:null,path:'',library:{},scene:null,selected:null,connectionSource:null,mode:'design',tool:'select',undo:[],redo:[],dirty:false,revision:0,recording:null,playing:false,frame:0,checks:null,analysis:null,plan:null,step:0,busy:false,simulation:null,simulationError:null,pendingSimulationResult:null,mirrorPoseError:null,simulationOptions:null,ports:preferences.portsVisible,snap:snapDefaults.gridEnabled,connectionSnap:snapDefaults.connectionsEnabled,snapSettings:snapDefaults,placementPending:false,moveBody:true};
+const state={doc:null,path:'',library:{},scene:null,selected:null,connectionSource:null,mode:'design',tool:'select',undo:[],redo:[],dirty:false,revision:0,recording:null,playing:false,frame:0,checks:null,analysis:null,plan:null,planning:null,step:0,busy:false,simulation:null,simulationError:null,pendingSimulationResult:null,mirrorPoseError:null,simulationOptions:null,ports:preferences.portsVisible,snap:snapDefaults.gridEnabled,connectionSnap:snapDefaults.connectionsEnabled,snapSettings:snapDefaults,placementPending:false,moveBody:true};
 // Resolve display names from the current scene so rename, Undo and Redo agree.
 // IDs remain the values used by selections, connections and API requests.
 function partName(id){return state.scene?.parts.find(p=>p.id===id)?.label||state.doc?.objects?.find(o=>o.id===id)?.label||id;}
@@ -146,7 +146,7 @@ async function offerSimilarConnections(message,ports){
     return;
   }
 }
-const EDITOR_API_VERSION=30;
+const EDITOR_API_VERSION=32;
 let humanImportMaxBytes=200*1024*1024;
 let serverApiVersion=null;
 const SERVER_UPDATE_MESSAGE=`The PipeSim server at ${window.location.host} is older than this editor. Save your work, stop the process using that address, start the server again, then reload this tab.`;
@@ -626,8 +626,8 @@ function updatePorts(){
   }
 }
 function highlightSelection(){
-  const object=wholeObject();
-  for(const [id,group] of partObjects){const active=object?id.startsWith(object.id+'/'):id===state.selected,hovered=id===hoveredDraftConnection?.connector;group.traverse(o=>{if(o.isMesh&&o.material?.emissive){o.material.emissive.set(hovered?'#f3ba62':active?'#438f79':'#000000');o.material.emissiveIntensity=hovered?.45:active?.12:0;}});}
+  const object=wholeObject(),buildParts=state.mode==='build'&&state.plan?.status==='buildable'?new Set(buildStepParts(buildInstructions(state.plan)[state.step])):null;
+  for(const [id,group] of partObjects){const active=buildParts?buildParts.has(id):object?id.startsWith(object.id+'/'):id===state.selected,hovered=id===hoveredDraftConnection?.connector;group.traverse(o=>{if(o.isMesh&&o.material?.emissive){o.material.emissive.set(hovered?'#f3ba62':active?'#438f79':'#000000');o.material.emissiveIntensity=hovered?.45:active?.12:0;}});}
   const part=state.scene?.parts.find(p=>p.id===state.selected);$('#selection-summary').textContent=part?partName(part.id)+' · '+part.kind:'Nothing selected';$('#selection-label').textContent=part?partName(part.id):'';$('#selection-label').classList.toggle('hidden',!part);
 }
 function select(id){
@@ -1240,7 +1240,8 @@ function snapSettingsDialog(){
     <section><h3>DISPLAY UNITS</h3><div class="fields"><div class="field"><label>LENGTH</label><select id="pref-length">${options([['mm','Millimetres'],['cm','Centimetres'],['m','Metres'],['in','Inches'],['ft','Feet']],preferences.lengthUnit)}</select></div>
       <div class="field"><label>MASS</label><select id="pref-mass">${options([['kg','Kilograms'],['g','Grams'],['lb','Pounds']],preferences.massUnit)}</select></div>
       <div class="field"><label>FORCE</label><select id="pref-force">${options([['N','Newtons'],['kN','Kilonewtons'],['lbf','Pounds force']],preferences.forceUnit)}</select></div></div>
-      <p>Design files, simulation, and APIs remain in mm, kg, and N.</p></section>
+      <div class="single-field"><label for="pref-dimension-precision">DIMENSION &amp; CUT LIST PRECISION · mm</label><input id="pref-dimension-precision" type="number" min="0.001" max="10" step="any" value="${preferences.dimensionPrecisionMm}"></div>
+      <p>Round displayed dimensions and exported cuts to this increment. For example, 1 mm groups 174.886 mm and 174.887 mm as 175 mm cuts. Exact design geometry is retained. Design files, simulation, and APIs remain in mm, kg, and N.</p></section>
     <section><h3>VIEW &amp; HISTORY</h3><label class="check-label"><input id="pref-grid" type="checkbox">Show ground grid</label>
       <label class="check-label"><input id="pref-floor" type="checkbox">Show floor</label>
       <label class="check-label"><input id="pref-ports" type="checkbox">Show connection ports</label>
@@ -1299,7 +1300,7 @@ function snapSettingsDialog(){
       keyboardMoveMm:$('#settings-keyboard-move').value,keyboardRotateDeg:$('#settings-keyboard-rotate').value});
     let chosen;try{chosen=validatePreferences({autosaveEnabled:$('#pref-autosave').checked,autosaveDirectory:$('#pref-directory').value,
       autosaveMinutes:$('#pref-minutes').value,autosaveKeep:$('#pref-keep').value,startup:$('#pref-startup').value,
-      startupExample:$('#pref-example').value,lengthUnit:$('#pref-length').value,massUnit:$('#pref-mass').value,
+      startupExample:$('#pref-example').value,lengthUnit:$('#pref-length').value,massUnit:$('#pref-mass').value,dimensionPrecisionMm:$('#pref-dimension-precision').value,
       forceUnit:$('#pref-force').value,gridVisible:$('#pref-grid').checked,floorVisible:$('#pref-floor').checked,portsVisible:$('#pref-ports').checked,
       theme:$('#pref-theme').value,undoLimit:$('#pref-undo').value,defaultTool:$('#pref-tool').value,fitOnOpen:$('#pref-fit').checked,
       fitAfterDuplicate:$('#pref-fit-duplicate').checked,cameraFovDeg:$('#pref-fov').value,
@@ -1325,7 +1326,7 @@ function snapSettingsDialog(){
     floor.visible=preferences.floorVisible;camera.fov=preferences.cameraFovDeg;camera.updateProjectionMatrix();
     state.ports=preferences.portsVisible;$('#ports-button').classList.toggle('active',state.ports);updatePorts();
     applyViewportTheme();state.undo.splice(0,Math.max(0,state.undo.length-preferences.undoLimit));
-    updateHeader();renderInspector();applyStructuralColors();if(state.mode==='simulate'&&state.recording)showFrame(state.frame);updateResizeHandles();scheduleAutosave();
+    updateHeader();renderInspector();applyStructuralColors();if(state.mode==='simulate'&&state.recording)showFrame(state.frame);if(state.mode==='build'&&state.plan?.status==='buildable')showStep(state.step,state.buildPosePhase);updateResizeHandles();scheduleAutosave();
     toast(persist?'Preferences saved in this browser.':'Preferences applied for this session.');
   }
 }
@@ -1617,7 +1618,7 @@ function connectionReview(matches,poses={},revision=state.revision,initial=null,
   settings();if(initial)showResult(initial);else refresh();
 }
 
-function propertyFields(label,values,key){return `<h3>${label}</h3><div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label>${axis} ${key==='rotation_deg'?'°':'mm'}</label><input type="number" data-pose="${key}" data-axis="${i}" value="${Number(values[i]||0).toFixed(1)}" step="${key==='rotation_deg'?state.snapSettings.rotationDeg:state.snapSettings.translationMm}" aria-label="${label} ${axis}"></div>`).join('')}</div>${key==='position_mm'?`<button class="inspect-action secondary" data-drop-floor="${label==='OBJECT POSITION'?'object':'part'}" title="Place the lowest point on Z = 0, lifting from below the floor if needed">Drop to floor</button>`:''}`;}
+function propertyFields(label,values,key){return `<h3>${label}</h3><div class="fields">${['X','Y','Z'].map((axis,i)=>`<div class="field"><label>${axis} ${key==='rotation_deg'?'°':'mm'}</label><input type="number" data-pose="${key}" data-axis="${i}" value="${key==='rotation_deg'?Number(values[i]||0).toFixed(1):Number(values[i]||0)}" step="${key==='rotation_deg'?state.snapSettings.rotationDeg:state.snapSettings.translationMm}" aria-label="${label} ${axis}"></div>`).join('')}</div>${key==='position_mm'?`<button class="inspect-action secondary" data-drop-floor="${label==='OBJECT POSITION'?'object':'part'}" title="Place the lowest point on Z = 0, lifting from below the floor if needed">Drop to floor</button>`:''}`;}
 function bindFloorButtons(selected,objectId=null){
   $$('[data-drop-floor]').forEach(button=>{
     button.disabled=state.busy||state.placementPending;
@@ -1945,16 +1946,18 @@ function decorateInspectorUnits(){
     }
   }
   const unit=preferences.lengthUnit;
-  if(unit==='mm')return;
   const inputs=$$('#inspector [data-pose="position_mm"], #inspector [data-part-pose="position_mm"], #inspector [data-param$="_mm"], #inspector [data-object-param$="_mm"], #draft-length');
   for(const input of inputs){
-    input.value=displayValue(Number(input.value),'length',unit);
+    const exact=Number(input.value);
+    input.value=displayValue(exact,'length',unit,preferences.dimensionPrecisionMm);
+    input.title=`Exact design value: ${exact} mm`;
+    const displayed=input.value;
     if(input.step&&input.step!=='any')input.step=Math.max(.0001,displayValue(Number(input.step),'length',unit));
     if(input.min)input.min=displayValue(Number(input.min),'length',unit);
     const label=input.closest('.field, .single-field')?.querySelector('label');
     if(label){label.textContent=label.textContent.replace(/\bmm\b/i,unit);if(!label.textContent.includes(unit))label.textContent+=' · '+unit;}
     const handler=input.onchange;
-    if(handler)input.onchange=event=>{input.value=storedValue(input.value,'length',unit);return handler.call(input,event);};
+    if(handler)input.onchange=event=>{if(input.value===displayed)return;input.value=storedValue(input.value,'length',unit);return handler.call(input,event);};
   }
 }
 function renderInspector(){renderInspectorContents();decorateInspectorUnits();}
@@ -1978,7 +1981,7 @@ function renderInspectorContents(){
       <button class="inspect-action secondary" id="draft-mirror-add" ${(mirrorAddOwner.mirrors||[]).length>=3?'disabled':''}>Add mirror plane</button></div>`;
     $('#inspector').innerHTML=`<div class="inspect-section"><div class="inspect-id">${esc(p.catalog)}</div><h2>${esc(p.id)}</h2><span class="chip">DRAFT RUN</span><p>Length follows the connector graph. The blue tube is a provisional preview; orange means a connection needs adjustment.</p></div>
       <div class="inspect-section">${propertyFields('POSITION',p.pose.position_mm,'position_mm')}<p>${run.attachments?.length?'Position moves the connected draft structure together.':'Move the tube by dragging it, using the gizmo, or entering its centre position.'}</p></div>
-      <div class="inspect-section"><h3>WORKING SPAN</h3><div class="single-field"><label>Preview length · mm</label><input id="draft-length" type="number" min="1" step="any" value="${p.length_mm.toFixed(2)}" ${fixed?'disabled':''}></div><label class="check-label"><input id="draft-lock" type="checkbox" ${run.locked_length_mm!=null?'checked':''}>Lock cut length at ${p.length_mm.toFixed(1)} mm</label><p>${fixed?'Both ends are connected; move a fitting to change the span.':centeredAttachment?'Changing the span moves the connected fitting equally away from or toward the mirror plane.':'Drag the run or enter a rough working length. Exact cut length is calculated when you finalize.'}</p><button class="inspect-action" id="draft-connect">Connect to a socket</button></div>
+      <div class="inspect-section"><h3>WORKING SPAN</h3><div class="single-field"><label>Preview length · mm</label><input id="draft-length" type="number" min="1" step="any" value="${p.length_mm}" ${fixed?'disabled':''}></div><label class="check-label"><input id="draft-lock" type="checkbox" ${run.locked_length_mm!=null?'checked':''}>Lock cut length at ${displayValue(p.length_mm,'length','mm',preferences.dimensionPrecisionMm)} mm</label><p>${fixed?'Both ends are connected; move a fitting to change the span.':centeredAttachment?'Changing the span moves the connected fitting equally away from or toward the mirror plane.':'Drag the run or enter a rough working length. Exact cut length is calculated when you finalize.'}</p><button class="inspect-action" id="draft-connect">Connect to a socket</button></div>
       ${mirrorPanel}
       <div class="inspect-section"><h3>CONNECTIONS · ${(run.attachments||[]).length}</h3>${(run.attachments||[]).map((a,i)=>`<div class="joint-card"><strong>${esc(partName(a.connector))} / ${esc(a.port)}</strong><p>${esc(a.end||'through station')}</p><button class="subtle" data-draft-detach="${i}">Detach</button></div>`).join('')||'<p>No sockets yet. Choose Connect, then a connector.</p>'}
       ${[...p.conflicts,...(p.warnings||[])].map(c=>`<div class="joint-card"><strong>${esc(c.code)}</strong><p>${esc(c.message)}</p></div>`).join('')}<button class="inspect-action secondary" id="draft-repair-selected">Repair alignment · stay in draft</button><button class="inspect-action" id="draft-finalize-selected">Finalize subassembly</button><p>Only draft pipes connected to this run will be finalized; separate structures stay in draft.</p><button class="inspect-action secondary" id="draft-delete">Delete draft run</button></div>`;
@@ -2670,7 +2673,77 @@ function previewDetailFields(){
   return `<details id="preview-detail"><summary>Extra Preview detail · ${selected.filter(id=>choices.some(p=>p.id===id)).length} selected</summary><p>Only selected lines use individual segments; only selected beams can bend. This keeps the same Preview solver budget.</p>${choices.map(p=>`<label class="check-label"><input type="checkbox" data-preview-detail="${esc(p.id)}" ${selected.includes(p.id)?'checked':''} ${state.busy?'disabled':''}>${esc(partName(p.id))}</label>`).join('')||'<p>No flexible lines or beams in this design.</p>'}</details>`;
 }
 function renderSimulation(){const r=state.recording;const humans=(state.doc.objects||[]).filter(o=>o.template==='human');$('#inspector').innerHTML=`<div class="inspect-section"><h2>Let physics explain it.</h2><p>Release the structure under gravity. Loose sockets can slide and turn; motors act through physical joints.</p><div class="single-field"><label for="sim-duration">DURATION · SECONDS</label><input id="sim-duration" type="number" min="0.1" max="30" step="any" required ${state.busy?'disabled':''} value="${esc(simulationDuration())}"></div><div class="single-field"><label for="sim-mode">SIMULATION MODE</label><select id="sim-mode" ${state.busy?'disabled':''}>${[['preview','Preview'],['full','Full physics']].map(([value,label])=>`<option value="${value}" ${(state.simulationMode||preferences.simulationMode)===value?'selected':''}>${label}</option>`).join('')}</select></div><p>Preview uses rigid beams, coarse lines and a fixed solver budget. Configure speed in Preferences or select extra detail below. Use Full physics for strength and breakage; Preview keeps overloaded lines and joints connected.</p>${previewDetailFields()}<button class="inspect-action" data-run="simulate" ${state.busy?'disabled':''}>${state.simulation?'Simulating…':'Run simulation ▶'}</button>${state.simulation?'<div id="sim-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-simulation">Cancel simulation</button>':''}${state.simulationError?`<div class="issue error" role="alert" id="simulation-error"><strong>Simulation error</strong><p>${esc(state.simulationError)}</p></div>`:''}${state.pendingSimulationResult?'<button class="inspect-action secondary" id="retry-simulation-result">Fetch completed recording</button>':''}${r?`<p id="simulation-recording-mode">${r.mode==='preview'?(r.quality?.resolved_mode==='full'?'Preview recording - automatically refined to Full physics because a flexible joint separated beyond the preview limit':r.quality?.resolved_mode==='mixed'?`Preview recording - ${r.quality.refinement.lines.length} affected rope, chain or beam length(s) replayed with finer segments after a joint gap exceeded 8 mm`:(r.quality?.strength_evaluation===false?'Preview recording - approximate motion; overload breakage disabled':'Preview recording - motion and damage are approximate')):'Full physics recording'}</p><div class="metric-cards"><div class="metric"><strong>${r.frames.length}</strong><span>RECORDED FRAMES</span></div><div class="metric"><strong>${r.settled?'Settled':'Moving'}</strong><span>FINAL STATE</span></div></div><button class="inspect-action secondary" id="render-recording-video">Render recording as video</button><p>${r.final_max_speed_m_s?.toFixed(3)||'0'} m/s maximum final speed</p>`:''}</div><div class="inspect-section"><h3>MOVING CONNECTIONS</h3>${(state.scene.chains||[]).map(c=>`<div class="joint-card"><div class="joint-card-top">${esc(partName(c.id))}</div><p>${c.count} flexible links</p></div>`).join('')}${state.scene.joints.filter(j=>!j.locked&&j.type!=='fixed'&&!(state.scene.chains||[]).some(c=>j.a.part.startsWith(c.id+'/')&&j.b.part.startsWith(c.id+'/'))).map(j=>`<div class="joint-card"><div class="joint-card-top">${esc(j.id)}</div><p>${esc(j.type)}${j.motor?' · motor':''}</p>${Object.entries(j.limits||{}).map(([k,v])=>`<p>${esc(k)}: ${esc(JSON.stringify(v))}</p>`).join('')}</div>`).join('')||((state.scene.chains||[]).length?'':'<p>All connected parts are secured. Loosen a socket in Design mode to give it motion.</p>')}</div><div class="inspect-section"><h3>HUMAN FIT</h3><p>Test joint-limited reach and seated dimensions with a 19-segment human model.</p><button class="inspect-action secondary" id="fit-human">Open fit test</button><button class="inspect-action secondary" data-run="fit">Run saved design tests</button></div>${r?.events?.length?'<div class="inspect-section"><h3>SIMULATION EVENTS</h3>'+r.events.map(e=>`<div class="issue"><div class="issue-code">${esc(e.type)}</div><p>${esc(e.part?partName(e.part):e.joint||'')} ${e.note?esc(e.note):''}</p></div>`).join('')+'</div>':''}`;bindOperations();$$('[data-preview-detail]').forEach(input=>input.onchange=()=>{state.simulationOptions={...state.simulationOptions,preview_detail_parts:$$('[data-preview-detail]:checked').map(field=>field.dataset.previewDetail)};$('#preview-detail summary').textContent='Extra Preview detail · '+state.simulationOptions.preview_detail_parts.length+' selected';});$('#sim-duration').oninput=rememberSimulationDuration;$('#sim-duration').onchange=rememberSimulationDuration;$('#sim-mode').onchange=()=>{state.simulationMode=$('#sim-mode').value;};$('#fit-human').onclick=fitDialog;if($('#render-recording-video'))$('#render-recording-video').onclick=videoRenderDialog;if($('#cancel-simulation'))$('#cancel-simulation').onclick=cancelSimulation;if($('#retry-simulation-result'))$('#retry-simulation-result').onclick=retrySimulationResult;updateSimulationProgress();}
-function renderBuild(){const p=state.plan;$('#inspector').innerHTML=`<div class="inspect-section"><h2>A plan you can build.</h2><p>Find an insertion order with clear paths and stable intermediate structures.</p><button class="inspect-action" data-run="plan">${state.busy?'Checking insertion paths…':'Find assembly order'}</button>${p?`<div class="report-head" style="margin-top:17px"><div class="report-symbol ${p.status==='buildable'?'':'warn'}">${p.status==='buildable'?'✓':'?'}</div><div><b>${esc(p.status)}</b><div class="subtle">${p.steps.length} assembly steps</div></div></div>${p.reason?'<p>'+esc(p.reason)+'</p>':''}`:''}</div>${p?.status==='buildable'?`<div class="inspect-section"><h3>STEP ${state.step+1} OF ${p.steps.length}</h3><p>${esc(p.steps[state.step].instruction)}</p>${p.steps[state.step].fasten.map(f=>'<p>↳ '+esc(f.action)+'</p>').join('')}<button class="inspect-action" id="export-build">Export illustrated build book ↗</button></div><div class="inspect-section"><h3>ASSEMBLY ORDER</h3>${p.steps.map((s,i)=>`<button class="build-step ${i===state.step?'active':''}" data-step="${i}"><span>${String(s.number).padStart(2,'0')}</span>${esc(partName(s.part))}</button>`).join('')}</div>`:''}`;bindOperations();$$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));if($('#export-build'))$('#export-build').onclick=()=>exportBuild();}
+function buildInstructions(plan){return plan?.instruction_steps??plan?.steps??[];}
+function buildStepParts(step){return step?.moving_parts?.length?step.moving_parts:step?.parts?.length?step.parts:step?.part?[step.part]:[];}
+function buildStepMounts(step){return (step.world_anchors|| (step.world_anchor?[step.world_anchor]:[])).map(a=>'<p>↳ Fix '+esc(partName(a.part))+' to the declared '+esc(a.surface||'fixture')+' using the selected anchors.</p>').join('')+(step.fixture?'<p>Temporary support: '+esc(step.fixture.description)+'</p>':'');}
+function buildAssemblyLabel(id){return id==='main'?'Main assembly':String(id||'').replace(/^subassembly-(\d+)$/,'Subassembly $1');}
+function buildStepLabel(step){if(step.display_title)return step.display_title;if(step.kind==='lift')return 'Lift '+buildAssemblyLabel(step.prepared_subassembly||step.subassembly);return step.prepared_subassembly?(step.kind==='position'?'Position ':'Merge ')+buildAssemblyLabel(step.prepared_subassembly):step.kind==='merge'?'Merge '+buildAssemblyLabel(step.subassembly||'subassemblies'):step.subassembly?buildAssemblyLabel(step.subassembly)+' · '+partName(step.part):partName(step.part);}
+function buildLiftControls(step){
+  if(step.kind!=='lift'||!step.start_poses)return '';
+  const mass=buildStepParts(step).reduce((sum,id)=>sum+(state.scene.parts.find(p=>p.id===id)?.mass_kg||0),0);
+  return '<p class="subtle">Lifted assembly · '+mass.toFixed(1)+' kg</p><div class="button-row"><button class="inspect-action secondary" data-build-pose="start" aria-pressed="'+(state.buildPosePhase==='start')+'">Before lifting</button><button class="inspect-action secondary" data-build-pose="end" aria-pressed="'+(state.buildPosePhase==='end')+'">Lifted position</button></div>';
+}
+function displayDimensionText(text){return text.replace(/(?<![\w.-])(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?= mm\b)/g,(value,number,offset)=>String(displayValue(text.slice(0,offset).toLowerCase().endsWith('cut to ')?Math.max(preferences.dimensionPrecisionMm,Number(value)):Number(value),'length','mm',preferences.dimensionPrecisionMm)));}
+function buildHandlingSummary(plan){
+  const c=plan?.certificate;if(plan?.status!=='buildable'||!c)return '';
+  let text=Number.isFinite(c.maximum_handled_mass_kg)?'<p>Largest handling operation: '+c.maximum_handled_mass_kg.toFixed(1)+' kg.</p>':'';
+  if(c.fallback_used)text+='<p>This sequence requires a team or lifting equipment. The search did not find a lighter sequence in the allotted time; lighter alternatives may exist.</p>';
+  if(c.floor_work_area_mm?.length===2&&Number.isFinite(c.maximum_overhead_height_mm)){
+    const metres=value=>(Math.ceil(value/100)/10).toFixed(1);
+    text+='<p class="subtle">Clear work area: '+c.floor_work_area_mm.map(metres).join(' × ')+' m. Clear height: '+metres(c.maximum_overhead_height_mm)+' m.</p>';
+  }
+  return text;
+}
+function renderBuild(){
+  const p=state.plan,steps=buildInstructions(p),step=steps[state.step];
+  let html='<div class="inspect-section"><h2>A plan you can build.</h2><p>Build smaller subassemblies, then slide parallel connections together.</p><button class="inspect-action" data-run="plan" '+(state.busy?'disabled':'')+'>'+(state.planning?'Finding assembly order…':'Find assembly order')+'</button>';
+  if(state.planning)html+='<div id="plan-progress" role="status" aria-live="polite"></div><button class="inspect-action secondary" id="cancel-plan">Cancel search</button>';
+  if(p)html+='<div class="report-head" style="margin-top:17px"><div class="report-symbol '+(p.status==='buildable'?'':'warn')+'">'+(p.status==='buildable'?'✓':'?')+'</div><div><b>'+esc(p.status)+'</b><div class="subtle">'+steps.length+' assembly steps</div></div></div>'+(p.reason?'<p>'+esc(p.reason)+'</p>':'');
+  html+=buildHandlingSummary(p)+'</div>';
+  if(p?.status==='buildable'&&step){
+    html+='<div class="inspect-section"><h3>STEP '+(state.step+1)+' OF '+steps.length+'</h3>'+(step.subassembly?'<p class="subtle">'+esc(buildAssemblyLabel(step.subassembly))+'</p>':'')+'<p>'+esc(displayDimensionText(step.instruction))+'</p>'+buildLiftControls(step)+step.fasten.map(f=>'<p>↳ '+esc(displayDimensionText(f.action))+'</p>').join('')+buildStepMounts(step)+'<button class="inspect-action" id="export-build">Export illustrated build book ↗</button></div><div class="inspect-section"><h3>ASSEMBLY ORDER</h3>';
+    html+=steps.map((s,i)=>'<button class="build-step '+(i===state.step?'active':'')+'" data-step="'+i+'"><span>'+String(s.number).padStart(2,'0')+'</span>'+esc(buildStepLabel(s))+'</button>').join('')+'</div>';
+  }
+  $('#inspector').innerHTML=html;bindOperations();
+  $$('[data-step]').forEach(b=>b.onclick=()=>showStep(+b.dataset.step));
+  $$('[data-build-pose]').forEach(b=>b.onclick=()=>showStep(state.step,b.dataset.buildPose));
+  if($('#export-build'))$('#export-build').onclick=()=>exportBuild();
+  if($('#cancel-plan'))$('#cancel-plan').onclick=()=>cancelBuildPlan();
+  updatePlanningProgress();
+}
+function updatePlanningProgress(){
+  const job=state.planning,element=$('#plan-progress');if(!job||!element)return;
+  const p=job.progress||{},details=[];
+  if(Number.isFinite(p.states_explored))details.push(p.states_explored+' subassembly states');
+  if(Number.isFinite(p.paths_checked))details.push(p.paths_checked+' paths checked');
+  if(Number.isFinite(p.planned_parts))details.push(p.planned_parts+' of '+p.total_parts+' parts planned');
+  if(Number.isFinite(job.elapsed_s))details.push(Math.floor(job.elapsed_s)+' s elapsed');
+  element.textContent=(job.cancelRequested?'Cancelling search…':p.message||'Finding parallel sections')+(details.length?' · '+details.join(' · '):'');
+  const button=$('#cancel-plan');if(button)button.disabled=!!job.cancelRequested;
+}
+async function cancelBuildPlan(){
+  const job=state.planning;if(!job)return;
+  job.cancelRequested=true;updatePlanningProgress();
+  if(job.id){try{Object.assign(job,await api('plan-cancel',{document:null,job_id:job.id}));}catch(error){job.cancelRequested=false;toast(error.message,true);}updatePlanningProgress();}
+}
+async function generateBuildPlan(){
+  const job=state.planning;
+  Object.assign(job,await api('plan',{background:true}));updatePlanningProgress();
+  if(job.cancelRequested)await cancelBuildPlan();
+  for(;;){
+    if(job.status==='cancelled'){status('Assembly search cancelled');return null;}
+    if(job.status==='failed')throw new Error(job.error||'Assembly search failed');
+    if(job.status==='completed'){
+      if(job.cancelRequested){status('Assembly search cancelled');return null;}
+      const completed=await api('plan-result',{document:null,job_id:job.id});
+      if(job.cancelRequested){status('Assembly search cancelled');return null;}
+      if(!completed.result)throw new Error('The completed assembly plan is unavailable');
+      return completed.result;
+    }
+    await new Promise(resolve=>setTimeout(resolve,300));
+    Object.assign(job,await api('plan-status',{document:null,job_id:job.id}));updatePlanningProgress();
+  }
+}
 function findingReference(button){
   const finding=state.checks?.issues[Number(button.dataset.resultFinding)]||{};
   const joints=[finding.joint,...(finding.joints||[])].filter(Boolean);
@@ -2771,16 +2844,39 @@ async function retrySimulationResult(){
   finally{state.busy=false;renderInspector();}
 }
 function installSimulationRecording(result){state.doc.results||={};state.doc.results.simulate=result;state.dirty=true;state.recording=result;state.frame=0;installBeamPlayback(result);$('#time-slider').max=result.frames.length-1;$('#timeline-mid').textContent=(result.duration_s/2).toFixed(1)+' s';$('#timeline-end').textContent=result.duration_s.toFixed(1)+' s';state.playing=true;showFrame(0);status('Simulation recorded · '+result.frames.length+' frames');updateHeader();}
-async function run(operation){if(state.busy)return;if(operation==='simulate'&&$('#sim-duration')&&!$('#sim-duration').reportValidity())return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value??simulationDuration()),mode:state.simulationMode||preferences.simulationMode,chain_links_per_body:(state.simulationMode||preferences.simulationMode)==='preview'?preferences.simulationChainLinks:1,preview_steps_per_second:preferences.previewStepsPerSecond,preview_solver_iterations:preferences.previewSolverIterations,preview_beam_segment_mm:preferences.previewBeamSegmentMm,preview_detail_parts:(state.simulationOptions?.preview_detail_parts||[]).filter(id=>previewDetailChoices().some(p=>p.id===id)),deflection_warning_mm:preferences.deflectionWarningMm}:{};if(operation==='simulate'){state.simulationRevision=revision;state.simulationError=null;state.pendingSimulationResult=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
-  try{const result=operation==='simulate'?await generateSimulation(extra):await api(operation,extra);if(!result)return;if(revision!==state.revision){toast('The design changed during the calculation. Run it again for the current design.');return;}state.doc.results||={};state.doc.results[operation]=result;state.dirty=true;
+async function run(operation){if(state.busy)return;if(operation==='simulate'&&$('#sim-duration')&&!$('#sim-duration').reportValidity())return;state.busy=true;const revision=state.revision;const extra=operation==='simulate'?{duration:Number($('#sim-duration')?.value??simulationDuration()),mode:state.simulationMode||preferences.simulationMode,chain_links_per_body:(state.simulationMode||preferences.simulationMode)==='preview'?preferences.simulationChainLinks:1,preview_steps_per_second:preferences.previewStepsPerSecond,preview_solver_iterations:preferences.previewSolverIterations,preview_beam_segment_mm:preferences.previewBeamSegmentMm,preview_detail_parts:(state.simulationOptions?.preview_detail_parts||[]).filter(id=>previewDetailChoices().some(p=>p.id===id)),deflection_warning_mm:preferences.deflectionWarningMm}:{};if(operation==='simulate'){state.simulationRevision=revision;state.simulationError=null;state.pendingSimulationResult=null;state.simulationOptions=extra;state.simulation={status:'starting',progress:{message:'Preparing simulation'}};state.playing=false;}if(operation==='plan'){state.playing=false;state.planning={status:'starting',progress:{message:'Finding parallel sections and subassemblies'}};}status(({validate:'Checking sockets and collisions…',analyse:'Solving the structural load case…',simulate:'Integrating rigid-body physics…',plan:'Searching stable assembly sequences…',fit:'Checking human fit…'})[operation]);renderInspector();
+  try{const result=operation==='simulate'?await generateSimulation(extra):operation==='plan'?await generateBuildPlan():await api(operation,extra);if(!result)return;if(revision!==state.revision){toast('The design changed during the calculation. Run it again for the current design.');return;}state.doc.results||={};state.doc.results[operation]=result;state.dirty=true;
     if(operation==='validate'){state.checks=result;status(result.valid?'Geometry checks passed':'Design has '+result.summary.errors+' errors');}
     if(operation==='analyse'){state.analysis=result;status('Structural analysis: '+result.status);applyStructuralColors();}
     if(operation==='simulate')installSimulationRecording(result);
-    if(operation==='plan'){state.plan=result;state.doc.build_plan=result;state.step=0;status('Assembly search: '+result.status);if(result.status==='buildable')showStep(0);}
+    if(operation==='plan'){state.plan=result;state.doc.build_plan=result;state.step=0;status('Assembly search: '+result.status);if(result.status==='buildable'&&state.mode==='build')showStep(0);}
     if(operation==='fit')jsonDialog('Human fit results',result);updateHeader();
-  }catch(e){if(operation==='simulate')state.simulationError=e.message;toast(e.message,true);status('Operation needs attention');}finally{state.busy=false;state.simulation=null;renderInspector();}}
-function setMode(mode){state.mode=mode;if(mode!=='design'&&resizeDrag)clearResizeDrag();if(mode!=='design'&&renderer)renderer.domElement.style.cursor='';$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-selected',b.dataset.mode===mode?'true':'false');});if(mode!=='design'){gizmo?.detach();if(state.tool==='connect')setTool('select');}else attachGizmo();ports.visible=mode==='design';for(const obj of partObjects.values())obj.visible=true;for(const obj of beamObjects.values())obj.visible=false;if(mode==='simulate'&&state.recording)showFrame(state.frame);if(mode==='build'&&state.plan?.status==='buildable')showStep(state.step);applyStructuralColors();renderInspector();updateResizeHandles();}
-function showStep(index){if(state.plan?.status!=='buildable')return;state.step=index;const step=state.plan.steps[index];state.selected=step.part;for(const [id,object] of partObjects)object.visible=step.installed_parts.includes(id);highlightSelection();ports.visible=false;renderBuild();}
+  }catch(e){if(operation==='simulate')state.simulationError=e.message;toast(e.message,true);status('Operation needs attention');}finally{state.busy=false;state.simulation=null;state.planning=null;renderInspector();}}
+function setMode(mode){if(state.mode==='build'&&mode!=='build'){for(const p of state.scene.parts)if(partObjects.has(p.id))setPose(partObjects.get(p.id),p.pose);floor.position.set(0,0,-1);grid.position.set(0,0,.1);floor.visible=preferences.floorVisible;grid.visible=preferences.gridVisible;}state.mode=mode;if(mode==='build'){state.playing=false;$('#play-button').textContent='▶';}if(mode!=='design'&&resizeDrag)clearResizeDrag();if(mode!=='design'&&renderer)renderer.domElement.style.cursor='';$$('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===mode);b.setAttribute('aria-selected',b.dataset.mode===mode?'true':'false');});if(mode!=='design'){gizmo?.detach();if(state.tool==='connect')setTool('select');}else attachGizmo();ports.visible=mode==='design';for(const obj of partObjects.values())obj.visible=true;for(const obj of beamObjects.values())obj.visible=false;if(mode==='simulate'&&state.recording)showFrame(state.frame);if(mode==='build'&&state.plan?.status==='buildable')showStep(state.step);applyStructuralColors();renderInspector();updateResizeHandles();}
+function fitBuildStep(focusParts=null){
+  if(!orbit)return;
+  const focus=focusParts?new Set(focusParts):null;
+  const box=new THREE.Box3();for(const [id,object] of partObjects)if(object.visible&&(!focus||focus.has(id)))box.expandByObject(object);
+  if(box.isEmpty())return;
+  const center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());
+  floor.position.x=center.x;floor.position.y=center.y;grid.position.x=center.x;grid.position.y=center.y;
+  const halfAngle=Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*Math.min(1,camera.aspect));
+  const distance=Math.max(size.length()/2,150)/Math.sin(halfAngle)*1.16;
+  const direction=camera.position.clone().sub(orbit.target).normalize();
+  orbit.target.copy(center);camera.position.copy(center).addScaledVector(direction,distance);orbit.update();
+}
+function showStep(index,phase){
+  const step=buildInstructions(state.plan)[index];
+  if(state.plan?.status!=='buildable'||!step)return;
+  state.playing=false;$('#play-button').textContent='▶';state.step=index;
+  state.selected=step.part;
+  state.buildPosePhase=phase||(step.kind==='lift'&&step.start_poses?'start':'end');
+  const poses=state.buildPosePhase==='start'?{...step.poses,...step.start_poses}:step.poses;
+  for(const p of state.scene.parts)if(partObjects.has(p.id))setPose(partObjects.get(p.id),poses?.[p.id]||p.pose);
+  for(const [id,object] of partObjects)object.visible=step.installed_parts.includes(id);
+  if(step.poses){floor.visible=true;grid.visible=true;floor.position.z=(step.floor_z_mm||0)-1;grid.position.z=(step.floor_z_mm||0)+.1;fitBuildStep(step.kind==='lift'&&state.buildPosePhase==='start'?buildStepParts(step):null);}
+  highlightSelection();ports.visible=false;renderBuild();
+}
 function statusColor(deflection,yielded){return yielded?'#e45b55':deflection>preferences.deflectionWarningMm?'#efb849':null;}
 function tintPart(group,color){if(!group)return;group.traverse(object=>{if(!object.isMesh||!object.material?.color)return;object.userData.baseColor??=object.material.color.clone();object.material.color.copy(color?new THREE.Color(color):object.userData.baseColor);});}
 function applyStructuralColors(){for(const p of state.scene?.parts||[])tintPart(partObjects.get(p.id),null);if(state.mode!=='check')return;for(const member of state.analysis?.members||[]){const unsafe=(member.yield_utilisation||0)>=1||(member.buckling_utilisation||0)>=1; tintPart(partObjects.get(member.part),statusColor(member.max_displacement_mm,unsafe));}}
@@ -2929,7 +3025,7 @@ function saveDialog(afterSave=null){
   $('#save-path').value=state.path;
 }
 function exportDialog(){modal('Export your creation','<button class="option-row" id="export-book-option">Illustrated build book<small>Printable instructions, bill of materials and a stock cutting plan</small></button><button class="option-row" id="export-image-option">Render an image<small>PNG from the current camera, with configurable lighting</small></button><button class="option-row" id="export-video-option">Render a video<small>MP4 or GIF from a simulation recording or authored animation</small></button><button class="option-row" id="export-file-option">Download design file<small>Portable JSON with parts, constraints and recorded results</small></button>',[{label:'Close',action:closeModal}]);$('#export-book-option').onclick=()=>{closeModal();exportBuild();};$('#export-image-option').onclick=()=>{closeModal();renderDialog();};$('#export-video-option').onclick=()=>{closeModal();videoRenderDialog();};$('#export-file-option').onclick=()=>{const blob=new Blob([JSON.stringify(state.doc,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=(state.doc.name||'design').replace(/[^a-z0-9-]/gi,'-')+'.pipe.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};}
-async function exportBuild(){if(state.busy)return;state.busy=true;status('Generating the illustrated build book…');try{const result=await api('export',{engineering:true});modal('Build book ready',`<p>${result.steps} illustrated assembly steps, ${result.stock_bars} stock lengths, plus the parts list and engineering results.</p><a class="button primary" href="${esc(result.url)}" target="_blank">Open printable instructions ↗</a><p>Saved in ${esc(result.directory)}</p>`,[{label:'Done',action:closeModal}]);status('Build instructions exported');}catch(e){toast(e.message,true);}finally{state.busy=false;}}
+async function exportBuild(){if(state.busy)return;state.busy=true;status('Generating the illustrated build book…');try{const result=await api('export',{engineering:true,dimension_precision_mm:preferences.dimensionPrecisionMm});modal('Build book ready',`<p>${result.steps} illustrated assembly steps, ${result.stock_bars} stock lengths, plus the parts list and engineering results.</p><a class="button primary" href="${esc(result.url)}" target="_blank">Open printable instructions ↗</a><p>Saved in ${esc(result.directory)}</p>`,[{label:'Done',action:closeModal}]);status('Build instructions exported');}catch(e){toast(e.message,true);}finally{state.busy=false;}}
 function renderDialog(){modal('Render an image',`<div class="fields"><div class="field"><label>WIDTH px</label><input id="render-width" value="${preferences.renderWidth}" type="number"></div><div class="field"><label>HEIGHT px</label><input id="render-height" value="${preferences.renderHeight}" type="number"></div></div><div class="single-field"><label>LIGHTING</label><select id="render-light"><option>studio</option><option>technical</option><option>flat</option></select></div><div class="single-field"><label>BACKGROUND</label><select id="render-bg"><option value="#edf1f3">Soft grey</option><option value="#ffffff">White</option><option value="transparent">Transparent</option></select></div>`,[{label:'Cancel',action:closeModal},{label:'Render PNG',primary:true,action:async()=>{status('Rendering image…');const options={width:+$('#render-width').value,height:+$('#render-height').value,eye:camera.position.toArray(),target:orbit.target.toArray(),lighting:$('#render-light').value,background:$('#render-bg').value};const result=(state.scene.humans||[]).some(h=>h.render_model?.enabled!==false)?await renderHumanImage(options):await api('render',{options});closeModal();modal('Image ready',`<img src="${esc(result.url)}" style="width:100%" alt="Rendered pipe creation"><p><a href="${esc(result.url)}" download="pipesim-render.png">Save PNG at full resolution</a></p>`,[{label:'Done',action:closeModal}]);status('Image exported');}}]);$('#render-light').value=preferences.renderLighting;$('#render-bg').value=preferences.renderBackground;}
 function videoRenderDialog(){
   const recording=state.recording||state.doc.results?.simulate,hasRecording=!!recording?.frames?.length,hasAnimation=!!state.doc.animation?.tracks?.length;

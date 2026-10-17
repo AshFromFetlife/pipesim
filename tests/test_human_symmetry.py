@@ -109,7 +109,10 @@ def test_reenabling_mirror_after_free_rotation_keeps_the_rotated_pose():
     rotated = move_object(Assembly.from_doc(free), 'person',
                           {'position_mm': [0, 120, 0], 'rotation_deg': [37, 0, 180]})['document']
     restored = set_human_symmetry(Assembly.from_doc(rotated), 'person', 'frame', 'center')
-    assert restored['objects'][0]['pose']['rotation_deg'] == pytest.approx([37, 0, 180])
+    # Euler angles at the branch cut may be either +180 or -180. Compare the
+    # actual orientation so numerical sign choice does not masquerade as motion.
+    assert np.allclose(transform(restored['objects'][0]['pose']),
+                       transform({'position_mm': [0, 120, 0], 'rotation_deg': [37, 0, 180]}), atol=1e-7)
     Assembly.from_doc(restored)
 
 

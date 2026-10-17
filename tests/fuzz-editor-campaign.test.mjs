@@ -53,6 +53,18 @@ for(const [name,source] of [
       console.log('Material cases_passed=1 profile_changes=3');
       console.log('Whole assembly cases_passed=1 rigid_moves=2');
     });`],
+  ['file opening was omitted',`import test from 'node:test';
+    test('stateful geometry',()=>{
+      console.log('Workflow case_seed=0 family=comb completed_actions=13');
+      console.log('Workflow successful actions: '+JSON.stringify(Object.fromEntries(
+        ['connect','translate','resize','resize-length','build-from-library','detach-reconnect',
+         'undo-redo','duplicate-delete','finalize-reopen','finalize-selected','reload','repair','mirror-cycle'].map(key=>[key,1])))+'.');
+      console.log('Anchored resize cases_passed=1 keyboard_edits=4');
+      console.log('Free assembly cases_passed=1 rigid_connections=1');
+      console.log('Material cases_passed=1 profile_changes=3');
+      console.log('Whole assembly cases_passed=1 rigid_moves=2');
+      console.log('Reinforcement cases_passed=1 connections=1');
+    });`],
 ])test(`campaign fails when ${name}`,async()=>{
   const directory=await mkdtemp(join(tmpdir(),'pipesim-campaign-oracle-'));
   try {
